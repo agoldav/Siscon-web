@@ -603,7 +603,22 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
 .msg-ico-btn.recording{color:#fff;background:var(--red);border-color:var(--red);animation:msgPulse 1s infinite}
 @keyframes msgPulse{0%,100%{opacity:1}50%{opacity:.55}}
 .msg-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--t3);font-size:13px;gap:8px;text-align:center;padding:20px}
+.login-form{display:flex;flex-direction:column;gap:12px}
+.login-form.hidden{display:none}
+.login-form h3{text-align:center;margin:0 0 8px 0;font-size:18px;color:var(--t1)}
+.login-form p{text-align:center;margin:0 0 12px 0;font-size:13px;color:var(--t2)}
+.login-links{margin-top:8px;display:flex;gap:16px;justify-content:center;font-size:12px}
+.login-links a{color:var(--acc);text-decoration:none;cursor:pointer;transition:opacity 0.2s}
+.login-links a:hover{text-decoration:underline;opacity:0.8}
+.btn-sec{background:transparent;border:1px solid var(--border2);color:var(--t2);padding:8px 16px;border-radius:8px;cursor:pointer;font-family:var(--font);font-size:13px;transition:all 0.2s}
+.btn-sec:hover{border-color:var(--t1);color:var(--t1)}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = 'https://qsmvyfyxynnzozzdavxj.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzbXZ5Znl4eW5uem96emRhdnhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5ODU2NTAsImV4cCI6MjA5OTU2MTY1MH0.FBuq8cWGZpwYiOq71jpib8CQC-wZT_3Hyx0uKYP7onU';
+const BACKEND_URL = 'https://siscon-backend.onrender.com';
+</script>
 </head>
 <body>
 <div id="save-toast">✓ Guardado</div>
@@ -634,10 +649,49 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
         <div class="lls">Sistema de gestión constructiva</div>
       </div>
     </div>
-    <div class="lf"><label>Usuario</label><input id="lu" placeholder="admin" autocomplete="off" onkeydown="if(event.key==='Enter')login()"/></div>
-    <div class="lf"><label>Contraseña</label><input id="lp" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')login()"/></div>
-    <div id="lerr" class="err hidden">Credenciales incorrectas</div>
-    <button class="btn-pri" onclick="login()">Ingresar</button>
+
+    <!-- FORM: Login -->
+    <div id="login-form" class="login-form">
+      <div class="lf"><label>Email</label><input id="lu" type="email" placeholder="usuario@siscon.cr" onkeydown="if(event.key==='Enter')login()"/></div>
+      <div class="lf"><label>Contraseña</label><input id="lp" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')login()"/></div>
+      <div id="lerr" class="err hidden"></div>
+      <button class="btn-pri" onclick="login()">Ingresar</button>
+      <div class="login-links">
+        <a href="#" onclick="showSignup(); return false;">Crear cuenta</a>
+        <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
+      </div>
+    </div>
+
+    <!-- FORM: Signup -->
+    <div id="signup-form" class="login-form hidden">
+      <div class="lf"><label>Email</label><input id="su" type="email" placeholder="usuario@siscon.cr" onkeydown="if(event.key==='Enter')signup()"/></div>
+      <div class="lf"><label>Nombre</label><input id="sn" type="text" placeholder="Tu nombre" onkeydown="if(event.key==='Enter')signup()"/></div>
+      <div class="lf"><label>Contraseña</label><input id="sp" type="password" placeholder="Min 8 caracteres" onkeydown="if(event.key==='Enter')signup()"/></div>
+      <div class="lf"><label>Confirmar Contraseña</label><input id="spc" type="password" placeholder="Confirma" onkeydown="if(event.key==='Enter')signup()"/></div>
+      <div id="serr" class="err hidden"></div>
+      <button class="btn-pri" onclick="signup()">Registrarse</button>
+      <button class="btn-sec" onclick="showLogin(); return false;">Cancelar</button>
+    </div>
+
+    <!-- FORM: Forgot Password -->
+    <div id="forgot-form" class="login-form hidden">
+      <p>Ingresa tu email. Te enviaremos un link para resetear contraseña.</p>
+      <div class="lf"><label>Email</label><input id="fe" type="email" placeholder="usuario@siscon.cr" onkeydown="if(event.key==='Enter')forgotPassword()"/></div>
+      <div id="ferr" class="err hidden"></div>
+      <button class="btn-pri" onclick="forgotPassword()">Enviar Link</button>
+      <button class="btn-sec" onclick="showLogin(); return false;">Cancelar</button>
+    </div>
+
+    <!-- FORM: Accept Invitation -->
+    <div id="invite-form" class="login-form hidden">
+      <h3>Aceptar Invitación</h3>
+      <p id="invite-email-display"></p>
+      <div class="lf"><label>Nombre</label><input id="in" type="text" placeholder="Tu nombre" onkeydown="if(event.key==='Enter')acceptInvitation()"/></div>
+      <div class="lf"><label>Contraseña</label><input id="ip" type="password" placeholder="Min 8 caracteres" onkeydown="if(event.key==='Enter')acceptInvitation()"/></div>
+      <div class="lf"><label>Confirmar Contraseña</label><input id="ipc" type="password" placeholder="Confirma" onkeydown="if(event.key==='Enter')acceptInvitation()"/></div>
+      <div id="ierr" class="err hidden"></div>
+      <button class="btn-pri" onclick="acceptInvitation()">Aceptar</button>
+    </div>
   </div>
 </div>
 
@@ -1190,25 +1244,24 @@ function registerDoc(fileName, category, mime, blobId){
 
 // ========== LOGIN ==========
 async function login(){
-  const u=document.getElementById('lu').value.trim();
-  const p=document.getElementById('lp').value;
-  const user=SYS.users.find(x=>x.username===u&&x.password===p);
-  if(user){
-    currentUser=user;
-    document.getElementById('topbar-user-label').textContent=user.name;
-    const sb=document.getElementById('btn-settings'); if(sb)sb.style.display=user.role==='Administrador'?'':'none';
+  const email=document.getElementById('lu').value.trim();
+  const password=document.getElementById('lp').value;
+  if(!validateEmail(email)){showError('lerr','Email inválido');return;}
+  if(!password){showError('lerr','Contraseña requerida');return;}
+  try{
+    const resp=await fetch(BACKEND_URL+'/api/auth/signin',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    if(!resp.ok){const err=await resp.json();showError('lerr',err.message||'Error de autenticación');return;}
+    const data=await resp.json();
+    currentUser=data.user;
+    _sbToken=data.access_token;
+    localStorage.setItem('sb_token',data.access_token);
+    localStorage.setItem('sb_refresh_token',data.refresh_token);
     document.getElementById('login-screen').style.display='none';
     document.getElementById('app').style.display='flex';
-
-    logAction('Inicio de sesión','log-create','Sistema',null,{user:user.name});
-
-    // Generar token local para API
-    _sbToken = 'local_' + btoa(JSON.stringify({sub: user.id || 'local-user', name: user.name, email: user.username}));
-    localStorage.setItem('sb_token', _sbToken);
-
-    // Cargar datos desde localStorage
+    document.getElementById('topbar-user-label').textContent=data.user.name;
+    document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';
+    logAction('Inicio de sesión','log-create','Sistema',null,{user:data.user.name});
     loadData();
-
     renderDash();
     handleOpenHash();
     checkNewWinOverride();
@@ -1216,12 +1269,14 @@ async function login(){
     setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);
     setTimeout(()=>checkPendingAuthOnLogin(), 1200);
     if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);
-
-    // Auto-migra después de 2 segundos
-    setTimeout(()=>migrateLocalStorageToSupabase(), 2000);
-  } else { document.getElementById('lerr').classList.remove('hidden'); }
+  }catch(e){showError('lerr','Error: '+e.message);}
 }
-function logout(){
+async function logout(){
+  try{const token=localStorage.getItem('sb_token');await fetch(BACKEND_URL+'/api/auth/logout',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Authorization':'Bearer '+token,'Content-Type':'application/json'},body:'{}'});}catch(e){console.error('Error logout:',e);}
+  currentUser=null;
+  _sbToken=null;
+  localStorage.removeItem('sb_token');
+  localStorage.removeItem('sb_refresh_token');
   logAction('Cierre de sesión','log-create','Sistema',null,null);
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('app').style.display='none';
@@ -10967,6 +11022,20 @@ const _ssObserver=new MutationObserver(()=>{
   _ssTimer=setTimeout(()=>document.querySelectorAll('select:not([data-ss-init]):not([data-no-search])').forEach(_ssInit),80);
 });
 _ssObserver.observe(document.body,{childList:true,subtree:true});
+
+// Auth helper functions
+function showLogin(){document.getElementById('login-form').classList.remove('hidden');document.getElementById('signup-form').classList.add('hidden');document.getElementById('forgot-form').classList.add('hidden');document.getElementById('invite-form').classList.add('hidden');clearErrors();}
+function showSignup(){document.getElementById('login-form').classList.add('hidden');document.getElementById('signup-form').classList.remove('hidden');document.getElementById('forgot-form').classList.add('hidden');document.getElementById('invite-form').classList.add('hidden');clearErrors();}
+function showForgotPassword(){document.getElementById('login-form').classList.add('hidden');document.getElementById('signup-form').classList.add('hidden');document.getElementById('forgot-form').classList.remove('hidden');document.getElementById('invite-form').classList.add('hidden');clearErrors();}
+function showError(elemId,msg){document.getElementById(elemId).textContent=msg;document.getElementById(elemId).classList.remove('hidden');}
+function clearErrors(){['lerr','serr','ferr','ierr'].forEach(id=>{document.getElementById(id).classList.add('hidden');});}
+function validateEmail(email){return/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);}
+function validatePassword(password){return password.length>=8&&/[A-Z]/.test(password)&&/\d/.test(password);}
+async function signup(){const email=document.getElementById('su').value.trim();const name=document.getElementById('sn').value.trim();const password=document.getElementById('sp').value;const confirmPassword=document.getElementById('spc').value;if(!validateEmail(email)){showError('serr','Email inválido');return;}if(!password){showError('serr','Contraseña requerida');return;}if(!validatePassword(password)){showError('serr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('serr','Las contraseñas no coinciden');return;}if(!name){showError('serr','Nombre requerido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/signup',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,password,name,confirmPassword})});if(!resp.ok){const err=await resp.json();showError('serr',err.message||'Error en registro');return;}toast('✓ Registro exitoso. Inicia sesión.');showLogin();}catch(e){showError('serr','Error: '+e.message);}}
+async function forgotPassword(){const email=document.getElementById('fe').value.trim();if(!validateEmail(email)){showError('ferr','Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/forgot-password',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){const err=await resp.json();showError('ferr',err.message||'Error');return;}toast('✓ Instrucciones enviadas al email');showLogin();}catch(e){showError('ferr','Error: '+e.message);}}
+async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){const err=await resp.json();showError('ierr',err.message||'Error');return;}const data=await resp.json();currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){showError('ierr','Error: '+e.message);}}
+function checkInvitationCode(){const params=new URLSearchParams(window.location.search);const code=params.get('invite');const email=params.get('email');if(code&&email){document.getElementById('login-form').classList.add('hidden');document.getElementById('invite-form').classList.remove('hidden');document.getElementById('invite-email-display').textContent='Email: '+email;window._inviteCode=code;window._inviteEmail=email;}}
+setTimeout(checkInvitationCode,100);
 </script>
 </body>
 </html>
