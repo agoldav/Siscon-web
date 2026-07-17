@@ -7662,9 +7662,9 @@ function calcLineHtml(p,si,l,li){
   const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId);
   const price=t?installPricePerM2(p,t):0; const total=calcLineTotal(p,l); const iva=total*0.13;
   return `<div class="calc-line" style="${calcCols()}">
-    <select style="font-size:11px" onchange="calcSetSub(${si},${li},this.value)"><option value="">— Instalador —</option>${subs.map(s=>`<option value="${s.id}"${l.subId===s.id?' selected':''}>${s.name}</option>`).join('')}</select>
+    <select data-no-search style="font-size:11px" onchange="calcSetSub(${si},${li},this.value)"><option value="">— Instalador —</option>${subs.map(s=>`<option value="${s.id}"${l.subId===s.id?' selected':''}>${s.name}</option>`).join('')}</select>
     ${crewDropHtml(sub,l.crewIds,(id)=>`calcToggleCrew(${si},${li},'${id}',this.checked)`)}
-    <select style="font-size:11px" onchange="calcSetHouse(${si},${li},this.value)"><option value="">— Casa —</option>${houseOpts}</select>
+    <select data-no-search style="font-size:11px" onchange="calcSetHouse(${si},${li},this.value)"><option value="">— Casa —</option>${houseOpts}</select>
     <input type="number" style="font-size:11px;text-align:right" value="${l.pct!=null&&l.houseId?l.pct:''}" min="0" max="100" onchange="calcSetPct(${si},${li},this.value)"/>
     <input type="number" style="font-size:11px;text-align:right" value="${l.area!=null&&l.houseId?l.area:''}" min="0" step="0.01" onchange="calcSetArea(${si},${li},this.value)"/>
     <div style="text-align:center;font-size:12px">${fmt(price)}</div>
@@ -7706,7 +7706,7 @@ function renderCalcBody(){
         <label style="font-size:11px;color:var(--t2);display:flex;align-items:center;gap:6px"><input type="checkbox" ${calcState.ivaShow?'checked':''} onchange="calcState.ivaShow=this.checked;renderCalcBody()" style="width:auto"/> IVA</label>
         ${!calcState.approvedBy?`<button class="btn-sm" onclick="calcSendApproval()">Enviar a aprobación</button>`:''}
         ${calcCanApprove()&&!calcState.approvedBy?`<button class="btn-sm" style="border-color:var(--grn);color:var(--grn)" onclick="calcApprove()">✓ Aprobar informe</button>`:''}
-        <select id="calc-proj-pick" style="font-size:12px"><option value="">— Proyecto —</option>${projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
+        <select id="calc-proj-pick" data-no-search style="font-size:12px"><option value="">— Proyecto —</option>${projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
         <button class="btn-add" onclick="calcAddProject()">+ Agregar Avance de Proyecto</button>
       </div>
     </div>
