@@ -1274,6 +1274,23 @@ async function authErrMsg(resp){
   try{ const j=JSON.parse(t); return j.error||j.message||t||('Error HTTP '+resp.status); }
   catch(e){ return t||('Error HTTP '+resp.status); }
 }
+// Refresco automático del token de Supabase (expira ~1h). Sin esto, los guardados y
+// el sondeo de autorizaciones empiezan a fallar con 401 en sesiones largas.
+let _tokRefreshIv=null;
+async function sbRefreshToken(){
+  const rt=localStorage.getItem('sb_refresh_token');
+  if(!rt||!currentUser) return false;
+  try{
+    const resp=await fetch(BACKEND_URL+'/api/auth/refresh-token',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({refresh_token:rt})});
+    if(!resp.ok) return false;
+    const d=await resp.json();
+    if(d.access_token){ _sbToken=d.access_token; localStorage.setItem('sb_token',d.access_token); }
+    if(d.refresh_token) localStorage.setItem('sb_refresh_token',d.refresh_token);
+    return true;
+  }catch(e){ return false; }
+}
+function startTokenRefresh(){ stopTokenRefresh(); _tokRefreshIv=setInterval(sbRefreshToken, 45*60*1000); }
+function stopTokenRefresh(){ if(_tokRefreshIv){clearInterval(_tokRefreshIv);_tokRefreshIv=null;} }
 async function login(){
   const email=document.getElementById('lu').value.trim();
   const password=document.getElementById('lp').value;
@@ -1287,6 +1304,7 @@ async function login(){
     _sbToken=data.access_token;
     localStorage.setItem('sb_token',data.access_token);
     localStorage.setItem('sb_refresh_token',data.refresh_token);
+    startTokenRefresh();
     document.getElementById('login-screen').style.display='none';
     document.getElementById('app').style.display='flex';
     document.getElementById('topbar-user-label').textContent=data.user.name;
@@ -1306,6 +1324,7 @@ async function login(){
 async function logout(){
   try{const token=localStorage.getItem('sb_token');await fetch(BACKEND_URL+'/api/auth/logout',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Authorization':'Bearer '+token,'Content-Type':'application/json'},body:'{}'});}catch(e){console.error('Error logout:',e);}
   stopAuthPolling();
+  stopTokenRefresh();
   currentUser=null;
   _sbToken=null;
   localStorage.removeItem('sb_token');
@@ -5162,6 +5181,7 @@ function ocRequestExtraAuth(){
 function showPendingAuthPopup(reqId){
   const req=pendingAuthList().find(r=>r.id===reqId);
   if(!req||req.status!=='pendiente') return;
+  if(typeof _authShownIds!=='undefined') _authShownIds.add(reqId);
   const hName=req.houseId==='all'?'Todas las casas':(curProj&&curProj.houses?((curProj.houses.find(h=>h.id===req.houseId)||{}).num||req.houseId):'Casa');
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--amb)">⚠ Solicitud de material fuera de presupuesto
@@ -5285,6 +5305,9 @@ function startAuthPolling(){
   _authPollIv=setInterval(pollPendingAuth, 15000);
 }
 function stopAuthPolling(){ if(_authPollIv){ clearInterval(_authPollIv); _authPollIv=null; } }
+// Solicitudes ya mostradas en ESTA sesión (el merge de saveData importa solicitudes a la
+// lista local en silencio, así que "está en la lista" NO significa "ya se mostró")
+const _authShownIds=new Set();
 async function pollPendingAuth(){
   if(!_sbToken||!currentUser) return;
   if(currentUser.role!=='Administrador'&&currentUser.role!=='Supervisor') return;
@@ -5296,15 +5319,13 @@ async function pollPendingAuth(){
     if(!resp.ok) return;
     const rec=await resp.json();
     let d=rec.data; if(typeof d==='string') d=JSON.parse(d);
-    const remotePending=((d&&d.SYS&&d.SYS.pendingAuthRequests)||[]).filter(r=>r.status==='pendiente');
-    if(!remotePending.length) return;
-    const localIds=new Set((SYS.pendingAuthRequests||[]).map(r=>r.id));
-    const nuevas=remotePending.filter(r=>!localIds.has(r.id));
-    if(nuevas.length){
-      if(!SYS.pendingAuthRequests) SYS.pendingAuthRequests=[];
-      nuevas.forEach(r=>SYS.pendingAuthRequests.push(r));
+    const remoteReqs=(d&&d.SYS&&d.SYS.pendingAuthRequests)||[];
+    // Traer todo lo remoto (incluye resoluciones hechas en otras sesiones)
+    SYS.pendingAuthRequests=_mergeAuthReqs(remoteReqs,SYS.pendingAuthRequests);
+    const toShow=(SYS.pendingAuthRequests||[]).filter(r=>r.status==='pendiente'&&!_authShownIds.has(r.id));
+    if(toShow.length){
       updateNotifBadge();
-      showPendingAuthPopup(nuevas[0].id);
+      showPendingAuthPopup(toShow[0].id);
     }
   }catch(e){ /* silencioso: reintenta en el próximo ciclo */ }
 }
@@ -11118,7 +11139,7 @@ function validateEmail(email){return/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);}
 function validatePassword(password){return password.length>=8&&/[A-Z]/.test(password)&&/\d/.test(password);}
 async function signup(){const email=document.getElementById('su').value.trim();const name=document.getElementById('sn').value.trim();const password=document.getElementById('sp').value;const confirmPassword=document.getElementById('spc').value;if(!validateEmail(email)){showError('serr','Email inválido');return;}if(!password){showError('serr','Contraseña requerida');return;}if(!validatePassword(password)){showError('serr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('serr','Las contraseñas no coinciden');return;}if(!name){showError('serr','Nombre requerido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/signup',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,password,name,confirmPassword})});if(!resp.ok){showError('serr',await authErrMsg(resp));return;}showToast('✓ Registro exitoso. Inicia sesión.');showLogin();}catch(e){showError('serr','Error: '+e.message);}}
 async function forgotPassword(){const email=document.getElementById('fe').value.trim();if(!validateEmail(email)){showError('ferr','Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/forgot-password',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){showError('ferr',await authErrMsg(resp));return;}showToast('✓ Instrucciones enviadas al email');showLogin();}catch(e){showError('ferr','Error: '+e.message);}}
-async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});const _apiOk2=await loadDataFromAPI();if(!_apiOk2||!(Array.isArray(projects)&&projects.length))loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){showError('ierr','Error: '+e.message);}}
+async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);startTokenRefresh();document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});const _apiOk2=await loadDataFromAPI();if(!_apiOk2||!(Array.isArray(projects)&&projects.length))loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){showError('ierr','Error: '+e.message);}}
 function checkInvitationCode(){const params=new URLSearchParams(window.location.search);const code=params.get('invite');const email=params.get('email');if(code&&email){document.getElementById('login-form').classList.add('hidden');document.getElementById('invite-form').classList.remove('hidden');document.getElementById('invite-email-display').textContent='Email: '+email;window._inviteCode=code;window._inviteEmail=email;}}
 setTimeout(checkInvitationCode,100);
 
