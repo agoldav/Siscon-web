@@ -1272,6 +1272,7 @@ async function login(){
 }
 async function logout(){
   try{const token=localStorage.getItem('sb_token');await fetch(BACKEND_URL+'/api/auth/logout',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Authorization':'Bearer '+token,'Content-Type':'application/json'},body:'{}'});}catch(e){console.error('Error logout:',e);}
+  stopAuthPolling();
   currentUser=null;
   _sbToken=null;
   localStorage.removeItem('sb_token');
@@ -5149,33 +5150,46 @@ function showPendingAuthPopup(reqId){
     </div>`;
   document.getElementById('modal').classList.remove('hidden');
 }
-function resolveExtraAuth(reqId, decision){
+async function resolveExtraAuth(reqId, decision){
+  // Aprobar/rechazar: refrescar primero desde el backend para actuar sobre el estado más reciente
+  // (la OC pudo crearse o cambiar en la sesión de quien solicitó)
+  if(decision==='aprobado'||decision==='rechazado'){ try{ await loadDataFromAPI(); }catch(e){} }
   const req=pendingAuthList().find(r=>r.id===reqId);
-  if(!req) return;
+  if(!req){ closeModal(); return; }
   req.status=decision;
   req.resolvedBy=currentUser?currentUser.name:'Admin';
   req.resolvedAt=Date.now();
   if(decision==='aprobado'){
-    // Agregar la línea a la OC
-    const proj=(SYS.projects||[]).find(p=>p.id===req.projId)||curProj;
+    // Agregar la línea a la OC (los proyectos viven en el global `projects`, no en SYS)
+    const proj=projects.find(p=>p.id===req.projId)||curProj;
     const oc=(proj&&proj.ocs||[]).find(o=>o.id===req.ocId);
     if(oc){
-      const newLine={lineId:'extra-'+Date.now(),matId:0,manualName:req.matName,unit:req.unit,budQty:0,qty:req.qty,price:req.price,isExtra:true,authorizedBy:req.resolvedBy};
+      const mkLine=(sfx)=>({lineId:'extra-'+Date.now()+(sfx||''),matId:0,manualName:req.matName,unit:req.unit||'unid',budQty:0,prevOrdered:0,qty:req.qty,price:req.price,discPct:0,isExtra:true,authorizedBy:req.resolvedBy});
+      if(!oc.lines)oc.lines={};
       if(req.houseId==='all'){
-        (oc.houseIds||[]).forEach(hid=>{ if(!oc.lines[hid])oc.lines[hid]=[]; oc.lines[hid].push({...newLine,lineId:'extra-'+Date.now()+hid}); });
+        (oc.houseIds||[]).forEach(hid=>{ if(!oc.lines[hid])oc.lines[hid]=[]; oc.lines[hid].push(mkLine('h'+hid)); });
       } else {
         if(!oc.lines[req.houseId])oc.lines[req.houseId]=[];
-        oc.lines[req.houseId].push(newLine);
+        oc.lines[req.houseId].push(mkLine());
+      }
+      // Si esta sesión tiene la misma OC abierta en el editor, reflejar el cambio en vivo
+      if(typeof ocState==='object'&&ocState&&curOCId===oc.id){
+        if(!ocState.lines)ocState.lines={};
+        if(req.houseId==='all'){ (oc.houseIds||[]).forEach(hid=>{ ocState.lines[hid]=ocState.lines[hid]||[]; ocState.lines[hid].push(mkLine('s'+hid)); }); }
+        else { ocState.lines[req.houseId]=ocState.lines[req.houseId]||[]; ocState.lines[req.houseId].push(mkLine('s')); }
       }
       logAction(`Material extra "${req.matName}" aprobado y agregado a OC`,'log-create','OC',null,{name:req.matName,approvedBy:req.resolvedBy});
+      addNotif(`✅ Material "${req.matName}" aprobado y agregado a OC ${req.ocNum||''} (${req.projName})`);
+    } else {
+      alert('Se aprobó la solicitud, pero no se encontró la OC "'+(req.ocNum||req.ocId)+'". Es posible que la orden aún no se haya guardado; pídele a quien la solicitó que guarde la OC y vuelve a intentar.');
     }
     // Eliminar notificaciones pending-auth relacionadas
     SYS.notifications=(SYS.notifications||[]).filter(n=>n.link!=='pending-auth');
     saveData();
     closeModal();
-    showToast('✅ Material aprobado y agregado a la OC');
+    showToast(oc?'✅ Material aprobado y agregado a la OC':'Solicitud aprobada (revisa la OC)');
     updateNotifBadge();
-    if(oc&&curOCId===oc.id) ocRenderTableBody();
+    if(oc&&curOCId===oc.id){ if(typeof ocRefreshTotals==='function')ocRefreshTotals(); ocRenderTableBody(); }
     // Detener recordatorio solo si no quedan más solicitudes pendientes
     if(!pendingAuthList().some(r=>r.status==='pendiente')) stopExtraAuthReminder();
   } else if(decision==='rechazado'){
@@ -5220,11 +5234,43 @@ function stopExtraAuthReminder(){ if(_extraReminderIv){clearInterval(_extraRemin
 // Al hacer login, revisar si hay solicitudes pendientes y mostrar el popup
 function checkPendingAuthOnLogin(){
   if(!currentUser||(currentUser.role!=='Administrador'&&currentUser.role!=='Supervisor')) return;
+  startAuthPolling();
   const pending=pendingAuthList().filter(r=>r.status==='pendiente');
   if(pending.length){
     setTimeout(()=>showPendingAuthPopup(pending[0].id), 800);
     startExtraAuthReminder();
   }
+}
+// Sondeo en vivo: entrega la solicitud al admin/supervisor aunque la sesión ya esté abierta
+let _authPollIv=null;
+function startAuthPolling(){
+  stopAuthPolling();
+  if(!currentUser||(currentUser.role!=='Administrador'&&currentUser.role!=='Supervisor')) return;
+  _authPollIv=setInterval(pollPendingAuth, 15000);
+}
+function stopAuthPolling(){ if(_authPollIv){ clearInterval(_authPollIv); _authPollIv=null; } }
+async function pollPendingAuth(){
+  if(!_sbToken||!currentUser) return;
+  if(currentUser.role!=='Administrador'&&currentUser.role!=='Supervisor') return;
+  // No interrumpir si ya hay un modal abierto (p.ej. aprobando otra solicitud)
+  const modal=document.getElementById('modal');
+  if(modal&&!modal.classList.contains('hidden')) return;
+  try{
+    const resp=await fetch(`${BACKEND_URL}/api/db/settings/1`,{headers:{'Authorization':'Bearer '+_sbToken}});
+    if(!resp.ok) return;
+    const rec=await resp.json();
+    let d=rec.data; if(typeof d==='string') d=JSON.parse(d);
+    const remotePending=((d&&d.SYS&&d.SYS.pendingAuthRequests)||[]).filter(r=>r.status==='pendiente');
+    if(!remotePending.length) return;
+    const localIds=new Set((SYS.pendingAuthRequests||[]).map(r=>r.id));
+    const nuevas=remotePending.filter(r=>!localIds.has(r.id));
+    if(nuevas.length){
+      if(!SYS.pendingAuthRequests) SYS.pendingAuthRequests=[];
+      nuevas.forEach(r=>SYS.pendingAuthRequests.push(r));
+      updateNotifBadge();
+      showPendingAuthPopup(nuevas[0].id);
+    }
+  }catch(e){ /* silencioso: reintenta en el próximo ciclo */ }
 }
 
 // ========== GUARDAR OC ==========
