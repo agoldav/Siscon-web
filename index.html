@@ -849,9 +849,35 @@ let _saveToastTimer=null;
 let _sbToken = localStorage.getItem('sb_token') || null;
 const BACKEND_URL = SYS.backendUrl || 'https://siscon-backend.onrender.com';
 
+// Merge de solicitudes de autorización local↔remoto: una resolución (aprobado/rechazado)
+// siempre gana sobre 'pendiente', sin importar qué sesión guarda de último.
+function _mergeAuthReqs(remote,local){
+  const map=new Map();
+  (remote||[]).forEach(r=>{ if(r&&r.id) map.set(r.id,r); });
+  (local||[]).forEach(r=>{
+    if(!r||!r.id) return;
+    const ex=map.get(r.id);
+    if(!ex){ map.set(r.id,r); return; }
+    const exRes=ex.status&&ex.status!=='pendiente', myRes=r.status&&r.status!=='pendiente';
+    if(myRes&&!exRes) map.set(r.id,r);
+    else if(myRes&&exRes) map.set(r.id,(r.resolvedAt||0)>=(ex.resolvedAt||0)?r:ex);
+    // si el local está pendiente y el remoto resuelto → se queda el remoto
+  });
+  return Array.from(map.values());
+}
 async function saveDataToAPI(){
   if(!_sbToken || !currentUser) return false;
   try{
+    // Antes de subir, traer las solicitudes remotas y fusionarlas para no pisar resoluciones de otras sesiones
+    try{
+      const r0=await fetch(`${BACKEND_URL}/api/db/settings/1`,{headers:{'Authorization':`Bearer ${_sbToken}`}});
+      if(r0.ok){
+        const rec0=await r0.json();
+        let d0=rec0.data; if(typeof d0==='string') d0=JSON.parse(d0);
+        const remoteReqs=(d0&&d0.SYS&&d0.SYS.pendingAuthRequests)||[];
+        SYS.pendingAuthRequests=_mergeAuthReqs(remoteReqs,SYS.pendingAuthRequests);
+      }
+    }catch(e){/* sin red: se guarda lo local igual */}
     const projectsClean=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
     console.log('📤 saveDataToAPI - Token:', _sbToken.substring(0, 50)+'...');
     const resp=await fetch(`${BACKEND_URL}/api/db/settings/1`, {
@@ -1241,6 +1267,13 @@ function registerDoc(fileName, category, mime, blobId){
 }
 
 // ========== LOGIN ==========
+// Lee el error de una respuesta del backend sin asumir que es JSON
+// (el rate limiter y algunos proxies responden texto plano)
+async function authErrMsg(resp){
+  const t=await resp.text().catch(()=>'' );
+  try{ const j=JSON.parse(t); return j.error||j.message||t||('Error HTTP '+resp.status); }
+  catch(e){ return t||('Error HTTP '+resp.status); }
+}
 async function login(){
   const email=document.getElementById('lu').value.trim();
   const password=document.getElementById('lp').value;
@@ -1248,7 +1281,7 @@ async function login(){
   if(!password){showError('lerr','Contraseña requerida');return;}
   try{
     const resp=await fetch(BACKEND_URL+'/api/auth/signin',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,password})});
-    if(!resp.ok){const err=await resp.json();showError('lerr',err.message||'Error de autenticación');return;}
+    if(!resp.ok){showError('lerr',await authErrMsg(resp));return;}
     const data=await resp.json();
     currentUser=data.user;
     _sbToken=data.access_token;
@@ -5085,6 +5118,9 @@ function ocOpenExtraModal(){
   document.getElementById('modal').classList.remove('hidden');
 }
 function ocRequestExtraAuth(){
+  // La OC debe existir guardada: si no, la solicitud viajaría sin id real y el admin no podría agregar el material
+  const _ocIdReal=(ocState&&ocState.id)||((curOCId&&curOCId!=='new')?curOCId:null);
+  if(!_ocIdReal){ alert('Guarda la OC primero (botón Guardar) y luego solicita el material extra.\n\nAsí la solicitud queda ligada a la orden correcta y el administrador podrá agregarlo.'); return; }
   const name=document.getElementById('oc-extra-name').value.trim();
   const unit=document.getElementById('oc-extra-unit').value||'unid';
   const qty=parseFloat(document.getElementById('oc-extra-qty').value)||0;
@@ -5104,7 +5140,7 @@ function ocRequestExtraAuth(){
     requestedAt:Date.now(),
     projId:curProj?curProj.id:null,
     projName:curProj?curProj.name:'',
-    ocId:ocState?ocState.id:null,
+    ocId:_ocIdReal,
     ocNum:ocState?ocState.num:'',
     matName:name, unit, qty, price,
     houseId: houseId==='all'?'all':(parseInt(houseId)||houseId),
@@ -11080,9 +11116,9 @@ function showError(elemId,msg){document.getElementById(elemId).textContent=msg;d
 function clearErrors(){['lerr','serr','ferr','ierr'].forEach(id=>{document.getElementById(id).classList.add('hidden');});}
 function validateEmail(email){return/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);}
 function validatePassword(password){return password.length>=8&&/[A-Z]/.test(password)&&/\d/.test(password);}
-async function signup(){const email=document.getElementById('su').value.trim();const name=document.getElementById('sn').value.trim();const password=document.getElementById('sp').value;const confirmPassword=document.getElementById('spc').value;if(!validateEmail(email)){showError('serr','Email inválido');return;}if(!password){showError('serr','Contraseña requerida');return;}if(!validatePassword(password)){showError('serr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('serr','Las contraseñas no coinciden');return;}if(!name){showError('serr','Nombre requerido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/signup',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,password,name,confirmPassword})});if(!resp.ok){const err=await resp.json();showError('serr',err.message||'Error en registro');return;}showToast('✓ Registro exitoso. Inicia sesión.');showLogin();}catch(e){showError('serr','Error: '+e.message);}}
-async function forgotPassword(){const email=document.getElementById('fe').value.trim();if(!validateEmail(email)){showError('ferr','Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/forgot-password',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){const err=await resp.json();showError('ferr',err.message||'Error');return;}showToast('✓ Instrucciones enviadas al email');showLogin();}catch(e){showError('ferr','Error: '+e.message);}}
-async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){const err=await resp.json();showError('ierr',err.message||'Error');return;}const data=await resp.json();currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});const _apiOk2=await loadDataFromAPI();if(!_apiOk2||!(Array.isArray(projects)&&projects.length))loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){showError('ierr','Error: '+e.message);}}
+async function signup(){const email=document.getElementById('su').value.trim();const name=document.getElementById('sn').value.trim();const password=document.getElementById('sp').value;const confirmPassword=document.getElementById('spc').value;if(!validateEmail(email)){showError('serr','Email inválido');return;}if(!password){showError('serr','Contraseña requerida');return;}if(!validatePassword(password)){showError('serr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('serr','Las contraseñas no coinciden');return;}if(!name){showError('serr','Nombre requerido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/signup',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,password,name,confirmPassword})});if(!resp.ok){showError('serr',await authErrMsg(resp));return;}showToast('✓ Registro exitoso. Inicia sesión.');showLogin();}catch(e){showError('serr','Error: '+e.message);}}
+async function forgotPassword(){const email=document.getElementById('fe').value.trim();if(!validateEmail(email)){showError('ferr','Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/forgot-password',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){showError('ferr',await authErrMsg(resp));return;}showToast('✓ Instrucciones enviadas al email');showLogin();}catch(e){showError('ferr','Error: '+e.message);}}
+async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});const _apiOk2=await loadDataFromAPI();if(!_apiOk2||!(Array.isArray(projects)&&projects.length))loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){showError('ierr','Error: '+e.message);}}
 function checkInvitationCode(){const params=new URLSearchParams(window.location.search);const code=params.get('invite');const email=params.get('email');if(code&&email){document.getElementById('login-form').classList.add('hidden');document.getElementById('invite-form').classList.remove('hidden');document.getElementById('invite-email-display').textContent='Email: '+email;window._inviteCode=code;window._inviteEmail=email;}}
 setTimeout(checkInvitationCode,100);
 
