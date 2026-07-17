@@ -5206,6 +5206,28 @@ function showPendingAuthPopup(reqId){
     </div>`;
   document.getElementById('modal').classList.remove('hidden');
 }
+// Aplica (idempotente) el material aprobado a la OC. El lineId es determinístico —
+// derivado del id de la solicitud — para que admin Y solicitante puedan aplicarlo
+// cada uno en su sesión sin riesgo de duplicados.
+function applyApprovedExtra(req){
+  const proj=projects.find(p=>p.id===req.projId)||curProj;
+  const oc=(proj&&proj.ocs||[]).find(o=>o.id===req.ocId);
+  if(!oc) return false;
+  if(!oc.lines)oc.lines={};
+  const mk=(hid)=>({lineId:'extra-'+req.id+(hid!=null?'-'+hid:''),matId:0,manualName:req.matName,unit:req.unit||'unid',budQty:0,prevOrdered:0,qty:req.qty,price:req.price,discPct:0,isExtra:true,authorizedBy:req.resolvedBy||''});
+  const addTo=(lines,hid)=>{ if(!lines[hid])lines[hid]=[]; const l=mk(hid); if(!lines[hid].some(x=>x.lineId===l.lineId)) lines[hid].push(l); };
+  if(req.houseId==='all'){ (oc.houseIds||[]).forEach(hid=>addTo(oc.lines,hid)); }
+  else addTo(oc.lines,req.houseId);
+  // Reflejar en vivo si esta sesión tiene la misma OC abierta en el editor
+  if(typeof ocState==='object'&&ocState&&curOCId===oc.id){
+    if(!ocState.lines)ocState.lines={};
+    if(req.houseId==='all'){ (oc.houseIds||[]).forEach(hid=>addTo(ocState.lines,hid)); }
+    else addTo(ocState.lines,req.houseId);
+    if(typeof ocRefreshTotals==='function')ocRefreshTotals();
+    ocRenderTableBody();
+  }
+  return true;
+}
 async function resolveExtraAuth(reqId, decision){
   // Aprobar/rechazar: refrescar primero desde el backend para actuar sobre el estado más reciente
   // (la OC pudo crearse o cambiar en la sesión de quien solicitó)
@@ -5216,24 +5238,8 @@ async function resolveExtraAuth(reqId, decision){
   req.resolvedBy=currentUser?currentUser.name:'Admin';
   req.resolvedAt=Date.now();
   if(decision==='aprobado'){
-    // Agregar la línea a la OC (los proyectos viven en el global `projects`, no en SYS)
-    const proj=projects.find(p=>p.id===req.projId)||curProj;
-    const oc=(proj&&proj.ocs||[]).find(o=>o.id===req.ocId);
-    if(oc){
-      const mkLine=(sfx)=>({lineId:'extra-'+Date.now()+(sfx||''),matId:0,manualName:req.matName,unit:req.unit||'unid',budQty:0,prevOrdered:0,qty:req.qty,price:req.price,discPct:0,isExtra:true,authorizedBy:req.resolvedBy});
-      if(!oc.lines)oc.lines={};
-      if(req.houseId==='all'){
-        (oc.houseIds||[]).forEach(hid=>{ if(!oc.lines[hid])oc.lines[hid]=[]; oc.lines[hid].push(mkLine('h'+hid)); });
-      } else {
-        if(!oc.lines[req.houseId])oc.lines[req.houseId]=[];
-        oc.lines[req.houseId].push(mkLine());
-      }
-      // Si esta sesión tiene la misma OC abierta en el editor, reflejar el cambio en vivo
-      if(typeof ocState==='object'&&ocState&&curOCId===oc.id){
-        if(!ocState.lines)ocState.lines={};
-        if(req.houseId==='all'){ (oc.houseIds||[]).forEach(hid=>{ ocState.lines[hid]=ocState.lines[hid]||[]; ocState.lines[hid].push(mkLine('s'+hid)); }); }
-        else { ocState.lines[req.houseId]=ocState.lines[req.houseId]||[]; ocState.lines[req.houseId].push(mkLine('s')); }
-      }
+    const ok=applyApprovedExtra(req);
+    if(ok){
       logAction(`Material extra "${req.matName}" aprobado y agregado a OC`,'log-create','OC',null,{name:req.matName,approvedBy:req.resolvedBy});
       addNotif(`✅ Material "${req.matName}" aprobado y agregado a OC ${req.ocNum||''} (${req.projName})`);
     } else {
@@ -5243,9 +5249,8 @@ async function resolveExtraAuth(reqId, decision){
     SYS.notifications=(SYS.notifications||[]).filter(n=>n.link!=='pending-auth');
     saveData();
     closeModal();
-    showToast(oc?'✅ Material aprobado y agregado a la OC':'Solicitud aprobada (revisa la OC)');
+    showToast(ok?'✅ Material aprobado y agregado a la OC':'Solicitud aprobada (revisa la OC)');
     updateNotifBadge();
-    if(oc&&curOCId===oc.id){ if(typeof ocRefreshTotals==='function')ocRefreshTotals(); ocRenderTableBody(); }
     // Detener recordatorio solo si no quedan más solicitudes pendientes
     if(!pendingAuthList().some(r=>r.status==='pendiente')) stopExtraAuthReminder();
   } else if(decision==='rechazado'){
@@ -5289,31 +5294,35 @@ function startExtraAuthReminder(){
 function stopExtraAuthReminder(){ if(_extraReminderIv){clearInterval(_extraReminderIv);_extraReminderIv=null;} }
 // Al hacer login, revisar si hay solicitudes pendientes y mostrar el popup
 function checkPendingAuthOnLogin(){
-  if(!currentUser||(currentUser.role!=='Administrador'&&currentUser.role!=='Supervisor')) return;
+  if(!currentUser) return;
+  // Al entrar, marcar como "ya vistas" las resoluciones viejas para no re-avisar
+  // (los datos frescos ya vienen de loadDataFromAPI, incluida cualquier línea aprobada)
+  (SYS.pendingAuthRequests||[]).forEach(r=>{ if(r.status&&r.status!=='pendiente') _authResolvedSeen.add(r.id); });
   startAuthPolling();
+  if(currentUser.role!=='Administrador'&&currentUser.role!=='Supervisor') return;
   const pending=pendingAuthList().filter(r=>r.status==='pendiente');
   if(pending.length){
     setTimeout(()=>showPendingAuthPopup(pending[0].id), 800);
     startExtraAuthReminder();
   }
 }
-// Sondeo en vivo: entrega la solicitud al admin/supervisor aunque la sesión ya esté abierta
+// Sondeo en vivo para TODOS los usuarios:
+//  - admin/supervisor: recibe el popup de solicitudes nuevas con la sesión abierta
+//  - solicitante: al aprobarse su solicitud, el material se agrega EN VIVO a su OC y se le avisa
 let _authPollIv=null;
 function startAuthPolling(){
   stopAuthPolling();
-  if(!currentUser||(currentUser.role!=='Administrador'&&currentUser.role!=='Supervisor')) return;
+  if(!currentUser) return;
   _authPollIv=setInterval(pollPendingAuth, 15000);
 }
 function stopAuthPolling(){ if(_authPollIv){ clearInterval(_authPollIv); _authPollIv=null; } }
 // Solicitudes ya mostradas en ESTA sesión (el merge de saveData importa solicitudes a la
 // lista local en silencio, así que "está en la lista" NO significa "ya se mostró")
 const _authShownIds=new Set();
+// Resoluciones ya avisadas/aplicadas en ESTA sesión
+const _authResolvedSeen=new Set();
 async function pollPendingAuth(){
   if(!_sbToken||!currentUser) return;
-  if(currentUser.role!=='Administrador'&&currentUser.role!=='Supervisor') return;
-  // No interrumpir si ya hay un modal abierto (p.ej. aprobando otra solicitud)
-  const modal=document.getElementById('modal');
-  if(modal&&!modal.classList.contains('hidden')) return;
   try{
     const resp=await fetch(`${BACKEND_URL}/api/db/settings/1`,{headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp'}});
     if(!resp.ok) return;
@@ -5322,10 +5331,32 @@ async function pollPendingAuth(){
     const remoteReqs=(d&&d.SYS&&d.SYS.pendingAuthRequests)||[];
     // Traer todo lo remoto (incluye resoluciones hechas en otras sesiones)
     SYS.pendingAuthRequests=_mergeAuthReqs(remoteReqs,SYS.pendingAuthRequests);
-    const toShow=(SYS.pendingAuthRequests||[]).filter(r=>r.status==='pendiente'&&!_authShownIds.has(r.id));
-    if(toShow.length){
+    // 1) Resoluciones de solicitudes hechas por ESTE usuario: aplicar en vivo y avisar
+    let _applied=false;
+    (SYS.pendingAuthRequests||[]).forEach(r=>{
+      if(!r.status||r.status==='pendiente'||_authResolvedSeen.has(r.id)) return;
+      if(r.requestedBy!==(currentUser&&currentUser.name)) return;
+      _authResolvedSeen.add(r.id);
+      if(r.status==='aprobado'){
+        if(applyApprovedExtra(r)) _applied=true;
+        showToast('✅ Tu solicitud de "'+r.matName+'" fue aprobada y el material se agregó a la OC');
+        addNotif('✅ Solicitud de "'+r.matName+'" aprobada por '+(r.resolvedBy||'administrador'));
+      } else if(r.status==='rechazado'){
+        showToast('⛔ Tu solicitud de "'+r.matName+'" fue rechazada');
+        addNotif('⛔ Solicitud de "'+r.matName+'" rechazada por '+(r.resolvedBy||'administrador'));
+      }
       updateNotifBadge();
-      showPendingAuthPopup(toShow[0].id);
+    });
+    if(_applied) saveData();
+    // 2) Popup de aprobación: solo admin/supervisor y sin otro modal abierto
+    if(currentUser.role==='Administrador'||currentUser.role==='Supervisor'){
+      const modal=document.getElementById('modal');
+      if(modal&&!modal.classList.contains('hidden')) return;
+      const toShow=(SYS.pendingAuthRequests||[]).filter(r=>r.status==='pendiente'&&!_authShownIds.has(r.id));
+      if(toShow.length){
+        updateNotifBadge();
+        showPendingAuthPopup(toShow[0].id);
+      }
     }
   }catch(e){ /* silencioso: reintenta en el próximo ciclo */ }
 }
