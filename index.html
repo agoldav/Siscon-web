@@ -9543,6 +9543,10 @@ function txnOcrZoneHtml(){
 }
 function txnDrop(e){ e.preventDefault(); const el=document.getElementById('txn-drop'); if(el)el.classList.remove('dragover'); const f=e.dataTransfer.files[0]; if(f)txnFile(f); }
 function txnFile(f){
+  // Si la factura ya tiene líneas cargadas, confirmar reemplazo antes de leer el PDF
+  const _tgtNow=(curTxnType==='proveedor')?vbState:txnState;
+  const _hasLines=_tgtNow&&Array.isArray(_tgtNow.lines)&&_tgtNow.lines.some(l=>(l.desc&&(''+l.desc).trim())||l.qty||l.price||l.productId);
+  if(_hasLines && !confirm('Esta factura ya tiene líneas creadas. ¿Deseas reemplazarlas por los productos del PDF adjunto?')) return;
   // Solo registrar blob y blobId; registerDoc se llama una sola vez
   if(/pdf/i.test(f.type||'')){
     const blobId='blob_txn_'+Date.now();
@@ -10860,7 +10864,7 @@ function setTheme(t){
 
 // ===== Claude API — vía backend (recomendado) o directo (fallback) =====
 function claudeKey(){ return (SYS.claudeKey||'').trim(); }
-function backendUrl(){ return (SYS.backendUrl||'').trim().replace(/\/$/,''); }
+function backendUrl(){ return ((SYS.backendUrl||'').trim().replace(/\/$/,'')) || BACKEND_URL; }
 async function claudeCall(body){
   const be=backendUrl();
   if(be){
