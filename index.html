@@ -2239,7 +2239,10 @@ function renderTypes(){
         return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--rlg);padding:14px;transition:border-color .2s" onmouseover="this.style.borderColor='var(--acc)'" onmouseout="this.style.borderColor='var(--border)'">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
             <div style="width:10px;height:10px;border-radius:50%;background:${t.color};flex-shrink:0"></div>
-            <div style="font-size:14px;font-weight:600;color:var(--t1);flex:1;cursor:pointer" onclick="openCreateType(${t.id})">${t.name}</div>
+            <div style="font-size:14px;font-weight:600;color:var(--t1);flex:1;cursor:pointer;display:flex;align-items:center;gap:6px" onclick="openCreateType(${t.id})">
+              ${t.name}
+              ${t.typeLocked?`<span title="Tipo bloqueado — solicita desbloqueo al administrador para editarlo" style="font-size:12px">🔒</span>`:''}
+            </div>
             <button title="Duplicar tipo" onclick="duplicateType(${t.id})" style="background:transparent;border:none;color:var(--t3);font-size:14px;padding:2px 4px;cursor:pointer;border-radius:5px" onmouseenter="this.style.color='var(--acc)'" onmouseleave="this.style.color='var(--t3)'">⧉</button>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;cursor:pointer" onclick="openCreateType(${t.id})">
@@ -2258,8 +2261,16 @@ function renderTypes(){
 
 // ========== CREATE / EDIT TYPE ==========
 function openCreateType(typeId){
-  showCreate=true; typeEditId=typeId; ctIVA=false;
   const p=curProj;
+  if(typeId){
+    const t=p.types.find(x=>x.id===typeId);
+    // Si el tipo está bloqueado y el usuario no es admin, pedir desbloqueo
+    if(t.typeLocked&&currentUser&&(currentUser.role!=='Administrador'&&currentUser.role!=='Supervisor')){
+      typeUnlockReq(typeId);
+      return;
+    }
+  }
+  showCreate=true; typeEditId=typeId; ctIVA=false;
   if(typeId){
     const t=p.types.find(x=>x.id===typeId);
     ctForm={name:t.name,area:t.area,budget:t.budget,salePrice:t.salePrice,utilityPct:t.utilityPct,
@@ -2271,6 +2282,25 @@ function openCreateType(typeId){
     ctCategories=defaultCategories();
   }
   renderBreadcrumb(); renderCreateType();
+}
+// Solicita desbloqueo de tipo (igual que houseUnlockReq pero para tipos)
+function typeUnlockReq(typeId){
+  const t=curProj.types.find(x=>x.id===typeId); if(!t)return;
+  const req={
+    id:'unlock-type-'+Date.now(),
+    type:'type-unlock',
+    status:'pendiente',
+    requestedBy:currentUser?currentUser.name:'Usuario',
+    requestedAt:Date.now(),
+    projId:curProj?curProj.id:null,
+    projName:curProj?curProj.name:'',
+    typeId:typeId,
+    typeName:t.name||''
+  };
+  pendingAuthList().push(req);
+  saveData();
+  showToast('✅ Solicitud de desbloqueo enviada al administrador');
+  logAction(`Solicitud de desbloqueo de tipo "${t.name}" enviada`,'log-create','Tipos',null,{typeName:t.name});
 }
 
 function lineName(l){
@@ -2674,8 +2704,8 @@ function saveType(){
     Object.assign(t,data);
     logAction(`Tipo "${name}" editado`,'log-edit','Tipos',before,data);
   } else {
-    curProj.types.push({id:Date.now(),...data});
-    logAction(`Tipo "${name}" creado`,'log-create','Tipos',null,data);
+    curProj.types.push({id:Date.now(),...data,typeLocked:true});
+    logAction(`Tipo "${name}" creado (bloqueado para edición)`,'log-create','Tipos',null,data);
   }
   curProj.lastActivity=Date.now();
   showCreate=false; typeEditId=null;
@@ -5183,7 +5213,31 @@ function showPendingAuthPopup(reqId){
   if(!req||req.status!=='pendiente') return;
   if(typeof _authShownIds!=='undefined') _authShownIds.add(reqId);
 
-  // Solicitud de desbloqueo de tipo
+  // Solicitud de desbloqueo de TIPO DE VIVIENDA
+  if(req.type==='type-unlock'){
+    document.getElementById('modal-inner').innerHTML=`
+      <div class="modal-title" style="color:var(--amb)">🔓 Solicitud de desbloqueo de tipo
+        <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
+      </div>
+      <div style="font-size:12px;color:var(--t2);margin-bottom:12px">
+        <strong style="color:var(--t1)">${req.requestedBy}</strong> solicita desbloquear el tipo
+        <strong style="color:var(--t1)">${req.typeName}</strong> en proyecto
+        <strong style="color:var(--t1)">${req.projName}</strong>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:12px;font-size:12px">
+        <div><span style="color:var(--t3)">Tipo:</span> <strong>${req.typeName}</strong></div>
+        <div><span style="color:var(--t3)">Proyecto:</span> ${req.projName}</div>
+        <div><span style="color:var(--t3)">Fecha:</span> ${new Date(req.requestedAt).toLocaleString('es-CR')}</div>
+      </div>
+      <div class="modal-actions" style="gap:8px">
+        <button class="btn-cancel" onclick="resolveExtraAuth('${reqId}','rechazado')" style="border-color:var(--red);color:var(--red)">✗ Rechazar</button>
+        <button class="btn-save" onclick="resolveExtraAuth('${reqId}','aprobado')">🔓 Desbloquear</button>
+      </div>`;
+    document.getElementById('modal').classList.remove('hidden');
+    return;
+  }
+
+  // Solicitud de desbloqueo de tipo de CASA
   if(req.type==='house-unlock'){
     document.getElementById('modal-inner').innerHTML=`
       <div class="modal-title" style="color:var(--amb)">🔓 Solicitud de desbloqueo de tipo
@@ -5264,7 +5318,11 @@ async function resolveExtraAuth(reqId, decision){
   req.resolvedAt=Date.now();
   if(decision==='aprobado'){
     let ok=false;
-    if(req.type==='house-unlock'){
+    if(req.type==='type-unlock'){
+      const proj=projects.find(p=>p.id===req.projId)||curProj;
+      const t=(proj&&proj.types||[]).find(x=>x.id===req.typeId);
+      if(t){ t.typeLocked=false; ok=true; logAction(`Tipo "${req.typeName}" desbloqueado`,'log-edit','Tipos',null,{typeName:req.typeName}); addNotif(`🔓 Tipo ${req.typeName} desbloqueado en ${req.projName}`); }
+    } else if(req.type==='house-unlock'){
       ok=applyApprovedTypeUnlock(req);
       if(ok){
         logAction(`Tipo de casa "${req.houseNum}" desbloqueado`,'log-edit','Casas',null,{houseId:req.houseId});
@@ -5374,7 +5432,13 @@ async function pollPendingAuth(){
       if(r.requestedBy!==(currentUser&&currentUser.name)) return;
       _authResolvedSeen.add(r.id);
       if(r.status==='aprobado'){
-        if(r.type==='house-unlock'){
+        if(r.type==='type-unlock'){
+          const proj=projects.find(p=>p.id===r.projId)||curProj;
+          const t=(proj&&proj.types||[]).find(x=>x.id===r.typeId);
+          if(t){ t.typeLocked=false; _applied=true; if(curTab==='tipos')renderTypes(); }
+          showToast('🔓 Tu solicitud de desbloqueo para tipo '+r.typeName+' fue aprobada');
+          addNotif('🔓 Tipo '+r.typeName+' desbloqueado por '+(r.resolvedBy||'administrador'));
+        } else if(r.type==='house-unlock'){
           if(applyApprovedTypeUnlock(r)) _applied=true;
           showToast('🔓 Tu solicitud de desbloqueo para '+r.houseNum+' fue aprobada');
           addNotif('🔓 Casa '+r.houseNum+' desbloqueada por '+(r.resolvedBy||'administrador'));
@@ -5384,7 +5448,10 @@ async function pollPendingAuth(){
           addNotif('✅ Solicitud de "'+r.matName+'" aprobada por '+(r.resolvedBy||'administrador'));
         }
       } else if(r.status==='rechazado'){
-        const label=r.type==='house-unlock'?('desbloqueo de '+r.houseNum):('"'+r.matName+'"');
+        let label='';
+        if(r.type==='type-unlock') label='desbloqueo de tipo '+r.typeName;
+        else if(r.type==='house-unlock') label='desbloqueo de '+r.houseNum;
+        else label='"'+r.matName+'"';
         showToast('⛔ Tu solicitud de '+label+' fue rechazada');
         addNotif('⛔ Solicitud de '+label+' rechazada por '+(r.resolvedBy||'administrador'));
       }
