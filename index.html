@@ -8832,9 +8832,20 @@ function vbLinkToOC(ocId){
   if(!oc) return;
   const ocLines=vbOCConsolidatedLines(oc); // incluye assign por casa y bodega
   const qbItems=qboItems();
-  // Match línea-a-línea por posición
+
+  // Mejor matching: busca por descripción (case-insensitive), luego fallback a posición
+  const usedOCIndexes=new Set();
   vbState.lines.forEach((bl,i)=>{
-    const ol=ocLines[i];
+    let ol=null;
+    // 1. Intenta match por descripción exacta
+    const billDesc=(bl.desc||'').toLowerCase().trim();
+    if(billDesc){
+      const descIdx=ocLines.findIndex((ocl,idx)=>!usedOCIndexes.has(idx)&&(ocl.desc||'').toLowerCase().trim()===billDesc);
+      if(descIdx>=0){ ol=ocLines[descIdx]; usedOCIndexes.add(descIdx); }
+    }
+    // 2. Si no encuentra, intenta match por posición
+    if(!ol && i<ocLines.length && !usedOCIndexes.has(i)){ ol=ocLines[i]; usedOCIndexes.add(i); }
+
     if(ol){
       // Buscar producto QB por nombre exacto (case-insensitive); fallback al productId de la OC
       const qbMatch=qbItems.find(it=>(it.name||'').toLowerCase()===(ol.desc||'').toLowerCase());
@@ -8845,7 +8856,7 @@ function vbLinkToOC(ocId){
         const ocTotal=ol.assign.reduce((s,a)=>s+(a.qty||0),0);
         const billQty=bl.qty||0;
         const ratio=ocTotal>0?billQty/ocTotal:0;
-        bl.assign=ol.assign.map(a=>({houseId:a.houseId,qty:parseFloat(((a.qty||0)*ratio).toFixed(4))}));
+        bl.assign=ol.assign.map(a=>({houseId:a.houseId,qty:parseFloat(((a.qty||0)*ratio).toFixed(4)),lineId:a.lineId}));
       } else {
         bl.assign=[];
       }
