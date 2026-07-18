@@ -2329,7 +2329,7 @@ function renderCreateType(){
   document.getElementById('content').innerHTML=`
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
       <button class="btn-cancel" onclick="showCreate=false;typeEditId=null;renderBreadcrumb();renderTypes()">← Volver</button>
-      <div class="th-title">${typeEditId?'Editar Tipo':'Crear Nuevo Tipo'}</div>
+      <div class="th-title">${typeEditId?'Editar Tipo':'Crear Nuevo Tipo'}${(typeEditId && (curProj.types.find(t=>t.id===typeEditId)||{}).typeLocked)?` <span title="Tipo bloqueado — solicita desbloqueo al administrador" style="font-size:12px">🔒</span>`:''}</div>
       <button class="btn-history" onclick="showLogModal('Tipos',curProj.id)" style="margin-left:auto">Log</button>
     </div>
     <div class="create-layout">
@@ -4635,14 +4635,6 @@ function renderOCForm(){
               </div>` : ''}
             </div>
           </div>
-
-          <div class="oc-fld">
-            <div class="oc-fld-label">IVA</div>
-            <select style="font-size:12px;height:28px" onchange="ocState.ivaRate=this.value==='0.13'?0.13:0;ocRefreshTotals();renderOCForm()">
-              <option value="0.13"${st.ivaRate===0.13?'selected':''}>13% IVA</option>
-              <option value="0"${!st.ivaRate||st.ivaRate===0?'selected':''}>Sin IVA</option>
-            </select>
-          </div>
         </div>
 
         <!-- Fila 2: Casas incluidas + Bodega -->
@@ -4717,7 +4709,10 @@ function renderOCForm(){
       <div class="oc-totals-row">
         <div class="oc-tot-box">
           <div class="oc-tot-row"><span class="oc-tot-lbl" id="oc-tot-label-sub">Subtotal</span><span class="oc-tot-val" id="oc-tot-sub">—</span></div>
-          <div class="oc-tot-row"><span class="oc-tot-lbl" id="oc-tot-iva-lbl">IVA</span><span class="oc-tot-val" id="oc-tot-iva">—</span></div>
+          <div class="oc-tot-row" style="gap:10px;align-items:center"><span class="oc-tot-lbl" id="oc-tot-iva-lbl" style="flex:1">IVA</span><select style="font-size:11px;height:26px;width:110px" onchange="ocState.ivaRate=this.value==='0.13'?0.13:0;ocRefreshTotals();renderOCForm()">
+              <option value="0.13"${st.ivaRate===0.13?'selected':''}>13% IVA</option>
+              <option value="0"${!st.ivaRate||st.ivaRate===0?'selected':''}>Sin IVA</option>
+            </select><span class="oc-tot-val" id="oc-tot-iva">—</span></div>
           <div class="oc-tot-row oc-tot-main">
             <span class="oc-tot-lbl" id="oc-tot-label-main">Total OC</span>
             <span class="oc-tot-val" id="oc-tot-total">—</span>
