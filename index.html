@@ -655,20 +655,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div id="lerr" class="err hidden"></div>
       <button class="btn-pri" onclick="login()">Ingresar</button>
       <div class="login-links">
-        <a href="#" onclick="showSignup(); return false;">Crear cuenta</a>
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-    </div>
-
-    <!-- FORM: Signup -->
-    <div id="signup-form" class="login-form hidden">
-      <div class="lf"><label>Email</label><input id="su" type="email" placeholder="usuario@siscon.cr" onkeydown="if(event.key==='Enter')signup()"/></div>
-      <div class="lf"><label>Nombre</label><input id="sn" type="text" placeholder="Tu nombre" onkeydown="if(event.key==='Enter')signup()"/></div>
-      <div class="lf"><label>Contraseña</label><input id="sp" type="password" placeholder="Min 8 caracteres" onkeydown="if(event.key==='Enter')signup()"/></div>
-      <div class="lf"><label>Confirmar Contraseña</label><input id="spc" type="password" placeholder="Confirma" onkeydown="if(event.key==='Enter')signup()"/></div>
-      <div id="serr" class="err hidden"></div>
-      <button class="btn-pri" onclick="signup()">Registrarse</button>
-      <button class="btn-sec" onclick="showLogin(); return false;">Cancelar</button>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -4460,7 +4448,7 @@ function ocFromHouse(houseId){
     exchangeRate:tcGet(), proforma:'',
     houseIds:[houseId], bodegaMode:false, lines:{},
     bodegaLines:[], extras:[], notes:'',
-    activeTab:'resumen', totalUSD:0, ivaUSD:0,
+    activeTab:'resumen', totalUSD:0, ivaUSD:0, ivaRate:0.13,
     qboPOId:'', qboBillId:'',
     createdAt:new Date().toLocaleDateString('es-CR'),
     createdBy:currentUser?currentUser.name:'Sistema',
@@ -4505,7 +4493,7 @@ function openNewOC(){
     extras: [],     // líneas fuera de presupuesto
     notes: '',
     activeTab: null,
-    totalUSD: 0, ivaUSD: 0,
+    totalUSD: 0, ivaUSD: 0, ivaRate: 0.13,
     qboPOId: '', qboBillId: '',
     createdAt: new Date().toLocaleDateString('es-CR'),
     createdBy: currentUser ? currentUser.name : 'Sistema',
@@ -4647,6 +4635,14 @@ function renderOCForm(){
               </label>` : ''}
             </div>
           </div>
+
+          <div class="oc-fld">
+            <div class="oc-fld-label">IVA</div>
+            <select style="font-size:12px;height:28px" onchange="ocState.ivaRate=this.value==='0.13'?0.13:0;ocRefreshTotals();renderOCForm()">
+              <option value="0.13"${st.ivaRate===0.13?'selected':''}>13% IVA</option>
+              <option value="0"${!st.ivaRate||st.ivaRate===0?'selected':''}>Sin IVA</option>
+            </select>
+          </div>
         </div>
 
         <!-- Fila 2: Casas incluidas + Bodega -->
@@ -4721,7 +4717,7 @@ function renderOCForm(){
       <div class="oc-totals-row">
         <div class="oc-tot-box">
           <div class="oc-tot-row"><span class="oc-tot-lbl" id="oc-tot-label-sub">Subtotal</span><span class="oc-tot-val" id="oc-tot-sub">—</span></div>
-          <div class="oc-tot-row"><span class="oc-tot-lbl">IVA (13%)</span><span class="oc-tot-val" id="oc-tot-iva">—</span></div>
+          <div class="oc-tot-row"><span class="oc-tot-lbl" id="oc-tot-iva-lbl">IVA</span><span class="oc-tot-val" id="oc-tot-iva">—</span></div>
           <div class="oc-tot-row oc-tot-main">
             <span class="oc-tot-lbl" id="oc-tot-label-main">Total OC</span>
             <span class="oc-tot-val" id="oc-tot-total">—</span>
@@ -5106,7 +5102,8 @@ function ocCalcSubUSD(){
 function ocRefreshTotals(){
   const st=ocState;
   const subUSD=ocCalcSubUSD();
-  const ivaUSD=subUSD*0.13;
+  const ivaRate=st.ivaRate||0.13;
+  const ivaUSD=subUSD*ivaRate;
   const totUSD=subUSD+ivaUSD;
   st.totalUSD=totUSD; st.ivaUSD=ivaUSD;
 
@@ -5119,6 +5116,7 @@ function ocRefreshTotals(){
   if(el('oc-tot-label-main')) el('oc-tot-label-main').textContent=labelMain;
   if(el('oc-tot-sub')) el('oc-tot-sub').textContent=ocFmt(subUSD);
   if(el('oc-tot-iva')) el('oc-tot-iva').textContent=ocFmt(ivaUSD);
+  if(el('oc-tot-iva-lbl')) el('oc-tot-iva-lbl').textContent=st.ivaRate>0?`IVA (${Math.round(st.ivaRate*100)}%)`:'IVA';
   const tv=el('oc-tot-total');
   if(tv){ tv.textContent=ocFmt(totUSD); tv.className='oc-tot-val'+(st.bodegaMode?' pur':''); }
   const eq=el('oc-usd-equiv');
@@ -6892,7 +6890,7 @@ function ciPickHouse(houseId){
   const prev=houseBilledPct(p,houseId,ciState.id);
   if(prev>=100){ alert('Esta casa ya está facturada al 100%.'); return; }
   const pendPct=Math.round((100-prev)*100)/100;
-  const line={houseId, pct:pendPct, prevPct:prev, productId:'1', productName:'Instalación PC', description:''};
+  const line={houseId, pct:pendPct, prevPct:prev, productId:'1', productName:'Instalación PC', description:'', ivaRate:0.13};
   line.description=ciAutoDesc(line);
   ciState.houseLines.push(line);
   renderClientInvForm();
@@ -6941,7 +6939,7 @@ function ciSetProduct(idx,val){
 function ciSetDesc(idx,val){ ciState.houseLines[idx].description=val; }
 
 // ---- líneas manuales (productos sueltos QBO) ----
-function ciAddManual(){ ciState.manualLines.push({productId:'2',productName:'Suministro de Materiales',description:'',qty:1,price:0}); renderClientInvForm(); }
+function ciAddManual(){ ciState.manualLines.push({productId:'2',productName:'Suministro de Materiales',description:'',qty:1,price:0,ivaRate:0.13}); renderClientInvForm(); }
 function ciDelManual(i){ ciState.manualLines.splice(i,1); renderClientInvForm(); }
 
 // importes USD
@@ -6964,12 +6962,8 @@ function ciSubtotalUSD(){
   return s;
 }
 function ciLineIVA(line){
-  if(!line.taxCodeId) return 0;
-  const tc=qboTaxCodes().find(c=>c.id===line.taxCodeId);
-  if(!tc) return 0;
-  let rate=(tc.rate&&isFinite(tc.rate)&&tc.rate>0)?tc.rate:0;
-  if(!rate){ const m=(tc.name||'').match(/(\d+([.,]\d+)?)\s*%/); if(m) rate=parseFloat(m[1].replace(',','.')); }
-  return (isFinite(rate)?rate:0)/100;
+  // Nueva lógica: usa ivaRate (0 o 0.13) en lugar de taxCodeId
+  return (line.ivaRate||0);
 }
 function ciIVATotal(){
   let iva=0;
@@ -7032,7 +7026,10 @@ function renderClientInvForm(){
         <div style="text-align:center;font-size:12px" title="m² facturados">${qty}</div>
         <input type="number" class="oc-cell-inp" style="text-align:center;font-size:11px" value="${(ciIsCRC()?displayTarifa*(ciState.exchangeRate||tcGet()):displayTarifa).toFixed(2)}" min="0" step="0.01" title="Tarifa por m²" onchange="ciSetTarifa(${idx},parseFloat(this.value)||0);renderClientInvForm()"/>
         <div class="oc-subtotal">${ciFmt(impUSD)}</div>
-        <select class="oc-cell-inp" style="font-size:10px" onchange="ciState.houseLines[${idx}].taxCodeId=this.value;ciRecalc()">${taxOpts(l.taxCodeId||'')}</select>
+        <select class="oc-cell-inp" style="font-size:10px" onchange="ciState.houseLines[${idx}].ivaRate=this.value==='0.13'?0.13:0;ciRecalc()">
+          <option value="0.13"${l.ivaRate===0.13?'selected':''}>13%</option>
+          <option value="0"${!l.ivaRate||l.ivaRate===0?'selected':''}>Sin IVA</option>
+        </select>
         <button class="oc-btn-del" onclick="ciRemoveHouse(${idx})">✕</button>
       </div>
       ${l.prevPct>0?`<div style="padding:1px 16px 3px;font-size:9px;color:var(--amb)">Ya facturado previamente: ${l.prevPct}% · esta factura cobra ${l.pct-l.prevPct}%</div>`:''}
@@ -7050,7 +7047,10 @@ function renderClientInvForm(){
       <input type="number" class="oc-cell-inp" value="${l.qty}" min="0" step="0.01" onchange="ciState.manualLines[${i}].qty=parseFloat(this.value)||0;ciRecalc()"/>
       <input type="number" class="oc-cell-inp" value="${l.price}" min="0" step="0.01" onchange="ciState.manualLines[${i}].price=parseFloat(this.value)||0;ciRecalc()"/>
       <div class="oc-subtotal amber">${ciFmt((l.qty||0)*(l.price||0))}</div>
-      <select class="oc-cell-inp" style="font-size:10px" onchange="ciState.manualLines[${i}].taxCodeId=this.value;ciRecalc()">${taxOpts(l.taxCodeId||'')}</select>
+      <select class="oc-cell-inp" style="font-size:10px" onchange="ciState.manualLines[${i}].ivaRate=this.value==='0.13'?0.13:0;ciRecalc()">
+        <option value="0.13"${l.ivaRate===0.13?'selected':''}>13%</option>
+        <option value="0"${!l.ivaRate||l.ivaRate===0?'selected':''}>Sin IVA</option>
+      </select>
       <button class="oc-btn-del" onclick="ciDelManual(${i})">✕</button>
     </div>`).join('');
 
@@ -11304,14 +11304,12 @@ const _ssObserver=new MutationObserver(()=>{
 _ssObserver.observe(document.body,{childList:true,subtree:true});
 
 // Auth helper functions
-function showLogin(){document.getElementById('login-form').classList.remove('hidden');document.getElementById('signup-form').classList.add('hidden');document.getElementById('forgot-form').classList.add('hidden');document.getElementById('invite-form').classList.add('hidden');clearErrors();}
-function showSignup(){document.getElementById('login-form').classList.add('hidden');document.getElementById('signup-form').classList.remove('hidden');document.getElementById('forgot-form').classList.add('hidden');document.getElementById('invite-form').classList.add('hidden');clearErrors();}
+function showLogin(){document.getElementById('login-form').classList.remove('hidden');document.getElementById('forgot-form').classList.add('hidden');document.getElementById('invite-form').classList.add('hidden');clearErrors();}
 function showForgotPassword(){document.getElementById('login-form').classList.add('hidden');document.getElementById('signup-form').classList.add('hidden');document.getElementById('forgot-form').classList.remove('hidden');document.getElementById('invite-form').classList.add('hidden');clearErrors();}
 function showError(elemId,msg){document.getElementById(elemId).textContent=msg;document.getElementById(elemId).classList.remove('hidden');}
 function clearErrors(){['lerr','serr','ferr','ierr'].forEach(id=>{document.getElementById(id).classList.add('hidden');});}
 function validateEmail(email){return/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);}
 function validatePassword(password){return password.length>=8&&/[A-Z]/.test(password)&&/\d/.test(password);}
-async function signup(){const email=document.getElementById('su').value.trim();const name=document.getElementById('sn').value.trim();const password=document.getElementById('sp').value;const confirmPassword=document.getElementById('spc').value;if(!validateEmail(email)){showError('serr','Email inválido');return;}if(!password){showError('serr','Contraseña requerida');return;}if(!validatePassword(password)){showError('serr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('serr','Las contraseñas no coinciden');return;}if(!name){showError('serr','Nombre requerido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/signup',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,password,name,confirmPassword})});if(!resp.ok){showError('serr',await authErrMsg(resp));return;}showToast('✓ Registro exitoso. Inicia sesión.');showLogin();}catch(e){showError('serr','Error: '+e.message);}}
 async function forgotPassword(){const email=document.getElementById('fe').value.trim();if(!validateEmail(email)){showError('ferr','Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/forgot-password',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){showError('ferr',await authErrMsg(resp));return;}showToast('✓ Instrucciones enviadas al email');showLogin();}catch(e){showError('ferr','Error: '+e.message);}}
 async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);startTokenRefresh();document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});const _apiOk2=await loadDataFromAPI();if(!_apiOk2||!(Array.isArray(projects)&&projects.length))loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){showError('ierr','Error: '+e.message);}}
 function checkInvitationCode(){const params=new URLSearchParams(window.location.search);const code=params.get('invite');const email=params.get('email');if(code&&email){document.getElementById('login-form').classList.add('hidden');document.getElementById('invite-form').classList.remove('hidden');document.getElementById('invite-email-display').textContent='Email: '+email;window._inviteCode=code;window._inviteEmail=email;}}
