@@ -8102,7 +8102,15 @@ function calcConvertToBill(){
     if(!valid.length)return;
     if(!p.billVendor)p.billVendor=[];
     const lines=valid.map(l=>{ const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId); const price=t?installPricePerM2(p,t):0;
-      return {productId:'',desc:'Instalación PC — '+(h?h.num:''),qty:l.area||0,price,discPct:0,assign:[{houseId:l.houseId,qty:l.area||0}]}; });
+      // Encuentra el lineId de "Sub-Contrato" en el tipo para asociar el gasto correctamente
+      let subLineId='';
+      if(t&&t.categories){
+        for(let cat of t.categories){
+          const subL=cat.lines.find(x=>x.manualName==='Sub-Contrato');
+          if(subL){ subLineId=subL.id; break; }
+        }
+      }
+      return {productId:'',desc:'Instalación PC — '+(h?h.num:''),qty:l.area||0,price,discPct:0,assign:[{houseId:l.houseId,qty:l.area||0,lineId:subLineId}],lineId:subLineId}; });
     const subUSD=lines.reduce((s,l)=>s+(l.qty*l.price),0);
     const bill={id:'fp-'+Date.now()+made,type:'proveedor',num:txnNextNumFor(p,'proveedor'),
       party:sub?sub.name:'',invoiceNumber:'',date:new Date().toISOString().slice(0,10),status:'Registrada',
