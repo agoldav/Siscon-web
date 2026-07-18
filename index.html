@@ -4623,16 +4623,16 @@ function renderOCForm(){
           <div class="oc-fld">
             <div class="oc-fld-label">Moneda</div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              ${currBadge}
+              ${st.vendorName ? (isCRC ?
+                `<span title="Clic para cambiar a USD" onclick="ocSwapCurrency()" style="cursor:pointer;background:rgba(29,184,122,.1);color:var(--grn);border:1px solid rgba(29,184,122,.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600">CRC – Colones ⇄</span>` :
+                `<span title="Clic para cambiar a CRC" onclick="ocSwapCurrency()" style="cursor:pointer;background:rgba(45,140,240,.1);color:var(--acc);border:1px solid rgba(45,140,240,.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600">USD – Dólares ⇄</span>`) :
+                `<span style="background:var(--bg3);color:var(--t3);border:1px solid var(--border2);border-radius:20px;padding:3px 10px;font-size:11px">— sin proveedor —</span>`}
               ${isCRC && st.vendorName ? `
               <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2)">
                 <span>T.C.:</span>
                 <input type="number" value="${st.exchangeRate}" step="0.01" style="width:80px;text-align:right;font-size:12px;-moz-appearance:textfield;appearance:textfield" onchange="ocSetXrate(this)"/>
                 <span style="font-size:9px;color:var(--t3)">₡/$</span>
-              </div>
-              <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t2);cursor:pointer">
-                <input type="checkbox" id="oc-show-usd" ${st.showUSD?'checked':''} onchange="ocState.showUSD=this.checked;renderOCForm()" style="width:auto;padding:0"/>USD
-              </label>` : ''}
+              </div>` : ''}
             </div>
           </div>
 
@@ -4750,6 +4750,7 @@ function renderOCForm(){
 }
 
 // ========== OC HELPERS ==========
+function ocSwapCurrency(){ ocState.showUSD=!ocState.showUSD; ocRefreshTotals(); renderOCForm(); }
 function ocFmt(usdVal, currency){
   const st = ocState||{};
   const isCRC = (currency||st.vendorCurrency)==='CRC' && !st.showUSD;
