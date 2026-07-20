@@ -727,7 +727,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span title="Versión del código cargado" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px">IVA-DROPDOWN-2</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');var c=(typeof renderClientInvForm==='function'?renderClientInvForm.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD HTML: IVA-DROPDOWN-2\\n\\nOC usa select .ivasel: '+r.includes('ivasel')+'\\nProveedor usa vbIvaSelect: '+v.includes('vbIvaSelect')+'\\nCliente usa .ivasel: '+c.includes('ivasel')+'\\n\\nSi los tres dicen TRUE = código nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">IVA-DROPDOWN-2</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
