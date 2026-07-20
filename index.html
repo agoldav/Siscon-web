@@ -662,7 +662,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: IVA-LINEA-3 · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-4-PERMISOS · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -727,7 +727,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: IVA-LINEA-3\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">IVA-LINEA-3</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-4-PERMISOS\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-4-PERMISOS</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -5277,6 +5277,33 @@ function showPendingAuthPopup(reqId){
     return;
   }
 
+  // Solicitud de material fuera de lista desde FACTURA DE GASTO (proveedor)
+  if(req.type==='vb-extra-material'){
+    const vhName=req.houseName||(curProj&&curProj.houses?((curProj.houses.find(h=>h.id===req.houseId)||{}).num||req.houseId):'Casa');
+    document.getElementById('modal-inner').innerHTML=`
+      <div class="modal-title" style="color:var(--amb)">⚠ Solicitud de material fuera de lista (Factura de Gasto)
+        <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
+      </div>
+      <div style="font-size:12px;color:var(--t2);margin-bottom:12px">
+        <strong style="color:var(--t1)">${req.requestedBy}</strong> solicita agregar un material fuera de lista en
+        <strong style="color:var(--t1)">${req.projName}</strong>${req.vbNum?` · Factura <strong>${req.vbNum}</strong>`:''}
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">
+        <div><span style="color:var(--t3)">Material:</span> <strong>${req.matName}</strong></div>
+        <div><span style="color:var(--t3)">Cantidad:</span> ${req.qty}</div>
+        <div><span style="color:var(--t3)">Precio:</span> ${fmt(req.price)}</div>
+        <div><span style="color:var(--t3)">Casa:</span> ${vhName}</div>
+        <div style="grid-column:1/-1"><span style="color:var(--t3)">Motivo:</span> <em>${req.comment}</em></div>
+      </div>
+      <div class="modal-actions" style="gap:8px">
+        <button class="btn-cancel" onclick="resolveExtraAuth('${reqId}','rechazado')" style="border-color:var(--red);color:var(--red)">✗ Rechazar</button>
+        <button style="background:transparent;border:1px solid var(--amb);color:var(--amb);border-radius:7px;padding:7px 14px;font-size:12px;cursor:pointer" onclick="resolveExtraAuth('${reqId}','ver_luego')">⏱ Ver luego</button>
+        <button class="btn-save" onclick="resolveExtraAuth('${reqId}','aprobado')">✓ Aprobar</button>
+      </div>`;
+    document.getElementById('modal').classList.remove('hidden');
+    return;
+  }
+
   // Solicitud de material extra (comportamiento original)
   const hName=req.houseId==='all'?'Todas las casas':(curProj&&curProj.houses?((curProj.houses.find(h=>h.id===req.houseId)||{}).num||req.houseId):'Casa');
   document.getElementById('modal-inner').innerHTML=`
@@ -5345,6 +5372,14 @@ async function resolveExtraAuth(reqId, decision){
         addNotif(`🔓 Casa ${req.houseNum} desbloqueada en ${req.projName}`);
       } else {
         alert('Se aprobó el desbloqueo, pero no se encontró la casa.');
+      }
+    } else if(req.type==='vb-extra-material'){
+      ok=applyApprovedVbExtra(req);
+      if(ok){
+        logAction(`Material fuera de lista "${req.matName}" aprobado (Factura de Gasto)`,'log-create','Factura de Proveedor',null,{name:req.matName,approvedBy:req.resolvedBy});
+        addNotif(`✅ Material "${req.matName}" aprobado para ${req.houseName||'casa'} (${req.projName})`);
+      } else {
+        alert('Se aprobó la solicitud, pero no se encontró la casa.');
       }
     } else {
       ok=applyApprovedExtra(req);
@@ -5458,6 +5493,10 @@ async function pollPendingAuth(){
           if(applyApprovedTypeUnlock(r)) _applied=true;
           showToast('🔓 Tu solicitud de desbloqueo para '+r.houseNum+' fue aprobada');
           addNotif('🔓 Casa '+r.houseNum+' desbloqueada por '+(r.resolvedBy||'administrador'));
+        } else if(r.type==='vb-extra-material'){
+          if(applyApprovedVbExtra(r)) _applied=true;
+          showToast('✅ Tu solicitud de "'+r.matName+'" fue aprobada');
+          addNotif('✅ Material "'+r.matName+'" aprobado por '+(r.resolvedBy||'administrador')+' para '+(r.houseName||'casa'));
         } else {
           if(applyApprovedExtra(r)) _applied=true;
           showToast('✅ Tu solicitud de "'+r.matName+'" fue aprobada y el material se agregó a la OC');
@@ -9187,6 +9226,11 @@ function isProductInHouseBudget(p,houseId,productId,desc){
   }
   return false;
 }
+// Material ya autorizado fuera de lista para la casa (aprobado por el admin → h.purchases)
+function isProductAuthorizedForHouse(p,houseId,productId,desc){
+  const h=p.houses.find(x=>x.id===houseId); if(!h||!h.purchases)return false;
+  return h.purchases.some(pu=>pu.nonBudgeted && ((productId&&String(pu.matId)===String(productId))||(desc&&pu.manualName===desc)));
+}
 // presupuesto disponible del producto para una casa (cantidad)
 function houseBudgetQtyForProduct(p,houseId,productId,desc){
   const h=p.houses.find(x=>x.id===houseId); const t=h&&p.types.find(x=>x.id===h.typeId); if(!t||!t.categories)return Infinity;
@@ -9252,7 +9296,7 @@ function vbAssignConfirm(i){
     if(a.houseId==='__bodega__')continue;
     const aProjId=a.projId||curProj.id;
     const aProj=projects.find(p=>p.id===aProjId)||curProj;
-    if(!isProductInHouseBudget(aProj,a.houseId,l.productId,l.desc)){
+    if(!isProductInHouseBudget(aProj,a.houseId,l.productId,l.desc) && !isProductAuthorizedForHouse(aProj,a.houseId,l.productId,l.desc)){
       vbShowMatOutOfList(i,a); return;
     }
   }
@@ -9301,58 +9345,50 @@ function vbRequestMatAuth(lineIdx, houseId){
       <button class="btn-save" onclick="vbSubmitMatAuth(${lineIdx},${JSON.stringify(houseId)})">Enviar</button>
     </div>`;
 }
-let _vbMatAuthCtx=null;
 function vbSubmitMatAuth(lineIdx, houseId){
   const reason=(document.getElementById('mat-auth-reason')||{}).value||'';
   if(!reason.trim()){alert('Indique el motivo.');return;}
-  _vbMatAuthCtx={lineIdx, houseId, reason};
   const l=vbState.lines[lineIdx];
   const houseName=vbAssignLabel(houseId);
-  const user=currentUser?currentUser.name:'Usuario';
-  const projName=curProj?curProj.name:'';
-  document.getElementById('modal-inner').innerHTML=`
-    <div class="modal-title" style="color:var(--amb)">⚠ Solicitud de autorización<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
-    <div style="font-size:12px;color:var(--t2);margin-bottom:8px"><strong style="color:var(--t1)">${user}</strong> solicita autorización para agregar material fuera de lista a <strong style="color:var(--t1)">${houseName}</strong> del proyecto <strong style="color:var(--t1)">${projName}</strong>.</div>
-    <div style="background:var(--bg2);border-radius:var(--r);padding:10px;margin-bottom:12px;font-size:12px"><strong>Motivo:</strong> ${reason.replace(/</g,'&lt;')}</div>
-    <div style="font-size:12px;color:var(--t2);margin-bottom:12px">Ingrese la contraseña de administrador para autorizar.</div>
-    <div class="ff"><input id="mat-auth-pwd" type="password" placeholder="Contraseña de administrador" style="width:100%"/></div>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="vbMatAuthResolve(false)">Denegar</button>
-      <button class="btn-save" onclick="vbMatAuthResolve(true)">Aceptar</button>
-    </div>`;
+  // Crear solicitud pendiente (async): la aprueba el administrador desde su sesión, igual que en la OC
+  const req={
+    id:'auth-'+Date.now(),
+    type:'vb-extra-material',
+    status:'pendiente',
+    requestedBy:currentUser?currentUser.name:'Usuario',
+    requestedAt:Date.now(),
+    projId:curProj?curProj.id:null,
+    projName:curProj?curProj.name:'',
+    vbNum:vbState?vbState.num:'',
+    matName:l.desc||'', productId:l.productId||0, unit:'unid',
+    qty:l.qty||0, price:l.price||0,
+    houseId:houseId, houseName:houseName,
+    comment:reason
+  };
+  pendingAuthList().push(req);
+  saveData();
+  closeModal();
+  showToast('✅ Solicitud enviada al administrador');
+  logAction(`Solicitud de material fuera de lista "${l.desc}" enviada`,'log-create','Factura de Proveedor',null,{name:l.desc,qty:l.qty,price:l.price,comment:reason});
+  // Si el admin está en sesión ahora mismo, mostrar el popup directamente
+  if(currentUser&&(currentUser.role==='Administrador'||currentUser.role==='Supervisor')){
+    setTimeout(()=>showPendingAuthPopup(req.id),300);
+  } else {
+    startExtraAuthReminder();
+  }
 }
-function vbMatAuthResolve(approve){
-  const ctx=_vbMatAuthCtx; if(!ctx) return;
-  if(approve){
-    const pwd=(document.getElementById('mat-auth-pwd')||{}).value||'';
-    if(!isAdminPwd(pwd)){alert('Contraseña incorrecta');return;}
+// Aplica (idempotente) el material aprobado a las compras no presupuestadas de la casa.
+function applyApprovedVbExtra(req){
+  const proj=projects.find(p=>p.id===req.projId)||curProj;
+  const h=(proj&&proj.houses||[]).find(x=>x.id===req.houseId);
+  if(!h) return false;
+  if(!h.purchases)h.purchases=[];
+  const lineId='vbextra-'+req.id;
+  if(!h.purchases.some(x=>x.lineId===lineId)){
+    h.purchases.push({lineId,matId:req.productId||0,manualName:req.matName||'',qty:req.qty||0,price:req.price||0,note:'Autorizado: '+(req.comment||''),nonBudgeted:true});
+    h.spent=(h.purchases||[]).reduce((s,p)=>s+p.qty*(p.price||0),0);
   }
-  _vbMatAuthCtx=null;
-  const l=vbState.lines[ctx.lineIdx];
-  const houseName=vbAssignLabel(ctx.houseId);
-  if(approve){
-    const h=curProj.houses.find(x=>x.id===ctx.houseId);
-    if(h){
-      const lineId='mat-auth-'+Date.now();
-      if(!h.purchases)h.purchases=[];
-      h.purchases.push({lineId,matId:l.productId||0,manualName:l.desc||'',qty:l.qty||0,price:l.price||0,note:'Autorizado: '+ctx.reason,nonBudgeted:true});
-      h.spent=(h.purchases||[]).reduce((s,p)=>s+p.qty*(p.price||0),0);
-      logAction(`Material "${l.desc}" autorizado fuera de lista para ${houseName}`,'log-create','Casas',null,{reason:ctx.reason});
-      saveData();
-    }
-  }
-  document.getElementById('modal-inner').innerHTML=`
-    <div style="text-align:center;padding:16px">
-      <div style="font-size:32px">${approve?'✅':'⛔'}</div>
-      <div style="font-size:14px;font-weight:700;margin:8px 0;color:${approve?'var(--grn)':'var(--red)'}">${approve?'Solicitud aprobada':'Solicitud denegada'}</div>
-      <div style="font-size:12px;color:var(--t2);margin-bottom:6px">
-        ${approve
-          ? `El producto <strong style="color:var(--t1)">${(l.desc||'').replace(/</g,'&lt;')}</strong> fue agregado a <strong style="color:var(--t1)">${houseName}</strong> en la sección de materiales no presupuestados.`
-          : 'La solicitud fue denegada por el administrador.'}
-      </div>
-      <button class="btn-save" style="margin-top:10px" onclick="closeModal()${approve?';renderVendorBill()':''}">Cerrar</button>
-    </div>`;
-  document.getElementById('modal').classList.remove('hidden');
+  return true;
 }
 function vbHouseProductQtyOtherLines(idx,houseId,line){
   let q=0; vbState.lines.forEach((l,k)=>{ if(k===idx)return; const same=(line.productId&&l.productId===line.productId)||(line.desc&&l.desc===line.desc); if(same)(l.assign||[]).forEach(a=>{if(a.houseId===houseId)q+=a.qty||0;}); }); return q;
