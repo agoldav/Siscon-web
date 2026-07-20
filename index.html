@@ -4507,6 +4507,7 @@ function openOCForm(ocId){
     if(!oc){ console.error('OC no encontrada:',ocId); return; }
     curOCId = ocId;
     ocState = JSON.parse(JSON.stringify(oc));
+    if(ocState.ivaRate===undefined) ocState.ivaRate=0.13;
     renderOCForm();
   }catch(e){ console.error('openOCForm error:',e); alert('Error al abrir OC: '+e.message); }
 }
@@ -5098,7 +5099,7 @@ function ocCalcSubUSD(){
 function ocRefreshTotals(){
   const st=ocState;
   const subUSD=ocCalcSubUSD();
-  const ivaRate=st.ivaRate||0.13;
+  const ivaRate=(st.ivaRate===0?0:(st.ivaRate||0.13));
   const ivaUSD=subUSD*ivaRate;
   const totUSD=subUSD+ivaUSD;
   st.totalUSD=totUSD; st.ivaUSD=ivaUSD;
@@ -5538,7 +5539,7 @@ function ocGeneratePDF(oc){
     <h1>Orden de Compra ${oc.num}</h1>
     <div style="font-size:12px;color:#555;margin:4px 0 12px">Proyecto: ${p.name} · Proveedor: ${oc.vendorName||'—'} · Fecha: ${fmtDate(new Date())}${oc.proforma?' · Proforma: '+oc.proforma:''}</div>
     <table><tr><th>Casa</th><th>Material</th><th class="r">Cantidad</th><th class="r">Precio Unitario</th><th class="r">Total</th></tr>${rows||'<tr><td colspan=5>Sin líneas</td></tr>'}</table>
-    <table style="margin-top:14px"><tr><td class="r" style="border:none">Subtotal</td><td class="r" style="width:140px">${sym((oc.totalUSD||0)/1.13)}</td></tr><tr><td class="r" style="border:none">IVA 13%</td><td class="r">${sym((oc.totalUSD||0)/1.13*0.13)}</td></tr><tr><td class="r" style="border:none;font-weight:700">TOTAL</td><td class="r" style="font-weight:700">${sym(oc.totalUSD||0)}</td></tr></table>
+    ${(()=>{const r=(oc.ivaRate===0?0:(oc.ivaRate||0.13));const subv=(oc.totalUSD||0)/(1+r);return `<table style="margin-top:14px"><tr><td class="r" style="border:none">Subtotal</td><td class="r" style="width:140px">${sym(subv)}</td></tr><tr><td class="r" style="border:none">IVA${r>0?' '+Math.round(r*100)+'%':' (Sin IVA)'}</td><td class="r">${sym(subv*r)}</td></tr><tr><td class="r" style="border:none;font-weight:700">TOTAL</td><td class="r" style="font-weight:700">${sym(oc.totalUSD||0)}</td></tr></table>`;})()}
     ${oc.notes?`<div style="margin-top:12px;font-size:12px"><strong>Notas:</strong> ${oc.notes}</div>`:''}
   </body></html>`);
   win.document.close(); setTimeout(()=>{try{win.focus();win.print();}catch(e){}},300);
@@ -8872,7 +8873,7 @@ function newVendorBill(fromOC){
   vbState={
     id:'fp-'+Date.now(), type:'proveedor', num:txnNextNum('proveedor'),
     party:'', invoiceNumber:'', date:new Date().toISOString().slice(0,10),
-    status:'Borrador', exchangeRate:tcGet(), discountOn:false,
+    status:'Borrador', exchangeRate:tcGet(), discountOn:false, ivaRate:0.13,
     lines:[{productId:'',desc:'',qty:1,price:0,discPct:0,assign:[]}],
     notes:'', linkedOcId:(fromOC&&fromOC.id)||'', linkedOcNum:(fromOC&&fromOC.num)||'',
     subtotalUSD:0, ivaUSD:0, totalUSD:0, qboId:'',
@@ -8886,6 +8887,7 @@ function openVendorBill(id){
   curTxnType='proveedor'; curTxnId=id;
   const tx=txnArr('proveedor').find(x=>String(x.id)===String(id)); if(!tx)return;
   vbState=JSON.parse(JSON.stringify(tx));
+  if(vbState.ivaRate===undefined)vbState.ivaRate=0.13;
   if(!vbState.lines||!vbState.lines.length)vbState.lines=[{productId:'',desc:'',qty:1,price:0,discPct:0,assign:[]}];
   vbState.lines.forEach(l=>{ if(!l.assign)l.assign=[]; if(l.discPct===undefined)l.discPct=0; });
   renderVendorBill();
@@ -8951,7 +8953,9 @@ function renderVendorBill(){
   const p=curProj, st=vbState;
   const items=qboItems();
   const cols='grid-template-columns:30px minmax(150px,1.4fr) minmax(120px,1fr) 64px 92px 66px 92px'+(st.showPriceDiff?' 70px':'')+' 70px 26px';
-  const sub=vbSub(), disc=vbDiscTotal(), iva=sub*0.13, tot=sub+iva;
+  const vbIvaRate=(st.ivaRate===0?0:(st.ivaRate||0.13));
+  const sub=vbSub(), disc=vbDiscTotal(), iva=sub*vbIvaRate, tot=sub+iva;
+  const vbIvaSelect=`<select style="font-size:11px;height:24px;width:104px;cursor:pointer" onchange="vbState.ivaRate=this.value==='0.13'?0.13:0;renderVendorBill()"><option value="0.13"${vbIvaRate===0.13?' selected':''}>13% IVA</option><option value="0"${vbIvaRate===0?' selected':''}>Sin IVA</option></select>`;
   // Tabs HTML when coming from OC
   const hasHouseTabs=!!(st.houseMode&&st.ocHouseIds&&st.ocHouseIds.length);
   const tabsHtml=hasHouseTabs?`<div class="oc-mat-tabbar" style="margin-bottom:0">
@@ -9093,13 +9097,13 @@ function renderVendorBill(){
           ${vbIsCRC()?`
           <div class="oc-tot-row"><span class="oc-tot-lbl">Subtotal (₡)</span><span class="oc-tot-val">₡${(sub*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
           ${disc>0?`<div class="oc-tot-row"><span class="oc-tot-lbl">Descuento (₡)</span><span class="oc-tot-val" style="color:var(--amb)">- ₡${(disc*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>`:''}
-          <div class="oc-tot-row"><span class="oc-tot-lbl">IVA 13% (₡)</span><span class="oc-tot-val">₡${(iva*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+          <div class="oc-tot-row" style="gap:8px;align-items:center"><span class="oc-tot-lbl" style="flex:1">IVA (₡)</span>${vbIvaSelect}<span class="oc-tot-val">₡${(iva*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
           <div class="oc-tot-row oc-tot-main"><span class="oc-tot-lbl">Total (₡)</span><span class="oc-tot-val" style="color:var(--org)">₡${(tot*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
           <div class="oc-tot-row" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><span class="oc-tot-lbl" style="color:var(--t3);font-size:10px">Equivalente USD (÷${(st.exchangeRate||tcGet()).toLocaleString()})</span><span class="oc-tot-val" style="color:var(--t3)">${fmt(tot)}</span></div>
           `:`
           <div class="oc-tot-row"><span class="oc-tot-lbl">Subtotal</span><span class="oc-tot-val">${fmt(sub)}</span></div>
           ${disc>0?`<div class="oc-tot-row"><span class="oc-tot-lbl">Descuento total</span><span class="oc-tot-val" style="color:var(--amb)">- ${fmt(disc)}</span></div>`:''}
-          <div class="oc-tot-row"><span class="oc-tot-lbl">IVA (13%)</span><span class="oc-tot-val">${fmt(iva)}</span></div>
+          <div class="oc-tot-row" style="gap:8px;align-items:center"><span class="oc-tot-lbl" style="flex:1">IVA</span>${vbIvaSelect}<span class="oc-tot-val">${fmt(iva)}</span></div>
           <div class="oc-tot-row oc-tot-main"><span class="oc-tot-lbl">Total</span><span class="oc-tot-val" style="color:var(--org)">${fmt(tot)}</span></div>
           `}
         </div>
@@ -9380,8 +9384,9 @@ function saveVendorBill(sync){
   if(!st.party){ alert('Indique el proveedor.'); return; }
   const err=vbValidateAssignments(); if(err){ alert(err); return; }
   const sub=vbSub(); // lines always stored in USD
-  st.subtotalUSD=sub; st.ivaUSD=sub*0.13; st.totalUSD=sub*1.13;
-  if(vbIsCRC()){ const xr=st.exchangeRate||tcGet(); st.subtotalCRC=sub*xr; st.totalCRC=sub*xr*1.13; }
+  const vbIvaRate=(st.ivaRate===0?0:(st.ivaRate||0.13));
+  st.subtotalUSD=sub; st.ivaUSD=sub*vbIvaRate; st.totalUSD=sub*(1+vbIvaRate);
+  if(vbIsCRC()){ const xr=st.exchangeRate||tcGet(); st.subtotalCRC=sub*xr; st.totalCRC=sub*xr*(1+vbIvaRate); }
   const arr=txnArr('proveedor');
   const data=JSON.parse(JSON.stringify(st));
   data.status=sync?'Emitida':(st.status==='Borrador'?'Registrada':st.status);
