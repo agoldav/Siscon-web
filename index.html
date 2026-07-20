@@ -662,7 +662,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-4-PERMISOS · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-5-USUARIOS · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -727,7 +727,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-4-PERMISOS\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-4-PERMISOS</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-5-USUARIOS\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-5-USUARIOS</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -1355,6 +1355,8 @@ function openSettings(){
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Usuarios</div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:8px">El <strong>acceso/login</strong> se gestiona con cuentas reales de Supabase (invitación por link). Esta lista es el <strong>directorio de RRHH</strong> (datos como cédula/salario); no controla el inicio de sesión.</div>
+      <button onclick="openUsersModal()" style="background:var(--acc);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:11px;cursor:pointer;margin-bottom:10px">👥 Cuentas de acceso (login)</button>
       ${SYS.users.map(u=>`
         <div class="user-row" style="position:relative">
           <div class="user-avatar" style="background:${u.color}20;color:${u.color}">${u.name.split(' ').map(w=>w[0]).join('').slice(0,2)}</div>
@@ -1371,7 +1373,7 @@ function openSettings(){
             </div>
           </div>`:''}
         </div>`).join('')}
-      <button class="btn-add" style="margin-top:8px;font-size:11px;padding:6px 12px" onclick="addUserModal()">+ Agregar Usuario</button>
+      <button class="btn-add" style="margin-top:8px;font-size:11px;padding:6px 12px" onclick="addUserModal()">+ Agregar registro (RRHH)</button>
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Correo de Facturas (Outlook / Microsoft)</div>
@@ -1508,23 +1510,21 @@ function _userFormFields(u){
     <div class="ff"><label>Nombre completo</label><input id="uf-name" value="${u.name||''}" placeholder="Juan Pérez"/></div>
     <div class="ff-row">
       <div class="ff"><label>Tipo de Usuario</label><select id="uf-role">${_userRoleOptions(u.role||'Regular')}</select></div>
-      <div class="ff"><label>Contraseña${u.id?' (dejar en blanco = sin cambio)':''}</label><input id="uf-pwd" type="password" placeholder="••••••"/></div>
-    </div>
-    <div class="ff-row">
       <div class="ff"><label>Correo electrónico</label><input id="uf-email" type="email" value="${u.email||''}" placeholder="juan@empresa.com"/></div>
-      <div class="ff"><label>Cédula</label><input id="uf-cedula" value="${u.cedula||''}" placeholder="1-1234-5678"/></div>
     </div>
     <div class="ff-row">
+      <div class="ff"><label>Cédula</label><input id="uf-cedula" value="${u.cedula||''}" placeholder="1-1234-5678"/></div>
       <div class="ff"><label>Salario mensual (₡)</label><input id="uf-salary" type="number" value="${u.salary||''}" placeholder="0"/></div>
-      <div class="ff"><label>Fecha de ingreso</label><input id="uf-startdate" type="date" value="${u.startDate||''}"/></div>
-    </div>`;
+    </div>
+    <div class="ff"><label>Fecha de ingreso</label><input id="uf-startdate" type="date" value="${u.startDate||''}"/></div>`;
 }
 
 function addUserModal(){
   closeModal();
   setTimeout(()=>{
     document.getElementById('modal-inner').innerHTML=`
-      <div class="modal-title">Agregar Usuario</div>
+      <div class="modal-title">Agregar registro de empleado (RRHH)</div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Esto NO crea una cuenta de acceso. Para dar login usa "👥 Cuentas de acceso".</div>
       ${_userFormFields({})}
       <div class="modal-actions">
         <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
@@ -1537,12 +1537,11 @@ function addUserModal(){
 function _userFormValues(){
   const name=document.getElementById('uf-name').value.trim();
   const role=document.getElementById('uf-role').value;
-  const pwd=document.getElementById('uf-pwd').value;
   const email=document.getElementById('uf-email').value.trim();
   const cedula=document.getElementById('uf-cedula').value.trim();
   const salary=parseFloat(document.getElementById('uf-salary').value)||0;
   const startDate=document.getElementById('uf-startdate').value;
-  return {name,role,pwd,email,cedula,salary,startDate};
+  return {name,role,email,cedula,salary,startDate};
 }
 
 function _genUsername(name){
@@ -1554,13 +1553,13 @@ function _genUsername(name){
 }
 
 function createUser(){
-  const {name,role,pwd,email,cedula,salary,startDate}=_userFormValues();
+  const {name,role,email,cedula,salary,startDate}=_userFormValues();
   if(!name)return alert('El nombre es obligatorio');
   const username=_genUsername(name);
   SYS.users.push({id:Date.now(),username,name,role,
-    password:pwd||'1234',color:COLORS_LIST[SYS.users.length%COLORS_LIST.length],
+    color:COLORS_LIST[SYS.users.length%COLORS_LIST.length],
     email,cedula,salary,startDate});
-  logAction(`Usuario "${name}" creado`,'log-create','Usuarios',null,{name,role});
+  logAction(`Registro de empleado "${name}" creado`,'log-create','Usuarios',null,{name,role});
   saveData();
   closeModal();
   openSettings();
@@ -1572,7 +1571,7 @@ function editUser(id){
   closeModal();
   setTimeout(()=>{
     document.getElementById('modal-inner').innerHTML=`
-      <div class="modal-title">Editar Usuario</div>
+      <div class="modal-title">Editar registro de empleado (RRHH)</div>
       ${_userFormFields(u)}
       <div class="modal-actions">
         <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
@@ -1586,11 +1585,10 @@ function saveEditUser(id){
   const u=SYS.users.find(x=>x.id===id);
   if(!u)return;
   const before={...u};
-  const {name,role,pwd,email,cedula,salary,startDate}=_userFormValues();
+  const {name,role,email,cedula,salary,startDate}=_userFormValues();
   if(name)u.name=name;
   u.role=role; u.email=email; u.cedula=cedula; u.salary=salary; u.startDate=startDate;
-  if(pwd)u.password=pwd;
-  logAction(`Usuario "${u.name}" editado`,'log-edit','Usuarios',before,u);
+  logAction(`Registro de empleado "${u.name}" editado`,'log-edit','Usuarios',before,u);
   saveData();
   closeModal();
   openSettings();
@@ -11396,9 +11394,48 @@ function checkInvitationCode(){const params=new URLSearchParams(window.location.
 setTimeout(checkInvitationCode,100);
 
 // Fase 4: Gestión de Usuarios Supabase
-async function loadSupabaseUsers(){try{const resp=await fetch(BACKEND_URL+'/api/db/profiles',{headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp'}});if(!resp.ok)return[];const data=await resp.json();return data.profiles||[];}catch(e){console.error('Error cargando usuarios:',e);return[];}}
-async function inviteSupabaseUser(){const email=document.getElementById('invite-email-input').value.trim();if(!validateEmail(email)){alert('Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/invite-user',{method:'POST',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){const err=await resp.json();alert('Error: '+(err.message||err.error||'No se pudo enviar invitación'));return;}const data=await resp.json();alert('✓ Invitación enviada a '+email);document.getElementById('invite-email-input').value='';await openUsersModal();}catch(e){alert('Error: '+e.message);}}
-async function openUsersModal(){if(currentUser.role!=='Administrador'){alert('Solo administrador');return;}const users=await loadSupabaseUsers();const usersList=users.map(u=>`<div style="display:flex;align-items:center;gap:10px;padding:8px;background:var(--bg3);border-radius:6px;margin-bottom:6px"><div style="background:${(u.color||'#2d8cf0')}20;color:${(u.color||'#2d8cf0')};width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">${(u.name||u.email||'U').substring(0,2).toUpperCase()}</div><div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--t1)">${u.name||u.email}</div><div style="font-size:11px;color:var(--t3)">${u.email}</div></div></div>`).join('');document.getElementById('modal-inner').innerHTML=`<div class="modal-title">Gestión de Usuarios <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div><div class="settings-section" style="max-height:300px;overflow-y:auto"><div class="settings-section-title">Usuarios Registrados (${users.length})</div>${usersList||'<div style="color:var(--t3);font-size:12px">Sin usuarios</div>'}</div><div class="settings-section"><div class="settings-section-title">Invitar Nuevo Usuario</div><div class="ff"><label>Email</label><input id="invite-email-input" type="email" placeholder="nuevo@ejemplo.com" style="width:100%"/></div><button onclick="inviteSupabaseUser()" style="background:var(--acc);color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;margin-top:6px">📧 Enviar Invitación</button></div><div class="modal-actions"><button class="btn-cancel" onclick="closeModal()">Cerrar</button></div>`;document.getElementById('modal').classList.remove('hidden');}
+let _sbUsersCache=[];
+async function loadSupabaseUsers(){try{const resp=await fetch(BACKEND_URL+'/api/auth/users',{headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp'}});if(!resp.ok)return{users:[],invitations:[]};const data=await resp.json();return{users:data.users||[],invitations:data.invitations||[]};}catch(e){console.error('Error cargando usuarios:',e);return{users:[],invitations:[]};}}
+async function changeUserRole(id,role){try{const resp=await fetch(BACKEND_URL+'/api/auth/users/'+id+'/role',{method:'PUT',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({role})});const data=await resp.json().catch(()=>({}));if(!resp.ok){alert('Error: '+(data.error||'No se pudo cambiar el rol'));return;}showToast('✓ Rol actualizado');await openUsersModal();}catch(e){alert('Error: '+e.message);}}
+async function deleteSupabaseUser(id){const u=(_sbUsersCache||[]).find(x=>String(x.id)===String(id));const name=(u&&(u.name||u.email||u.username))||'este usuario';if(!confirm('¿Eliminar la cuenta de "'+name+'"? Perderá el acceso al sistema. Esta acción no se puede deshacer.'))return;try{const resp=await fetch(BACKEND_URL+'/api/auth/users/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp'}});const data=await resp.json().catch(()=>({}));if(!resp.ok){alert('Error: '+(data.error||'No se pudo eliminar'));return;}showToast('✓ Cuenta eliminada');await openUsersModal();}catch(e){alert('Error: '+e.message);}}
+function ucopyInvite(code,email){const link='https://app.sisconcr.com?invite='+encodeURIComponent(code)+'&email='+encodeURIComponent(email);try{navigator.clipboard.writeText(link);showToast('Link copiado');}catch(e){prompt('Copia el link:',link);}}
+async function inviteSupabaseUser(){const email=((document.getElementById('invite-email-input')||{}).value||'').trim();const role=(document.getElementById('invite-role-input')||{}).value||'Regular';if(!validateEmail(email)){alert('Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/invite-user',{method:'POST',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,role})});const data=await resp.json().catch(()=>({}));if(!resp.ok){alert('Error: '+(data.message||data.error||'No se pudo crear la invitación'));return;}const link=data.invite_link||'https://app.sisconcr.com';try{await navigator.clipboard.writeText(link);}catch(e){}prompt('✓ Invitación creada para '+email+' ('+role+').\n\nComparte este link con la persona (ya se copió al portapapeles):',link);await openUsersModal();}catch(e){alert('Error: '+e.message);}}
+async function openUsersModal(){
+  if(!currentUser||currentUser.role!=='Administrador'){alert('Solo el administrador puede gestionar cuentas de acceso.');return;}
+  const {users,invitations}=await loadSupabaseUsers();
+  _sbUsersCache=users;
+  const roleBadge=(r)=>{const c=r==='Administrador'?'var(--acc)':r==='Supervisor'?'var(--amb)':'var(--t3)';return `<span style="font-size:9px;padding:2px 7px;border-radius:10px;background:${c}18;color:${c};border:1px solid ${c}55">${r||'Regular'}</span>`;};
+  const roleOpts=(sel)=>['Administrador','Supervisor','Regular'].map(r=>`<option${r===sel?' selected':''}>${r}</option>`).join('');
+  const usersList=users.map(u=>{
+    const email=u.email||u.username||'';
+    const name=u.name||email||'Usuario';
+    const self=String(u.id)===String(currentUser.id);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg3);border-radius:6px;margin-bottom:6px">
+      <div style="background:${(u.color||'#2d8cf0')}20;color:${(u.color||'#2d8cf0')};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0">${name.substring(0,2).toUpperCase()}</div>
+      <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:500;color:var(--t1)">${name}${self?' <span style="font-size:9px;color:var(--t3)">(tú)</span>':''}</div><div style="font-size:11px;color:var(--t3);overflow:hidden;text-overflow:ellipsis">${email}</div></div>
+      ${self?roleBadge(u.role):`<select onchange="changeUserRole('${u.id}',this.value)" style="font-size:10px;height:26px;width:118px" title="Cambiar rol">${roleOpts(u.role||'Regular')}</select>`}
+      ${self?'':`<button onclick="deleteSupabaseUser('${u.id}')" class="oc-btn-del" title="Eliminar cuenta">✕</button>`}
+    </div>`;
+  }).join('');
+  const invList=(invitations||[]).map(iv=>`<div style="display:flex;align-items:center;gap:8px;padding:7px;background:rgba(212,148,26,.06);border:1px solid rgba(212,148,26,.2);border-radius:6px;margin-bottom:5px">
+      <div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--t1)">${iv.email} ${roleBadge(iv.role)}</div><div style="font-size:9px;color:var(--t3)">Invitación pendiente</div></div>
+      <button onclick="ucopyInvite('${(iv.code||'').replace(/[^A-Za-z0-9]/g,'')}','${iv.email.replace(/'/g,'')}')" style="font-size:10px;padding:4px 8px;border:1px solid var(--acc);color:var(--acc);background:transparent;border-radius:5px;cursor:pointer">Copiar link</button>
+    </div>`).join('');
+  document.getElementById('modal-inner').innerHTML=`
+    <div class="modal-title">Cuentas de acceso <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Cuentas reales de Supabase Auth (login seguro). Al invitar se genera un link que debes compartir con la persona — aún no se envía email automático.</div>
+    <div class="settings-section" style="max-height:250px;overflow-y:auto"><div class="settings-section-title">Usuarios (${users.length})</div>${usersList||'<div style="color:var(--t3);font-size:12px">Sin usuarios</div>'}</div>
+    ${invList?`<div class="settings-section"><div class="settings-section-title">Invitaciones pendientes</div>${invList}</div>`:''}
+    <div class="settings-section"><div class="settings-section-title">Invitar nuevo usuario</div>
+      <div class="ff-row">
+        <div class="ff" style="flex:2"><label>Email</label><input id="invite-email-input" type="email" placeholder="nuevo@ejemplo.com" style="width:100%"/></div>
+        <div class="ff"><label>Rol</label><select id="invite-role-input">${roleOpts('Regular')}</select></div>
+      </div>
+      <button onclick="inviteSupabaseUser()" style="background:var(--acc);color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;margin-top:6px">✉️ Crear invitación</button>
+    </div>
+    <div class="modal-actions"><button class="btn-cancel" onclick="closeModal()">Cerrar</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
 // Agregar botón de Usuarios en Settings
 window._addUsersButtonToSettings=function(){if(!document.querySelector('.settings-users-btn')){const settingsBtn=document.getElementById('btn-settings');if(settingsBtn&&currentUser&&currentUser.role==='Administrador'){const newBtn=document.createElement('button');newBtn.className='settings-users-btn icon-btn';newBtn.innerHTML='👥';newBtn.title='Gestión de Usuarios';newBtn.onclick=openUsersModal;newBtn.style.display='none';settingsBtn.parentNode.insertBefore(newBtn,settingsBtn.nextSibling);setTimeout(()=>{newBtn.style.display='';},100);}}};
 setTimeout(()=>{if(document.getElementById('app').style.display!=='none')window._addUsersButtonToSettings?.();},500);
