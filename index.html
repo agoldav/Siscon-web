@@ -48,6 +48,11 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 input:focus,select:focus,textarea:focus{border-color:var(--acc);}
 input::placeholder,textarea::placeholder{color:var(--t3);}
 select option{background:var(--bg2);}
+select{cursor:pointer;}
+/* Dropdown de IVA: flecha ▾ visible + no escribible (solo selección) */
+.ivasel{position:relative;display:inline-block;}
+.ivasel::after{content:"\25BE";position:absolute;right:9px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--t2);font-size:11px;line-height:1;}
+.ivasel>select{-webkit-appearance:none;-moz-appearance:none;appearance:none;padding-right:24px;width:100%;cursor:pointer;}
 button{cursor:pointer;font-family:var(--font);transition:all .15s;}
 ::-webkit-scrollbar{width:5px;height:5px;}
 ::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px;}
@@ -4710,10 +4715,10 @@ function renderOCForm(){
       <div class="oc-totals-row">
         <div class="oc-tot-box">
           <div class="oc-tot-row"><span class="oc-tot-lbl" id="oc-tot-label-sub">Subtotal</span><span class="oc-tot-val" id="oc-tot-sub">—</span></div>
-          <div class="oc-tot-row" style="gap:10px;align-items:center"><span class="oc-tot-lbl" id="oc-tot-iva-lbl" style="flex:1">IVA</span><select style="font-size:11px;height:26px;width:110px" onchange="ocState.ivaRate=this.value==='0.13'?0.13:0;ocRefreshTotals();renderOCForm()">
+          <div class="oc-tot-row" style="gap:10px;align-items:center"><span class="oc-tot-lbl" id="oc-tot-iva-lbl" style="flex:1">IVA</span><span class="ivasel" style="width:110px"><select style="font-size:11px;height:26px" onchange="ocState.ivaRate=this.value==='0.13'?0.13:0;ocRefreshTotals();renderOCForm()">
               <option value="0.13"${st.ivaRate===0.13?'selected':''}>13% IVA</option>
               <option value="0"${!st.ivaRate||st.ivaRate===0?'selected':''}>Sin IVA</option>
-            </select><span class="oc-tot-val" id="oc-tot-iva">—</span></div>
+            </select></span><span class="oc-tot-val" id="oc-tot-iva">—</span></div>
           <div class="oc-tot-row oc-tot-main">
             <span class="oc-tot-lbl" id="oc-tot-label-main">Total OC</span>
             <span class="oc-tot-val" id="oc-tot-total">—</span>
@@ -7023,10 +7028,10 @@ function renderClientInvForm(){
         <div style="text-align:center;font-size:12px" title="m² facturados">${qty}</div>
         <input type="number" class="oc-cell-inp" style="text-align:center;font-size:11px" value="${(ciIsCRC()?displayTarifa*(ciState.exchangeRate||tcGet()):displayTarifa).toFixed(2)}" min="0" step="0.01" title="Tarifa por m²" onchange="ciSetTarifa(${idx},parseFloat(this.value)||0);renderClientInvForm()"/>
         <div class="oc-subtotal">${ciFmt(impUSD)}</div>
-        <select class="oc-cell-inp" style="font-size:10px" onchange="ciState.houseLines[${idx}].ivaRate=this.value==='0.13'?0.13:0;ciRecalc()">
+        <span class="ivasel" style="display:block"><select class="oc-cell-inp" style="font-size:10px" onchange="ciState.houseLines[${idx}].ivaRate=this.value==='0.13'?0.13:0;ciRecalc()">
           <option value="0.13"${l.ivaRate===0.13?'selected':''}>13%</option>
           <option value="0"${!l.ivaRate||l.ivaRate===0?'selected':''}>Sin IVA</option>
-        </select>
+        </select></span>
         <button class="oc-btn-del" onclick="ciRemoveHouse(${idx})">✕</button>
       </div>
       ${l.prevPct>0?`<div style="padding:1px 16px 3px;font-size:9px;color:var(--amb)">Ya facturado previamente: ${l.prevPct}% · esta factura cobra ${l.pct-l.prevPct}%</div>`:''}
@@ -7044,10 +7049,10 @@ function renderClientInvForm(){
       <input type="number" class="oc-cell-inp" value="${l.qty}" min="0" step="0.01" onchange="ciState.manualLines[${i}].qty=parseFloat(this.value)||0;ciRecalc()"/>
       <input type="number" class="oc-cell-inp" value="${l.price}" min="0" step="0.01" onchange="ciState.manualLines[${i}].price=parseFloat(this.value)||0;ciRecalc()"/>
       <div class="oc-subtotal amber">${ciFmt((l.qty||0)*(l.price||0))}</div>
-      <select class="oc-cell-inp" style="font-size:10px" onchange="ciState.manualLines[${i}].ivaRate=this.value==='0.13'?0.13:0;ciRecalc()">
+      <span class="ivasel" style="display:block"><select class="oc-cell-inp" style="font-size:10px" onchange="ciState.manualLines[${i}].ivaRate=this.value==='0.13'?0.13:0;ciRecalc()">
         <option value="0.13"${l.ivaRate===0.13?'selected':''}>13%</option>
         <option value="0"${!l.ivaRate||l.ivaRate===0?'selected':''}>Sin IVA</option>
-      </select>
+      </select></span>
       <button class="oc-btn-del" onclick="ciDelManual(${i})">✕</button>
     </div>`).join('');
 
@@ -8955,7 +8960,7 @@ function renderVendorBill(){
   const cols='grid-template-columns:30px minmax(150px,1.4fr) minmax(120px,1fr) 64px 92px 66px 92px'+(st.showPriceDiff?' 70px':'')+' 70px 26px';
   const vbIvaRate=(st.ivaRate===0?0:(st.ivaRate||0.13));
   const sub=vbSub(), disc=vbDiscTotal(), iva=sub*vbIvaRate, tot=sub+iva;
-  const vbIvaSelect=`<select style="font-size:11px;height:24px;width:104px;cursor:pointer" onchange="vbState.ivaRate=this.value==='0.13'?0.13:0;renderVendorBill()"><option value="0.13"${vbIvaRate===0.13?' selected':''}>13% IVA</option><option value="0"${vbIvaRate===0?' selected':''}>Sin IVA</option></select>`;
+  const vbIvaSelect=`<span class="ivasel" style="width:104px"><select style="font-size:11px;height:24px" onchange="vbState.ivaRate=this.value==='0.13'?0.13:0;renderVendorBill()"><option value="0.13"${vbIvaRate===0.13?' selected':''}>13% IVA</option><option value="0"${vbIvaRate===0?' selected':''}>Sin IVA</option></select></span>`;
   // Tabs HTML when coming from OC
   const hasHouseTabs=!!(st.houseMode&&st.ocHouseIds&&st.ocHouseIds.length);
   const tabsHtml=hasHouseTabs?`<div class="oc-mat-tabbar" style="margin-bottom:0">
