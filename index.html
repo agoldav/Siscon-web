@@ -439,15 +439,15 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
 .oc-tabs-hint{padding:9px 0;font-size:11px;color:var(--t3);font-style:italic;}
 
 /* OC table */
-.oc-tbl-head{padding:5px 10px 5px 16px;background:var(--bg2);border-bottom:1px solid var(--border);display:grid;grid-template-columns:20px minmax(140px,1fr) 80px 80px 100px 65px 90px 28px;gap:5px;}
-.oc-tbl-head.res{grid-template-columns:20px minmax(140px,1fr) 70px 80px 100px 65px 90px 28px;}
-.oc-tbl-head.bod{grid-template-columns:20px minmax(140px,1fr) 90px 80px 100px 65px 90px 28px;}
+.oc-tbl-head{padding:5px 10px 5px 16px;background:var(--bg2);border-bottom:1px solid var(--border);display:grid;grid-template-columns:20px minmax(140px,1fr) 80px 80px 100px 65px 90px 72px 28px;gap:5px;}
+.oc-tbl-head.res{grid-template-columns:20px minmax(140px,1fr) 70px 80px 100px 65px 90px 72px 28px;}
+.oc-tbl-head.bod{grid-template-columns:20px minmax(140px,1fr) 90px 80px 100px 65px 90px 72px 28px;}
 .oc-th{font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;font-weight:600;}
 .oc-th.r{text-align:right;}
 .oc-tbl-body{min-height:40px;border-bottom:1px solid var(--border);}
-.oc-line{display:grid;grid-template-columns:20px minmax(140px,1fr) 80px 80px 100px 65px 90px 28px;gap:5px;padding:5px 10px 5px 16px;align-items:center;border-bottom:1px solid var(--border);}
-.oc-line.res{grid-template-columns:20px minmax(140px,1fr) 70px 80px 100px 65px 90px 28px;}
-.oc-line.bod{grid-template-columns:20px minmax(140px,1fr) 90px 80px 100px 65px 90px 28px;}
+.oc-line{display:grid;grid-template-columns:20px minmax(140px,1fr) 80px 80px 100px 65px 90px 72px 28px;gap:5px;padding:5px 10px 5px 16px;align-items:center;border-bottom:1px solid var(--border);}
+.oc-line.res{grid-template-columns:20px minmax(140px,1fr) 70px 80px 100px 65px 90px 72px 28px;}
+.oc-line.bod{grid-template-columns:20px minmax(140px,1fr) 90px 80px 100px 65px 90px 72px 28px;}
 .oc-line:last-child{border-bottom:none;}
 .oc-line:hover{background:rgba(255,255,255,.02);}
 .oc-line.extra-line{background:rgba(212,148,26,.03);}
@@ -662,7 +662,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: IVA-DROPDOWN-2 · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: IVA-LINEA-3 · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -727,7 +727,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');var c=(typeof renderClientInvForm==='function'?renderClientInvForm.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD HTML: IVA-DROPDOWN-2\\n\\nOC usa select .ivasel: '+r.includes('ivasel')+'\\nProveedor usa vbIvaSelect: '+v.includes('vbIvaSelect')+'\\nCliente usa .ivasel: '+c.includes('ivasel')+'\\n\\nSi los tres dicen TRUE = código nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">IVA-DROPDOWN-2</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: IVA-LINEA-3\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">IVA-LINEA-3</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -4717,10 +4717,7 @@ function renderOCForm(){
       <div class="oc-totals-row">
         <div class="oc-tot-box">
           <div class="oc-tot-row"><span class="oc-tot-lbl" id="oc-tot-label-sub">Subtotal</span><span class="oc-tot-val" id="oc-tot-sub">—</span></div>
-          <div class="oc-tot-row" style="gap:10px;align-items:center"><span class="oc-tot-lbl" id="oc-tot-iva-lbl" style="flex:1">IVA</span><span class="ivasel" style="width:110px"><select style="font-size:11px;height:26px" onchange="ocState.ivaRate=this.value==='0.13'?0.13:0;ocRefreshTotals();renderOCForm()">
-              <option value="0.13"${st.ivaRate===0.13?'selected':''}>13% IVA</option>
-              <option value="0"${!st.ivaRate||st.ivaRate===0?'selected':''}>Sin IVA</option>
-            </select></span><span class="oc-tot-val" id="oc-tot-iva">—</span></div>
+          <div class="oc-tot-row"><span class="oc-tot-lbl" id="oc-tot-iva-lbl">IVA</span><span class="oc-tot-val" id="oc-tot-iva">—</span></div>
           <div class="oc-tot-row oc-tot-main">
             <span class="oc-tot-lbl" id="oc-tot-label-main">Total OC</span>
             <span class="oc-tot-val" id="oc-tot-total">—</span>
@@ -4913,15 +4910,15 @@ function ocRenderTableHead(){
   if(st.bodegaMode){
     el.innerHTML = `<div class="oc-tbl-head bod"><div class="oc-th"></div><div class="oc-th">Material</div>
       <div class="oc-th r">Existencia</div><div class="oc-th r">Cantidad a Pedir</div>
-      <div class="oc-th r">Precio Unitario (${sym})</div><div class="oc-th r">Desc %</div><div class="oc-th r">Total (${sym})</div><div class="oc-th"></div></div>`;
+      <div class="oc-th r">Precio Unitario (${sym})</div><div class="oc-th r">Desc %</div><div class="oc-th r">Total (${sym})</div><div class="oc-th r">IVA</div><div class="oc-th"></div></div>`;
   } else if(st.activeTab==='resumen'){
     el.innerHTML = `<div class="oc-tbl-head res"><div class="oc-th"></div><div class="oc-th">Material / Descripción</div>
       <div class="oc-th r">Unidad</div><div class="oc-th r">Cantidad Total</div>
-      <div class="oc-th r">Precio Unitario (${sym})</div><div class="oc-th r">Desc %</div><div class="oc-th r">Total (${sym})</div><div class="oc-th"></div></div>`;
+      <div class="oc-th r">Precio Unitario (${sym})</div><div class="oc-th r">Desc %</div><div class="oc-th r">Total (${sym})</div><div class="oc-th r">IVA</div><div class="oc-th"></div></div>`;
   } else {
     el.innerHTML = `<div class="oc-tbl-head"><div class="oc-th"></div><div class="oc-th">Material / Descripción</div>
       <div class="oc-th r">Disponible</div><div class="oc-th r">Cantidad a Pedir</div>
-      <div class="oc-th r">Precio Unitario (${sym})</div><div class="oc-th r">Desc %</div><div class="oc-th r">Total (${sym})</div><div class="oc-th"></div></div>`;
+      <div class="oc-th r">Precio Unitario (${sym})</div><div class="oc-th r">Desc %</div><div class="oc-th r">Total (${sym})</div><div class="oc-th r">IVA</div><div class="oc-th"></div></div>`;
   }
 }
 
@@ -4963,6 +4960,10 @@ function ocRenderHouseBody(body){
       <input type="number" class="oc-cell-inp" value="${line.discPct||0}" min="0" max="100" step="0.1"
         oninput="ocState.lines[${houseId}][${li}].discPct=parseFloat(this.value)||0;ocUpdateLineSubtotal(this);ocRefreshTotals()" title="% descuento"/>
       <div class="oc-subtotal${line.isExtra?' amber':''}">${ocFmt(line.qty*line.price*(1-(line.discPct||0)/100))}</div>
+      <span class="ivasel" style="display:block"><select class="oc-cell-inp" style="font-size:10px" onchange="ocState.lines[${houseId}][${li}].ivaRate=this.value==='0.13'?0.13:0;ocRefreshTotals()">
+        <option value="0.13"${ocLineIVARate(line)===0.13?'selected':''}>13%</option>
+        <option value="0"${ocLineIVARate(line)===0?'selected':''}>Sin IVA</option>
+      </select></span>
       <button class="oc-btn-del" onclick="ocRemoveLine(${houseId},${li})">✕</button>`;
     body.appendChild(div);
   });
@@ -4975,10 +4976,11 @@ function ocRenderResumenBody(body){
     (st.lines[hid]||[]).forEach(line => {
       // Clave por nombre normalizado para consolidar materiales iguales de distintos tipos
       const key = (line.manualName||'').toLowerCase().trim()+'||'+(line.matId||0);
-      if(!map[key]) map[key] = {name:line.manualName, unit:line.unit||'unid', price:line.price, total:0, totalValue:0, isExtra:line.isExtra, houses:[], lineId:line.lineId, matId:line.matId};
+      if(!map[key]) map[key] = {name:line.manualName, unit:line.unit||'unid', price:line.price, total:0, totalValue:0, ivaValue:0, isExtra:line.isExtra, houses:[], lineId:line.lineId, matId:line.matId};
       if(line.qty>0){
         map[key].total+=line.qty;
         map[key].totalValue+=line.qty*(line.price||0)*(1-(line.discPct||0)/100);
+        map[key].ivaValue+=line.qty*(line.price||0)*(1-(line.discPct||0)/100)*ocLineIVARate(line);
         const h=curProj.houses.find(h=>h.id===hid);
         map[key].houses.push((h?h.num:'?')+': '+line.qty);
       }
@@ -5000,6 +5002,7 @@ function ocRenderResumenBody(body){
       <div class="oc-cell-r">${ocFmt(m.unitPrice)}</div>
       <div class="oc-cell-r" style="color:${avgDisc>0?'var(--grn)':'var(--t3)'}">${avgDisc>0?avgDisc+'%':'—'}</div>
       <div class="oc-subtotal">${ocFmt(m.totalValue)}</div>
+      <div class="oc-cell-r" style="color:var(--t3)" title="IVA de este material">${ocFmt(m.ivaValue||0)}</div>
       <div></div>`;
     body.appendChild(div);
   });
@@ -5050,6 +5053,10 @@ function ocRenderBodegaBody(body){
       <input type="number" class="oc-cell-inp" value="${item.discPct||0}" min="0" max="100" step="0.1"
         oninput="ocState.bodegaLines[${i}].discPct=parseFloat(this.value)||0;ocRefreshTotals()" title="% descuento"/>
       <div class="oc-subtotal pur">${ocFmt(item.qty*(item.price||0)*(1-(item.discPct||0)/100))}</div>
+      <span class="ivasel" style="display:block"><select class="oc-cell-inp" style="font-size:10px" onchange="ocState.bodegaLines[${i}].ivaRate=this.value==='0.13'?0.13:0;ocRefreshTotals()">
+        <option value="0.13"${ocLineIVARate(item)===0.13?'selected':''}>13%</option>
+        <option value="0"${ocLineIVARate(item)===0?'selected':''}>Sin IVA</option>
+      </select></span>
       <button class="oc-btn-del" onclick="ocState.bodegaLines.splice(${i},1);ocRenderTableBody()">✕</button>`;
     body.appendChild(div);
   });
@@ -5102,12 +5109,19 @@ function ocCalcSubUSD(){
   st.houseIds.forEach(hid=>{ (st.lines[hid]||[]).forEach(l=>total+=l.qty*(l.price||0)*(1-(l.discPct||0)/100)); });
   return total;
 }
+function ocLineIVARate(l){ return (l&&l.ivaRate===0)?0:(((l&&l.ivaRate)||0.13)); }
+function ocLineNetUSD(l){ return (l.qty||0)*(l.price||0)*(1-(l.discPct||0)/100); }
+function ocIVATotalUSD(){
+  const st=ocState; let iva=0;
+  if(st.bodegaMode){ st.bodegaLines.forEach(it=>iva+=ocLineNetUSD(it)*ocLineIVARate(it)); return iva; }
+  st.houseIds.forEach(hid=>{ (st.lines[hid]||[]).forEach(l=>iva+=ocLineNetUSD(l)*ocLineIVARate(l)); });
+  return iva;
+}
 
 function ocRefreshTotals(){
   const st=ocState;
   const subUSD=ocCalcSubUSD();
-  const ivaRate=(st.ivaRate===0?0:(st.ivaRate||0.13));
-  const ivaUSD=subUSD*ivaRate;
+  const ivaUSD=ocIVATotalUSD();
   const totUSD=subUSD+ivaUSD;
   st.totalUSD=totUSD; st.ivaUSD=ivaUSD;
 
@@ -5120,7 +5134,7 @@ function ocRefreshTotals(){
   if(el('oc-tot-label-main')) el('oc-tot-label-main').textContent=labelMain;
   if(el('oc-tot-sub')) el('oc-tot-sub').textContent=ocFmt(subUSD);
   if(el('oc-tot-iva')) el('oc-tot-iva').textContent=ocFmt(ivaUSD);
-  if(el('oc-tot-iva-lbl')) el('oc-tot-iva-lbl').textContent=st.ivaRate>0?`IVA (${Math.round(st.ivaRate*100)}%)`:'IVA';
+  if(el('oc-tot-iva-lbl')) el('oc-tot-iva-lbl').textContent='IVA';
   const tv=el('oc-tot-total');
   if(tv){ tv.textContent=ocFmt(totUSD); tv.className='oc-tot-val'+(st.bodegaMode?' pur':''); }
   const eq=el('oc-usd-equiv');
@@ -5546,7 +5560,7 @@ function ocGeneratePDF(oc){
     <h1>Orden de Compra ${oc.num}</h1>
     <div style="font-size:12px;color:#555;margin:4px 0 12px">Proyecto: ${p.name} · Proveedor: ${oc.vendorName||'—'} · Fecha: ${fmtDate(new Date())}${oc.proforma?' · Proforma: '+oc.proforma:''}</div>
     <table><tr><th>Casa</th><th>Material</th><th class="r">Cantidad</th><th class="r">Precio Unitario</th><th class="r">Total</th></tr>${rows||'<tr><td colspan=5>Sin líneas</td></tr>'}</table>
-    ${(()=>{const r=(oc.ivaRate===0?0:(oc.ivaRate||0.13));const subv=(oc.totalUSD||0)/(1+r);return `<table style="margin-top:14px"><tr><td class="r" style="border:none">Subtotal</td><td class="r" style="width:140px">${sym(subv)}</td></tr><tr><td class="r" style="border:none">IVA${r>0?' '+Math.round(r*100)+'%':' (Sin IVA)'}</td><td class="r">${sym(subv*r)}</td></tr><tr><td class="r" style="border:none;font-weight:700">TOTAL</td><td class="r" style="font-weight:700">${sym(oc.totalUSD||0)}</td></tr></table>`;})()}
+    ${(()=>{const iva=(oc.ivaUSD!=null?oc.ivaUSD:0);const subv=(oc.totalUSD||0)-iva;return `<table style="margin-top:14px"><tr><td class="r" style="border:none">Subtotal</td><td class="r" style="width:140px">${sym(subv)}</td></tr><tr><td class="r" style="border:none">IVA</td><td class="r">${sym(iva)}</td></tr><tr><td class="r" style="border:none;font-weight:700">TOTAL</td><td class="r" style="font-weight:700">${sym(oc.totalUSD||0)}</td></tr></table>`;})()}
     ${oc.notes?`<div style="margin-top:12px;font-size:12px"><strong>Notas:</strong> ${oc.notes}</div>`:''}
   </body></html>`);
   win.document.close(); setTimeout(()=>{try{win.focus();win.print();}catch(e){}},300);
