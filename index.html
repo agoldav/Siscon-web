@@ -8880,8 +8880,8 @@ function newVendorBill(fromOC){
   vbState={
     id:'fp-'+Date.now(), type:'proveedor', num:txnNextNum('proveedor'),
     party:'', invoiceNumber:'', date:new Date().toISOString().slice(0,10),
-    status:'Borrador', exchangeRate:tcGet(), discountOn:false, ivaRate:0.13,
-    lines:[{productId:'',desc:'',qty:1,price:0,discPct:0,assign:[]}],
+    status:'Borrador', exchangeRate:tcGet(), discountOn:false,
+    lines:[{productId:'',desc:'',qty:1,price:0,discPct:0,assign:[],ivaRate:0.13}],
     notes:'', linkedOcId:(fromOC&&fromOC.id)||'', linkedOcNum:(fromOC&&fromOC.num)||'',
     subtotalUSD:0, ivaUSD:0, totalUSD:0, qboId:'',
     createdAt:new Date().toLocaleDateString('es-CR'), createdBy:currentUser?currentUser.name:'Sistema',
@@ -8894,9 +8894,8 @@ function openVendorBill(id){
   curTxnType='proveedor'; curTxnId=id;
   const tx=txnArr('proveedor').find(x=>String(x.id)===String(id)); if(!tx)return;
   vbState=JSON.parse(JSON.stringify(tx));
-  if(vbState.ivaRate===undefined)vbState.ivaRate=0.13;
-  if(!vbState.lines||!vbState.lines.length)vbState.lines=[{productId:'',desc:'',qty:1,price:0,discPct:0,assign:[]}];
-  vbState.lines.forEach(l=>{ if(!l.assign)l.assign=[]; if(l.discPct===undefined)l.discPct=0; });
+  if(!vbState.lines||!vbState.lines.length)vbState.lines=[{productId:'',desc:'',qty:1,price:0,discPct:0,assign:[],ivaRate:0.13}];
+  vbState.lines.forEach(l=>{ if(!l.assign)l.assign=[]; if(l.discPct===undefined)l.discPct=0; if(l.ivaRate===undefined)l.ivaRate=0.13; });
   renderVendorBill();
 }
 let vbActiveTab='resumen'; // 'resumen' | houseId
@@ -8931,6 +8930,8 @@ function vbPrefillFromOC(oc){
 function vbLineNet(l){ const gross=(l.qty||0)*(l.price||0); return gross*(1-(l.discPct||0)/100); }
 function vbLineDisc(l){ const gross=(l.qty||0)*(l.price||0); return gross*(l.discPct||0)/100; }
 function vbSub(){ let s=0; vbState.lines.forEach(l=>s+=vbLineNet(l)); return s; }
+function vbLineIVARate(l){ return (l.ivaRate===0?0:(l.ivaRate||0.13)); }
+function vbIVATotal(){ let s=0; vbState.lines.forEach(l=>{ s+=vbLineNet(l)*vbLineIVARate(l); }); return s; }
 function vbDiscTotal(){ let s=0; vbState.lines.forEach(l=>s+=vbLineDisc(l)); return s; }
 function vbAssignedQty(l){ return (l.assign||[]).reduce((s,a)=>s+(a.qty||0),0); }
 function vbIsCRC(){ return (vbState.currencyBill||'USD')==='CRC'; }
@@ -8959,10 +8960,8 @@ function vbHouseTabBody(houseId){
 function renderVendorBill(){
   const p=curProj, st=vbState;
   const items=qboItems();
-  const cols='grid-template-columns:30px minmax(150px,1.4fr) minmax(120px,1fr) 64px 92px 66px 92px'+(st.showPriceDiff?' 70px':'')+' 70px 26px';
-  const vbIvaRate=(st.ivaRate===0?0:(st.ivaRate||0.13));
-  const sub=vbSub(), disc=vbDiscTotal(), iva=sub*vbIvaRate, tot=sub+iva;
-  const vbIvaSelect=`<span class="ivasel" style="width:104px"><select style="font-size:11px;height:24px" onchange="vbState.ivaRate=this.value==='0.13'?0.13:0;renderVendorBill()"><option value="0.13"${vbIvaRate===0.13?' selected':''}>13% IVA</option><option value="0"${vbIvaRate===0?' selected':''}>Sin IVA</option></select></span>`;
+  const cols='grid-template-columns:30px minmax(150px,1.4fr) minmax(120px,1fr) 64px 92px 66px 92px'+(st.showPriceDiff?' 70px':'')+' 78px 70px 26px';
+  const sub=vbSub(), disc=vbDiscTotal(), iva=vbIVATotal(), tot=sub+iva;
   // Tabs HTML when coming from OC
   const hasHouseTabs=!!(st.houseMode&&st.ocHouseIds&&st.ocHouseIds.length);
   const tabsHtml=hasHouseTabs?`<div class="oc-mat-tabbar" style="margin-bottom:0">
@@ -9005,6 +9004,10 @@ function renderVendorBill(){
       <input type="number" class="oc-cell-inp" value="${l.discPct||0}" min="0" max="100" step="0.1" onchange="vbState.lines[${i}].discPct=parseFloat(this.value)||0;renderVendorBill()" title="% descuento"/>
       <div class="oc-subtotal">${subFmt}</div>
       ${st.showPriceDiff?diffCell||'<div></div>':''}
+      <span class="ivasel" style="display:block"><select class="oc-cell-inp" style="font-size:10px" onchange="vbState.lines[${i}].ivaRate=this.value==='0.13'?0.13:0;renderVendorBill()">
+        <option value="0.13"${vbLineIVARate(l)===0.13?'selected':''}>13%</option>
+        <option value="0"${vbLineIVARate(l)===0?'selected':''}>Sin IVA</option>
+      </select></span>
       <button class="btn-sm" style="font-size:10px;padding:3px 7px;${assignOk?'border-color:var(--grn);color:var(--grn)':'border-color:var(--amb);color:var(--amb)'}" onclick="vbOpenAssign(${i})" title="${assignedTxt}">Asignar</button>
       <button class="oc-btn-del" onclick="vbState.lines.splice(${i},1);renderVendorBill()">✕</button>
     </div>${l.assign&&l.assign.length?`<div style="padding:0 16px 4px 78px;font-size:9px;color:${assignOk?'var(--grn)':'var(--amb)'}">→ ${assignedTxt}${!assignOk?' (la suma debe igualar '+(l.qty||0)+')':''}</div>`:''}`;
@@ -9085,11 +9088,11 @@ function renderVendorBill(){
       <div class="oc-tbl-head" style="${cols}">
         <div class="oc-th"></div><div class="oc-th">Producto/Servicio</div><div class="oc-th">Descripción</div>
         <div class="oc-th r">Cantidad</div><div class="oc-th r">Precio Unitario</div><div class="oc-th r">Descuento %</div>
-        <div class="oc-th r">Subtotal</div>${st.showPriceDiff?'<div class="oc-th r" style="color:var(--t3)">Δ vs OC</div>':''}<div class="oc-th">Proyecto</div><div class="oc-th"></div>
+        <div class="oc-th r">Subtotal</div>${st.showPriceDiff?'<div class="oc-th r" style="color:var(--t3)">Δ vs OC</div>':''}<div class="oc-th r">IVA</div><div class="oc-th">Proyecto</div><div class="oc-th"></div>
       </div>
       <div class="oc-tbl-body">${rows||'<div class="oc-empty-tbl">Sin líneas</div>'}</div>
       <div class="oc-extra-bar">
-        <button class="btn-oc-extra" onclick="vbState.lines.push({productId:'',desc:'',qty:1,price:0,discPct:0,assign:[]});renderVendorBill()">+ Agregar línea</button>
+        <button class="btn-oc-extra" onclick="vbState.lines.push({productId:'',desc:'',qty:1,price:0,discPct:0,assign:[],ivaRate:0.13});renderVendorBill()">+ Agregar línea</button>
       </div>
       </div>
 
@@ -9104,13 +9107,13 @@ function renderVendorBill(){
           ${vbIsCRC()?`
           <div class="oc-tot-row"><span class="oc-tot-lbl">Subtotal (₡)</span><span class="oc-tot-val">₡${(sub*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
           ${disc>0?`<div class="oc-tot-row"><span class="oc-tot-lbl">Descuento (₡)</span><span class="oc-tot-val" style="color:var(--amb)">- ₡${(disc*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>`:''}
-          <div class="oc-tot-row" style="gap:8px;align-items:center"><span class="oc-tot-lbl" style="flex:1">IVA (₡)</span>${vbIvaSelect}<span class="oc-tot-val">₡${(iva*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+          <div class="oc-tot-row"><span class="oc-tot-lbl">IVA (₡)</span><span class="oc-tot-val">₡${(iva*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
           <div class="oc-tot-row oc-tot-main"><span class="oc-tot-lbl">Total (₡)</span><span class="oc-tot-val" style="color:var(--org)">₡${(tot*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
           <div class="oc-tot-row" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><span class="oc-tot-lbl" style="color:var(--t3);font-size:10px">Equivalente USD (÷${(st.exchangeRate||tcGet()).toLocaleString()})</span><span class="oc-tot-val" style="color:var(--t3)">${fmt(tot)}</span></div>
           `:`
           <div class="oc-tot-row"><span class="oc-tot-lbl">Subtotal</span><span class="oc-tot-val">${fmt(sub)}</span></div>
           ${disc>0?`<div class="oc-tot-row"><span class="oc-tot-lbl">Descuento total</span><span class="oc-tot-val" style="color:var(--amb)">- ${fmt(disc)}</span></div>`:''}
-          <div class="oc-tot-row" style="gap:8px;align-items:center"><span class="oc-tot-lbl" style="flex:1">IVA</span>${vbIvaSelect}<span class="oc-tot-val">${fmt(iva)}</span></div>
+          <div class="oc-tot-row"><span class="oc-tot-lbl">IVA</span><span class="oc-tot-val">${fmt(iva)}</span></div>
           <div class="oc-tot-row oc-tot-main"><span class="oc-tot-lbl">Total</span><span class="oc-tot-val" style="color:var(--org)">${fmt(tot)}</span></div>
           `}
         </div>
@@ -9391,9 +9394,9 @@ function saveVendorBill(sync){
   if(!st.party){ alert('Indique el proveedor.'); return; }
   const err=vbValidateAssignments(); if(err){ alert(err); return; }
   const sub=vbSub(); // lines always stored in USD
-  const vbIvaRate=(st.ivaRate===0?0:(st.ivaRate||0.13));
-  st.subtotalUSD=sub; st.ivaUSD=sub*vbIvaRate; st.totalUSD=sub*(1+vbIvaRate);
-  if(vbIsCRC()){ const xr=st.exchangeRate||tcGet(); st.subtotalCRC=sub*xr; st.totalCRC=sub*xr*(1+vbIvaRate); }
+  const ivaT=vbIVATotal();
+  st.subtotalUSD=sub; st.ivaUSD=ivaT; st.totalUSD=sub+ivaT;
+  if(vbIsCRC()){ const xr=st.exchangeRate||tcGet(); st.subtotalCRC=sub*xr; st.totalCRC=(sub+ivaT)*xr; }
   const arr=txnArr('proveedor');
   const data=JSON.parse(JSON.stringify(st));
   data.status=sync?'Emitida':(st.status==='Borrador'?'Registrada':st.status);
