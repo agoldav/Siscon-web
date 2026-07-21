@@ -662,7 +662,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-5-USUARIOS · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-6-INVITE · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -727,7 +727,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-5-USUARIOS\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-5-USUARIOS</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-6-INVITE\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-6-INVITE</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -1266,8 +1266,10 @@ function registerDoc(fileName, category, mime, blobId){
 // (el rate limiter y algunos proxies responden texto plano)
 async function authErrMsg(resp){
   const t=await resp.text().catch(()=>'' );
-  try{ const j=JSON.parse(t); return j.error||j.message||t||('Error HTTP '+resp.status); }
-  catch(e){ return t||('Error HTTP '+resp.status); }
+  try{ const j=JSON.parse(t); const m=j.error||j.message; if(m&&typeof m==='string') return m; }catch(e){}
+  // Sin mensaje útil (p.ej. body "{}" o vacío): mostrar algo claro con el status
+  if(t&&t!=='{}'&&t.length<200) return t+' (HTTP '+resp.status+')';
+  return 'Error del servidor (HTTP '+resp.status+'). Recarga la página (⌥⌘E + ⌘R) y reintenta; si persiste, avísame.';
 }
 // Refresco automático del token de Supabase (expira ~1h). Sin esto, los guardados y
 // el sondeo de autorizaciones empiezan a fallar con 401 en sesiones largas.
