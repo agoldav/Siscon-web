@@ -677,7 +677,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-10-PAGO2 · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-11-DIFF · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -743,7 +743,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-10-PAGO2\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-10-PAGO2</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-11-DIFF\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-11-DIFF</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -9152,6 +9152,7 @@ function renderVendorBill(){
   const items=qboItems();
   const cols='grid-template-columns:30px minmax(150px,1.4fr) minmax(120px,1fr) 64px 92px 66px 92px'+(st.showPriceDiff?' 70px':'')+' 78px 70px 26px';
   const sub=vbSub(), disc=vbDiscTotal(), iva=vbIVATotal(), tot=sub+iva;
+  const budCmp = st.showPriceDiff ? vbBudgetCompare() : null;
   // Tabs HTML when coming from OC
   const hasHouseTabs=!!(st.houseMode&&st.ocHouseIds&&st.ocHouseIds.length);
   const tabsHtml=hasHouseTabs?`<div class="oc-mat-tabbar" style="margin-bottom:0">
@@ -9171,17 +9172,19 @@ function renderVendorBill(){
     const subFmt=isCRC?`₡${subNetDisp.toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}`:fmt(subNetDisp);
     const curItem=items.find(it=>String(it.id)===String(l.productId));
     const curItemName=(curItem||{}).name||'';
-    // Columna de diferencia de precio OC vs Factura
-    const showDiff=st.showPriceDiff&&l._ocPrice!=null;
+    // Columna Δ vs Presupuesto: costo real de la línea − costo presupuestado de la(s) casa(s) asignada(s)
     let diffCell='';
-    if(showDiff){
-      const billPriceUSD=l.price||0;
-      const ocPriceUSD=l._ocPrice||0;
-      const diff=isCRC?((billPriceUSD-ocPriceUSD)*(st.exchangeRate||tcGet())):(billPriceUSD-ocPriceUSD);
-      const diffFmt=isCRC?`₡${Math.abs(diff).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}`:fmt(Math.abs(diff));
-      const diffSign=diff>0?'+':diff<0?'-':'';
-      const diffColor=diff>0?'var(--red)':'var(--grn)';
-      diffCell=`<div class="oc-subtotal" style="color:${diffColor};font-weight:600" title="OC: ${isCRC?'₡':fmt(ocPriceUSD)}">${diff===0?'=':diffSign+diffFmt}</div>`;
+    if(st.showPriceDiff){
+      const bc=vbLineBudgetCostUSD(l);
+      const diffUSD=vbLineNet(l)-bc.cost;
+      const diffDisp=isCRC?diffUSD*(st.exchangeRate||tcGet()):diffUSD;
+      const diffFmt=isCRC?`₡${Math.abs(diffDisp).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}`:fmt(Math.abs(diffDisp));
+      const over=diffUSD>0.005, under=diffUSD<-0.005;
+      const sign=over?'+':under?'−':'';
+      const color=over?'var(--amb)':(under?'var(--grn)':'var(--t3)');
+      const budDisp=isCRC?bc.cost*(st.exchangeRate||tcGet()):bc.cost;
+      const title=bc.hasBudget?`Presupuesto casa: ${isCRC?'₡'+budDisp.toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2}):fmt(bc.cost)}`:'Sin presupuesto de referencia para este material';
+      diffCell=`<div class="oc-subtotal" style="color:${color};font-weight:600" title="${title}">${sign?sign+diffFmt:'='}</div>`;
     }
     return `<div class="oc-line" style="${cols}">
       <div class="oc-dh">⠿</div>
@@ -9285,7 +9288,7 @@ function renderVendorBill(){
           </div>
           <div class="oc-fld" style="flex-direction:row;align-items:flex-end;gap:6px;padding-bottom:4px">
             <input type="checkbox" id="vb-show-diff" ${st.showPriceDiff?'checked':''} onchange="vbState.showPriceDiff=this.checked;renderVendorBill()" style="width:14px;height:14px;cursor:pointer;margin-bottom:2px"/>
-            <label for="vb-show-diff" style="font-size:11px;color:var(--t2);cursor:pointer;user-select:none;white-space:nowrap">Δ Diferencia OC</label>
+            <label for="vb-show-diff" style="font-size:11px;color:var(--t2);cursor:pointer;user-select:none;white-space:nowrap" title="Compara el costo real de cada línea contra el presupuesto de la casa asignada">Δ Diferencia vs Presupuesto</label>
           </div>
         </div>
       </div>
@@ -9301,7 +9304,7 @@ function renderVendorBill(){
       <div class="oc-tbl-head" style="${cols}">
         <div class="oc-th"></div><div class="oc-th">Producto/Servicio</div><div class="oc-th">Descripción</div>
         <div class="oc-th r">Cantidad</div><div class="oc-th r">Precio Unitario</div><div class="oc-th r">Descuento %</div>
-        <div class="oc-th r">Subtotal</div>${st.showPriceDiff?'<div class="oc-th r" style="color:var(--t3)">Δ vs OC</div>':''}<div class="oc-th r">IVA</div><div class="oc-th">Proyecto</div><div class="oc-th"></div>
+        <div class="oc-th r">Subtotal</div>${st.showPriceDiff?'<div class="oc-th r" style="color:var(--t3)">Δ vs Presup.</div>':''}<div class="oc-th r">IVA</div><div class="oc-th">Proyecto</div><div class="oc-th"></div>
       </div>
       <div class="oc-tbl-body">${rows||'<div class="oc-empty-tbl">Sin líneas</div>'}</div>
       <div class="oc-extra-bar">
@@ -9315,19 +9318,27 @@ function renderVendorBill(){
       </div>
       ${txnOcrZoneHtml()}
 
+      ${budCmp?`<div style="padding:0 16px 10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:600;background:${budCmp.over?'rgba(212,148,26,.14)':'rgba(29,184,122,.14)'};color:${budCmp.over?'var(--amb)':'var(--grn)'};border:1px solid ${budCmp.over?'rgba(212,148,26,.45)':'rgba(29,184,122,.45)'}">
+          <span>${budCmp.over?'⚠ Costo mayor a presupuesto':'✓ Costos según presupuesto'}</span>
+          <span style="font-weight:500;font-size:11px">Δ ${budCmp.over?'+':(budCmp.diff<-0.005?'−':'')}${vbIsCRC()?'₡'+(Math.abs(budCmp.diff)*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2}):fmt(Math.abs(budCmp.diff))} vs presupuesto</span>
+        </div>
+      </div>`:''}
       <div class="oc-totals-row">
-        <div class="oc-tot-box">
+        <div class="oc-tot-box"${budCmp?` style="border:1px solid ${budCmp.over?'rgba(212,148,26,.5)':'rgba(29,184,122,.5)'}"`:''}>
           ${vbIsCRC()?`
           <div class="oc-tot-row"><span class="oc-tot-lbl">Subtotal (₡)</span><span class="oc-tot-val">₡${(sub*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
           ${disc>0?`<div class="oc-tot-row"><span class="oc-tot-lbl">Descuento (₡)</span><span class="oc-tot-val" style="color:var(--amb)">- ₡${(disc*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>`:''}
           <div class="oc-tot-row"><span class="oc-tot-lbl">IVA (₡)</span><span class="oc-tot-val">₡${(iva*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
           <div class="oc-tot-row oc-tot-main"><span class="oc-tot-lbl">Total (₡)</span><span class="oc-tot-val" style="color:var(--org)">₡${(tot*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
           <div class="oc-tot-row" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><span class="oc-tot-lbl" style="color:var(--t3);font-size:10px">Equivalente USD (÷${(st.exchangeRate||tcGet()).toLocaleString()})</span><span class="oc-tot-val" style="color:var(--t3)">${fmt(tot)}</span></div>
+          ${budCmp?`<div class="oc-tot-row" style="margin-top:4px;padding-top:6px;border-top:1px dashed var(--border)"><span class="oc-tot-lbl" style="color:${budCmp.over?'var(--amb)':'var(--grn)'}">Δ vs Presupuesto</span><span class="oc-tot-val" style="color:${budCmp.over?'var(--amb)':'var(--grn)'}">${budCmp.over?'+':(budCmp.diff<-0.005?'−':'')}₡${(Math.abs(budCmp.diff)*(st.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>`:''}
           `:`
           <div class="oc-tot-row"><span class="oc-tot-lbl">Subtotal</span><span class="oc-tot-val">${fmt(sub)}</span></div>
           ${disc>0?`<div class="oc-tot-row"><span class="oc-tot-lbl">Descuento total</span><span class="oc-tot-val" style="color:var(--amb)">- ${fmt(disc)}</span></div>`:''}
           <div class="oc-tot-row"><span class="oc-tot-lbl">IVA</span><span class="oc-tot-val">${fmt(iva)}</span></div>
           <div class="oc-tot-row oc-tot-main"><span class="oc-tot-lbl">Total</span><span class="oc-tot-val" style="color:var(--org)">${fmt(tot)}</span></div>
+          ${budCmp?`<div class="oc-tot-row" style="margin-top:4px;padding-top:6px;border-top:1px dashed var(--border)"><span class="oc-tot-lbl" style="color:${budCmp.over?'var(--amb)':'var(--grn)'}">Δ vs Presupuesto</span><span class="oc-tot-val" style="color:${budCmp.over?'var(--amb)':'var(--grn)'}">${budCmp.over?'+':(budCmp.diff<-0.005?'−':'')}${fmt(Math.abs(budCmp.diff))}</span></div>`:''}
           `}
         </div>
       </div>
@@ -9397,6 +9408,38 @@ function houseBudgetQtyForProduct(p,houseId,productId,desc){
   let bud=0;
   t.categories.forEach(c=>c.lines.forEach(l=>{ const match=(productId&&String(l.matId)===String(productId))||(desc&&(l.manualName||lineName(l))===desc); if(match)bud+=(l.qty||0); }));
   return bud||Infinity;
+}
+// Precio unitario PRESUPUESTADO (USD) de un material en el tipo de una casa (null si no está en presupuesto)
+function houseBudgetPriceForProduct(p,houseId,productId,desc){
+  const h=(p.houses||[]).find(x=>String(x.id)===String(houseId));
+  const t=h&&(p.types||[]).find(x=>x.id===h.typeId);
+  if(!t||!t.categories) return null;
+  const xr=t.exchangeRate||p.exchangeRate||SYS.exchangeRate||1;
+  for(const c of t.categories) for(const l of (c.lines||[])){
+    const match=(productId&&String(l.matId)===String(productId))||(desc&&(l.manualName||lineName(l))===desc);
+    if(match){ const up=linePrice(l); return (l.currency==='CRC')?up/(xr||1):up; }
+  }
+  return null;
+}
+// Costo PRESUPUESTADO (USD) de una línea de factura según las casas asignadas
+function vbLineBudgetCostUSD(l){
+  const p=curProj; const price=l.price||0; let cost=0, hasBudget=false;
+  const assigns=(l.assign&&l.assign.length)?l.assign:[{houseId:null,qty:l.qty||0}];
+  assigns.forEach(a=>{
+    const q=a.qty||0;
+    if(a.houseId==null||a.houseId==='__bodega__'){ cost+=q*price; return; } // sin presupuesto → neutral
+    const aProj=(a.projId&&projects.find(x=>x.id===a.projId))||p;
+    let bp=houseBudgetPriceForProduct(aProj,a.houseId,l.productId,l.desc);
+    if(bp==null){ bp=price; } else { hasBudget=true; }
+    cost+=q*bp;
+  });
+  return {cost, hasBudget};
+}
+// Comparación total factura vs presupuesto (USD)
+function vbBudgetCompare(){
+  let inv=0, bud=0, anyBudget=false;
+  (vbState.lines||[]).forEach(l=>{ inv+=vbLineNet(l); const b=vbLineBudgetCostUSD(l); bud+=b.cost; if(b.hasBudget)anyBudget=true; });
+  return {inv, bud, diff:inv-bud, over:(inv-bud)>0.005, anyBudget};
 }
 function vbOpenAssign(i){
   const l=vbState.lines[i];
