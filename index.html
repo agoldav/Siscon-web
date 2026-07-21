@@ -498,8 +498,15 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
 .split-arrow-oc:hover{filter:brightness(.88);}
 .split-drop-oc{position:absolute;bottom:calc(100% + 5px);right:0;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);min-width:180px;overflow:hidden;display:none;box-shadow:0 8px 24px rgba(0,0,0,.4);}
 .split-drop-oc.open{display:block;}
-.split-opt-oc{display:block;width:100%;background:transparent;border:none;color:var(--t1);text-align:left;padding:9px 14px;font-size:12px;}
+.split-opt-oc{display:block;width:100%;background:transparent;border:none;color:var(--t1);text-align:left;padding:9px 14px;font-size:12px;cursor:pointer;}
 .split-opt-oc:hover{background:var(--bg3);}
+/* Split azul "Comprar dentro de presupuesto" (dropdown hacia abajo) */
+.split-main-ocb{background:var(--acc);color:#fff;border:none;border-radius:8px 0 0 8px;padding:7px 13px;font-size:12px;font-weight:500;border-right:1px solid rgba(255,255,255,.18);cursor:pointer;}
+.split-main-ocb:hover{filter:brightness(.9);}
+.split-arrow-ocb{background:var(--acc);color:#fff;border:none;border-radius:0 8px 8px 0;padding:7px 9px;font-size:11px;cursor:pointer;}
+.split-arrow-ocb:hover{filter:brightness(.9);}
+.split-drop-ocb{position:absolute;top:calc(100% + 5px);left:0;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);min-width:230px;overflow:hidden;display:none;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:50;}
+.split-drop-ocb.open{display:block;}
 
 /* QBO section in settings */
 .qbo-settings{background:rgba(29,184,122,.05);border:1px solid rgba(29,184,122,.15);border-radius:var(--r);padding:12px;margin-top:8px;}
@@ -670,7 +677,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-7-LOADING · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-8-OC · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -736,7 +743,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-7-LOADING\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-7-LOADING</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-8-OC\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-8-OC</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -4350,8 +4357,10 @@ function deleteGarantia(i){
 // curOCId declarado en el bloque de estado global
 let ocState = {};           // estado del formulario de OC activo
 let ocSplitOpen = false;
+let ocBudSplitOpen = false;
 document.addEventListener('click', ()=>{
   if(ocSplitOpen){ ocSplitOpen=false; const d=document.getElementById('oc-split-drop');if(d)d.classList.remove('open'); }
+  if(ocBudSplitOpen){ ocBudSplitOpen=false; const d2=document.getElementById('oc-bud-split-drop');if(d2)d2.classList.remove('open'); }
 });
 
 function ocNextNum(){
@@ -4506,8 +4515,9 @@ function ocFromHouse(houseId){
   }
 
   // 4. Navegar a Transacciones → OC
-  setTab('txn');
+  setTab('txn');            // ojo: setTab() resetea curOCId=null
   curTxnTab='oc';
+  curOCId='new';            // re-fijar DESPUÉS de setTab, si no, ocSaveSilent no guarda
   document.querySelectorAll('.txn-tab-btn').forEach(b=>b.classList.toggle('active',b.getAttribute('data-txn')==='oc'));
   renderOCForm();
 }
@@ -4657,7 +4667,7 @@ function renderOCForm(){
           <div class="oc-fld">
             <div class="oc-fld-label">Moneda</div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              ${st.vendorName ? (isCRC ?
+              ${st.vendorName ? ((st.vendorCurrency==='CRC' && !st.showUSD) ?
                 `<span title="Clic para cambiar a USD" onclick="ocSwapCurrency()" style="cursor:pointer;background:rgba(29,184,122,.1);color:var(--grn);border:1px solid rgba(29,184,122,.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600">CRC – Colones ⇄</span>` :
                 `<span title="Clic para cambiar a CRC" onclick="ocSwapCurrency()" style="cursor:pointer;background:rgba(45,140,240,.1);color:var(--acc);border:1px solid rgba(45,140,240,.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600">USD – Dólares ⇄</span>`) :
                 `<span style="background:var(--bg3);color:var(--t3);border:1px solid var(--border2);border-radius:20px;padding:3px 10px;font-size:11px">— sin proveedor —</span>`}
@@ -4727,8 +4737,16 @@ function renderOCForm(){
 
       <!-- Botón extra -->
       <div class="oc-extra-bar">
-        <button class="btn-oc-extra" onclick="ocOpenExtraModal()">${st.bodegaMode?'+ Agregar material a bodega':'+ Agregar producto fuera de presupuesto'}</button>
-        ${!st.bodegaMode?`<span style="font-size:10px;color:var(--t3)">Requiere autorización de supervisor si eres usuario Regular</span>`:''}
+        ${st.bodegaMode
+          ? `<button class="btn-oc-extra" onclick="ocOpenExtraModal()">+ Agregar material a bodega</button>`
+          : `<div class="split-btn-oc">
+              <button class="split-main-ocb" onclick="event.stopPropagation();ocOpenBudgetModal()">+ Comprar Producto Dentro de Presupuesto</button>
+              <button class="split-arrow-ocb" onclick="event.stopPropagation();ocBudSplitOpen=!ocBudSplitOpen;document.getElementById('oc-bud-split-drop').classList.toggle('open',ocBudSplitOpen)">▾</button>
+              <div class="split-drop-ocb" id="oc-bud-split-drop">
+                <button class="split-opt-oc" onclick="event.stopPropagation();ocBudSplitOpen=false;document.getElementById('oc-bud-split-drop').classList.remove('open');ocOpenExtraModal()">Agregar producto fuera de presupuesto</button>
+              </div>
+            </div>
+            <span style="font-size:10px;color:var(--t3)">Fuera de presupuesto requiere autorización</span>`}
       </div>
 
       <!-- Notas -->
@@ -5175,6 +5193,98 @@ function ocRefreshTotals(){
 // ── Solicitudes de autorización pendientes (persisten en SYS) ─────────────────
 let _extraReminderIv=null;
 function pendingAuthList(){ return SYS.pendingAuthRequests||(SYS.pendingAuthRequests=[]); }
+
+// ===== Comprar producto DENTRO de presupuesto (sin autorización) =====
+// Materiales del presupuesto de una casa que aún tienen cantidad disponible para pedir.
+function ocBudgetOptionsForHouse(houseId){
+  const p=curProj, st=ocState;
+  const h=(p.houses||[]).find(x=>String(x.id)===String(houseId));
+  const t=h&&h.typeId?(p.types||[]).find(x=>x.id===h.typeId):null;
+  if(!t||!t.categories) return [];
+  const xr=t.exchangeRate||p.exchangeRate||SYS.exchangeRate;
+  const out=[];
+  t.categories.forEach(cat=>(cat.lines||[]).filter(l=>l.matId||l.manualName).forEach(l=>{
+    const budQty=l.qty||0;
+    const orderedOther=ocOrderedQty(p,houseId,l.id,curOCId==='new'?null:curOCId);
+    const inThis=((st.lines[houseId]||[]).find(x=>String(x.lineId)===String(l.id)&&!x.isExtra)||{}).qty||0;
+    const avail=budQty-orderedOther-inThis;
+    if(avail>0.0001){
+      const mat=l.matId?MATS.find(m=>m.id===l.matId):null;
+      const unitPrice=linePrice(l);
+      out.push({ lineId:l.id, matId:l.matId||0,
+        name:l.manualName||(mat?mat.name:''),
+        unit:l.matId?(MATS.find(m=>m.id===l.matId)?.unit||'unid'):'unid',
+        avail:Math.round(avail*100)/100, budQty, orderedOther,
+        priceUSD:(l.currency==='CRC'?unitPrice/xr:unitPrice) });
+    }
+  }));
+  return out;
+}
+function ocOpenBudgetModal(houseId){
+  const st=ocState;
+  if(st.bodegaMode){ ocOpenExtraModal(); return; }
+  const ocHouses=(curProj.houses||[]).filter(h=>st.houseIds.includes(h.id));
+  if(!ocHouses.length){ alert('Agrega al menos una casa a la OC primero.'); return; }
+  let hid = (houseId!=null && st.houseIds.some(x=>String(x)===String(houseId))) ? houseId
+            : (typeof st.activeTab==='number'?st.activeTab:ocHouses[0].id);
+  const opts=ocBudgetOptionsForHouse(hid);
+  document.getElementById('modal-inner').innerHTML=`
+    <div class="modal-title">Comprar producto dentro de presupuesto
+      <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div style="font-size:12px;color:var(--t2);margin-bottom:12px">Agrega a la OC un material del presupuesto de la casa que aún tiene cantidad disponible. No requiere autorización.</div>
+    <div class="ff"><label>Casa</label>
+      <select id="oc-bud-house" onchange="ocOpenBudgetModal(this.value)">
+        ${ocHouses.map(h=>`<option value="${h.id}"${String(h.id)===String(hid)?' selected':''}>${h.num}</option>`).join('')}
+      </select>
+    </div>
+    <div class="ff"><label>Producto (disponible en presupuesto)</label>
+      <select id="oc-bud-line" onchange="ocBudSyncMax()">
+        ${opts.length?opts.map(o=>`<option value="${o.lineId}" data-avail="${o.avail}">${o.name} — disponible: ${o.avail} ${o.unit}</option>`).join('')
+          :'<option value="">— No hay más productos disponibles en esta casa —</option>'}
+      </select>
+    </div>
+    <div class="ff-row">
+      <div class="ff"><label>Cantidad a pedir</label><input id="oc-bud-qty" type="number" min="0" step="0.01" value="${opts.length?opts[0].avail:0}"/></div>
+      <div class="ff"><label>Máximo disponible</label><input id="oc-bud-max" value="${opts.length?opts[0].avail+' '+opts[0].unit:'—'}" disabled style="opacity:.7"/></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-save" onclick="ocAddBudgetLine()" ${opts.length?'':'disabled style="opacity:.5;cursor:not-allowed"'}>Agregar a la OC</button>
+    </div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function ocBudSyncMax(){
+  const sel=document.getElementById('oc-bud-line'); if(!sel)return;
+  const opt=sel.options[sel.selectedIndex];
+  const avail=opt?parseFloat(opt.getAttribute('data-avail'))||0:0;
+  const q=document.getElementById('oc-bud-qty'); if(q) q.value=avail;
+  const mx=document.getElementById('oc-bud-max'); if(mx) mx.value=avail;
+}
+function ocAddBudgetLine(){
+  const st=ocState;
+  const hv=document.getElementById('oc-bud-house').value;
+  const hid=(curProj.houses||[]).map(h=>h.id).find(x=>String(x)===String(hv));
+  const lineId=document.getElementById('oc-bud-line').value;
+  if(!lineId){ alert('Selecciona un producto disponible.'); return; }
+  let qty=parseFloat(document.getElementById('oc-bud-qty').value)||0;
+  if(qty<=0){ alert('Ingresa una cantidad mayor a 0.'); return; }
+  const opts=ocBudgetOptionsForHouse(hid);
+  const o=opts.find(x=>String(x.lineId)===String(lineId));
+  if(!o){ alert('Ese producto ya no tiene disponibilidad.'); return; }
+  if(qty>o.avail+0.0001){ qty=o.avail; }
+  if(!st.lines[hid]) st.lines[hid]=[];
+  const existing=st.lines[hid].find(x=>String(x.lineId)===String(o.lineId)&&!x.isExtra);
+  if(existing){ existing.qty=(existing.qty||0)+qty; }
+  else {
+    st.lines[hid].push({ lineId:o.lineId, matId:o.matId, manualName:o.name, unit:o.unit,
+      budQty:o.budQty, prevOrdered:o.orderedOther, qty, price:o.priceUSD, discPct:0, isExtra:false, authorizedBy:'' });
+  }
+  closeModal();
+  st.activeTab=hid; // ir a la pestaña de esa casa para ver la línea agregada
+  renderOCForm();
+  showToast('✅ Producto agregado a la OC');
+}
 
 function ocOpenExtraModal(){
   const st=ocState;
