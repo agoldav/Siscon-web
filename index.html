@@ -677,7 +677,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-11-DIFF · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-12-SELLO · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -743,7 +743,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-11-DIFF\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-11-DIFF</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-12-SELLO\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-12-SELLO</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -6645,7 +6645,7 @@ function renderGenericList(type){
       return `<div class="oc-list-item" onclick="openGenericTxn('${type}','${tx.id}')" style="${tx._pending?'border-left:3px solid var(--red)':''}">
         <span class="oc-num-badge" style="color:${def.color}">${type==='proveedor'&&tx.invoiceNumber?tx.invoiceNumber:tx.num}</span>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —'}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —'}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}</div>
           <div style="font-size:10px;color:var(--t2);margin-top:2px">${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.consecutivo?' · Consec: '+tx.consecutivo:''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
@@ -9435,11 +9435,20 @@ function vbLineBudgetCostUSD(l){
   });
   return {cost, hasBudget};
 }
-// Comparación total factura vs presupuesto (USD)
-function vbBudgetCompare(){
+// Comparación total factura vs presupuesto (USD). Opcional: pasar las líneas de una factura.
+function vbBudgetCompare(lines){
+  lines = lines || (vbState.lines||[]);
   let inv=0, bud=0, anyBudget=false;
-  (vbState.lines||[]).forEach(l=>{ inv+=vbLineNet(l); const b=vbLineBudgetCostUSD(l); bud+=b.cost; if(b.hasBudget)anyBudget=true; });
+  lines.forEach(l=>{ inv+=vbLineNet(l); const b=vbLineBudgetCostUSD(l); bud+=b.cost; if(b.hasBudget)anyBudget=true; });
   return {inv, bud, diff:inv-bud, over:(inv-bud)>0.005, anyBudget};
+}
+// Sello (badge) de presupuesto para la lista de facturas de proveedor ('' si no hay presupuesto de referencia)
+function vbBudgetSealBadge(bill){
+  const bc=vbBudgetCompare(bill.lines||[]);
+  if(!bc.anyBudget) return '';
+  return bc.over
+    ? `<span title="Costo mayor a presupuesto (Δ +${fmt(bc.diff)})" style="background:rgba(212,148,26,.16);color:var(--amb);border:1px solid rgba(212,148,26,.4);font-size:9px;font-weight:600;padding:1px 7px;border-radius:10px;white-space:nowrap;flex-shrink:0">⚠ Sobre presup.</span>`
+    : `<span title="Costos según presupuesto (Δ ${fmt(bc.diff)})" style="background:rgba(29,184,122,.16);color:var(--grn);border:1px solid rgba(29,184,122,.4);font-size:9px;font-weight:600;padding:1px 7px;border-radius:10px;white-space:nowrap;flex-shrink:0">✓ Según presup.</span>`;
 }
 function vbOpenAssign(i){
   const l=vbState.lines[i];
