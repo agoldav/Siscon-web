@@ -677,7 +677,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-8-OC · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-9-PAGO · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -743,7 +743,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-8-OC\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-8-OC</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-9-PAGO\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-9-PAGO</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -6592,8 +6592,8 @@ const TXN_DEFS={
   notas:    {key:'creditNotes',label:'Nota de Crédito',        numPfx:'NC',  party:'Cliente',     partySrc:'client', qbo:'CreditMemo', color:'#d4941a'},
   requis:   {key:'requis',     label:'Requisición de Materiales',numPfx:'REQ',party:'Solicitante', partySrc:'user',   qbo:null,         color:'#7c6fef'},
 };
-const TXN_STATUS_COLOR={'Borrador':'rgba(74,90,114,.2)','Emitida':'rgba(45,140,240,.14)','Pagada':'rgba(29,184,122,.14)','Pagada parcial':'rgba(212,148,26,.16)','Registrada':'rgba(45,140,240,.14)','Anulada':'rgba(226,75,74,.14)'};
-const TXN_STATUS_TEXT ={'Borrador':'#8a9ab5','Emitida':'#2d8cf0','Pagada':'#1db87a','Pagada parcial':'#d4941a','Registrada':'#2d8cf0','Anulada':'#e24b4a'};
+const TXN_STATUS_COLOR={'Borrador':'rgba(74,90,114,.2)','Pendiente de Pago':'rgba(232,120,58,.16)','Emitida':'rgba(45,140,240,.14)','Pagada':'rgba(29,184,122,.14)','Pagada parcial':'rgba(212,148,26,.16)','Registrada':'rgba(45,140,240,.14)','Anulada':'rgba(226,75,74,.14)'};
+const TXN_STATUS_TEXT ={'Borrador':'#8a9ab5','Pendiente de Pago':'#e8783a','Emitida':'#2d8cf0','Pagada':'#1db87a','Pagada parcial':'#d4941a','Registrada':'#2d8cf0','Anulada':'#e24b4a'};
 
 function txnBodyEl(){ return document.getElementById('txn-body')||document.getElementById('content'); }
 function txnArr(type){ const k=TXN_DEFS[type].key; if(!curProj[k])curProj[k]=[]; return curProj[k]; }
@@ -9201,6 +9201,20 @@ function renderVendorBill(){
       <button class="oc-btn-del" onclick="vbState.lines.splice(${i},1);renderVendorBill()">✕</button>
     </div>${l.assign&&l.assign.length?`<div style="padding:0 16px 4px 78px;font-size:9px;color:${assignOk?'var(--grn)':'var(--amb)'}">→ ${assignedTxt}${!assignOk?' (la suma debe igualar '+(l.qty||0)+')':''}</div>`:''}`;
   }).join('');
+  // Botón/estado de PAGO (flujo Borrador → Pendiente de Pago → Pagada)
+  const pagarBtn = (curTxnId==='new') ? '' : (()=>{
+    const s=st.status||'Borrador';
+    if(s==='Pagada'){
+      const pm=st.payment||{};
+      const amt=pm.amount!=null ? (pm.currency==='CRC'?('₡'+Number(pm.amount).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})):fmt(pm.amount)) : '';
+      return `<span style="display:inline-flex;align-items:center;gap:8px;font-size:11px;color:var(--grn)">✓ Pagada${amt?' · '+amt:''}${pm.method?' · '+pm.method:''}${pm.date?' · '+pm.date:''}
+        <a onclick="vbRevertPago()" style="color:var(--t3);cursor:pointer;text-decoration:underline;font-size:10px">revertir</a></span>`;
+    }
+    if(s==='Pendiente de Pago'){
+      return `<button onclick="vbPagar()" style="background:var(--grn);color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer">💵 Marcar Pagada</button>`;
+    }
+    return `<button onclick="vbPagar()" style="background:var(--org);color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer">💵 Marcar Pendiente de Pago</button>`;
+  })();
   txnBodyEl().innerHTML=`
     <datalist id="vb-items-list">${items.map(it=>`<option value="${(it.name||'').replace(/"/g,'&quot;')}">`).join('')}</datalist>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
@@ -9211,9 +9225,10 @@ function renderVendorBill(){
     </div>
     <div class="oc-form-wrap">
       <div class="oc-form-header">
-        <div style="display:flex;align-items:center;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-size:14px;font-weight:600;color:var(--org)">${st.num}</span>
           ${txnBadge(st.status)}
+          ${pagarBtn}
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:10px;color:var(--t3)">Creado por ${st.createdBy} · ${st.createdAt}</span>
@@ -9574,6 +9589,80 @@ function vbApplyToHouses(data){
     });
   });
   curProj.areaInstalled=curProj.houses.reduce((s,x)=>s+(x.areaInstalled||0),0);
+}
+// ===== Flujo de PAGO de factura de proveedor (Borrador → Pendiente de Pago → Pagada) =====
+function vbPersistBill(){
+  const arr=txnArr('proveedor');
+  const idx=arr.findIndex(x=>String(x.id)===String(curTxnId));
+  if(idx>=0){ vbState.lastModified=new Date().toLocaleString('es-CR'); arr[idx]=JSON.parse(JSON.stringify(vbState)); }
+  if(curProj) curProj.lastActivity=Date.now();
+  saveData();
+}
+function vbPagar(){
+  const st=vbState;
+  if(curTxnId==='new'){ alert('Guarda la factura primero (botón Guardar) y luego márcala como pagada.'); return; }
+  const s=st.status||'Borrador';
+  if(s==='Pagada'){ return; }
+  if(s==='Pendiente de Pago'){ vbOpenPaymentModal(); return; }
+  // Cualquier otro estado (Borrador/Registrada/Emitida) → Pendiente de Pago
+  st.status='Pendiente de Pago';
+  vbPersistBill();
+  logAction(`Factura "${st.num}" marcada Pendiente de Pago`,'log-edit','Factura de Proveedor',null,{num:st.num});
+  showToast('Factura marcada como Pendiente de Pago');
+  renderVendorBill();
+}
+function vbOpenPaymentModal(){
+  const st=vbState;
+  const isCRC=vbIsCRC();
+  const xr=st.exchangeRate||tcGet();
+  const defAmt=(isCRC ? (st.totalUSD||0)*xr : (st.totalUSD||0)).toFixed(2);
+  const sym=isCRC?'₡':'$';
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('modal-inner').innerHTML=`
+    <div class="modal-title">Registrar pago
+      <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div style="font-size:12px;color:var(--t2);margin-bottom:12px">Factura <strong>${st.num}</strong> — ${st.party||''}</div>
+    <div class="ff-row">
+      <div class="ff"><label>Monto pagado (${sym})</label><input id="vb-pay-amount" type="number" step="0.01" min="0" value="${defAmt}"/></div>
+      <div class="ff"><label>Fecha de pago</label><input id="vb-pay-date" type="date" value="${today}"/></div>
+    </div>
+    <div class="ff"><label>Método de pago</label>
+      <select id="vb-pay-method">
+        <option>Tarjeta</option>
+        <option>Transferencia</option>
+        <option>Caja Chica</option>
+        <option>Reembolso</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-save" onclick="vbConfirmPayment()">Marcar Pagada</button>
+    </div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function vbConfirmPayment(){
+  const st=vbState;
+  const amount=parseFloat((document.getElementById('vb-pay-amount')||{}).value)||0;
+  const date=(document.getElementById('vb-pay-date')||{}).value||new Date().toISOString().slice(0,10);
+  const method=(document.getElementById('vb-pay-method')||{}).value||'Transferencia';
+  st.payment={ amount, currency: vbIsCRC()?'CRC':'USD', date, method };
+  st.status='Pagada';
+  vbPersistBill();
+  logAction(`Factura "${st.num}" marcada Pagada (${method})`,'log-edit','Factura de Proveedor',null,{num:st.num,method,amount});
+  closeModal();
+  showToast('✅ Factura marcada como Pagada');
+  renderVendorBill();
+}
+function vbRevertPago(){
+  const st=vbState;
+  if(!confirm('¿Revertir el pago? La factura volverá a "Pendiente de Pago".')) return;
+  st.status='Pendiente de Pago';
+  st.payment=null;
+  vbPersistBill();
+  logAction(`Pago revertido en factura "${st.num}"`,'log-edit','Factura de Proveedor',null,{num:st.num});
+  showToast('Pago revertido');
+  renderVendorBill();
 }
 function saveVendorBill(sync){
   const st=vbState;
