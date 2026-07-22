@@ -678,7 +678,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-16-GAR1 · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-17-GAR2 · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -744,7 +744,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-16-GAR1\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-16-GAR1</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-17-GAR2\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-17-GAR2</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -1214,6 +1214,7 @@ let curTxnTab='oc',curTxnType=null,curTxnId=null,txnState={};
 let houseFilter='Todos',houseSortCol=null,houseSortAsc=true;
 let chatOpen=false,chatMsgs=[{r:'a',t:'¡Hola! Soy el asistente de Siscon. ¿En qué puedo ayudarte?'}],chatLoading=false;
 let ctMats=[], ctForm={}, ctCategories=[], showCreate=false, typeEditId=null, ctIVA=false;
+let garBudgetGid=null;   // id de garantía cuando el editor de "Tipo" se usa como presupuesto de garantía
 let dashSort='alpha-asc';
 let hpSnapshot=null;
 let docBlobMap={};
@@ -2356,32 +2357,42 @@ function calcAllCatCosts(){
 }
 
 function renderCreateType(){
+  const isGar=!!garBudgetGid; const gw=isGar?garFind(garBudgetGid):null;
+  const billable=isGar?!!ctForm.billable:true;   // en garantía no facturable → sin utilidad/admin
   const xr=parseFloat(ctForm.exchangeRate)||SYS.exchangeRate;
   const matCost=calcAllCatCosts();
   const margen=parseFloat(ctForm.margen)||0;
   let utilidad=ctForm.utilidad!==''&&ctForm.utilidad!==undefined?parseFloat(ctForm.utilidad)||0
     :(margen>0&&margen<100?matCost/(1-margen/100)-matCost:0);
-  const adminPct=parseFloat(ctForm.adminPct)||2;
+  let adminPct=parseFloat(ctForm.adminPct)||2;
+  if(isGar&&!billable){ utilidad=0; adminPct=0; }
   const admin=(matCost+utilidad)*(adminPct/100);
   const impuesto=(matCost+utilidad+admin)*0.13;
   const salePrice=matCost+utilidad+admin+(ctIVA?impuesto:0);
   const budget=ctIVA?matCost*(1+0.13):matCost;
+  const lockUA=isGar&&!billable;   // bloquear utilidad/margen/admin
 
   document.getElementById('content').innerHTML=`
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-      <button class="btn-cancel" onclick="showCreate=false;typeEditId=null;renderBreadcrumb();renderTypes()">← Volver</button>
-      <div class="th-title">${typeEditId?'Editar Tipo':'Crear Nuevo Tipo'}${(typeEditId && (curProj.types.find(t=>t.id===typeEditId)||{}).typeLocked)?` <span title="Tipo bloqueado — solicita desbloqueo al administrador" style="font-size:12px">🔒</span>`:''}</div>
-      <button class="btn-history" onclick="showLogModal('Tipos',curProj.id)" style="margin-left:auto">Log</button>
+      <button class="btn-cancel" onclick="${isGar?`garCancelBudget()`:`showCreate=false;typeEditId=null;renderBreadcrumb();renderTypes()`}">← Volver</button>
+      <div class="th-title">${isGar?('Presupuesto · Garantía '+(gw?gw.num:'')+(gw&&gw.house?' · '+gw.house:'')):(typeEditId?'Editar Tipo':'Crear Nuevo Tipo')}${(typeEditId && (curProj.types.find(t=>t.id===typeEditId)||{}).typeLocked)?` <span title="Tipo bloqueado — solicita desbloqueo al administrador" style="font-size:12px">🔒</span>`:''}</div>
+      ${!isGar?`<button class="btn-history" onclick="showLogModal('Tipos',curProj.id)" style="margin-left:auto">Log</button>`:''}
     </div>
     <div class="create-layout">
       <div>
         <div class="panel">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
             <div class="panel-title" style="margin-bottom:0">Información General</div>
-            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t2);cursor:pointer">
-              <input type="checkbox" ${ctIVA?'checked':''} onchange="ctIVA=this.checked;renderCreateType()" style="width:auto;background:transparent;padding:0"/>IVA
-            </label>
+            <div style="display:flex;align-items:center;gap:12px">
+              ${isGar?`<label style="display:flex;align-items:center;gap:5px;font-size:11px;color:${billable?'var(--grn)':'var(--t2)'};cursor:pointer;font-weight:600" title="Si se activa, la garantía se le puede cobrar al cliente y se habilitan Utilidad y Costo Administrativo">
+                <input type="checkbox" ${billable?'checked':''} onchange="ctForm.billable=this.checked;renderCreateType()" style="width:auto;background:transparent;padding:0"/>Facturable al cliente
+              </label>`:''}
+              <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t2);cursor:pointer">
+                <input type="checkbox" ${ctIVA?'checked':''} onchange="ctIVA=this.checked;renderCreateType()" style="width:auto;background:transparent;padding:0"/>IVA
+              </label>
+            </div>
           </div>
+          ${isGar&&!billable?`<div style="font-size:10px;color:var(--t3);background:var(--bg3);border-radius:6px;padding:6px 9px;margin-bottom:8px">Garantía no facturable: Utilidad y Costo Administrativo quedan en $0. Activa "Facturable al cliente" para habilitarlos.</div>`:''}
           <div class="ff"><label>Nombre del Tipo</label><input id="ct-name" value="${ctForm.name||''}" placeholder="Tipo A" onchange="ctForm.name=this.value"/></div>
           <div class="ff"><label>Área (m²)</label><input id="ct-area" type="number" value="${ctForm.area||''}" placeholder="85" onchange="ctForm.area=parseFloat(this.value)||0"/></div>
           <div class="ff"><label>Tipo de Cambio (₡/$)</label><input id="ct-xr" type="number" value="${xr}" step="1" onchange="ctForm.exchangeRate=parseFloat(this.value)||SYS.exchangeRate;renderCreateType()"/></div>
@@ -2389,11 +2400,11 @@ function renderCreateType(){
             <input value="${fmt(budget)}" readonly style="color:var(--acc)"/>
           </div>
           <div class="ff" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <div><label>Margen (%)</label><input id="ct-margen" type="number" value="${ctForm.margen||30}" min="0" max="99" step="0.1" onchange="ctForm.margen=parseFloat(this.value)||0;ctForm.utilidad='';renderCreateType()"/></div>
-            <div><label>Utilidad ($)</label><input id="ct-util" type="number" value="${utilidad.toFixed(2)}" onchange="ctForm.utilidad=parseFloat(this.value)||0;updateCtMargen()"/></div>
+            <div><label>Margen (%)</label><input id="ct-margen" type="number" value="${lockUA?0:(ctForm.margen||30)}" min="0" max="99" step="0.1" ${lockUA?'disabled style="opacity:.5"':''} onchange="ctForm.margen=parseFloat(this.value)||0;ctForm.utilidad='';renderCreateType()"/></div>
+            <div><label>Utilidad ($)</label><input id="ct-util" type="number" value="${utilidad.toFixed(2)}" ${lockUA?'disabled style="opacity:.5"':''} onchange="ctForm.utilidad=parseFloat(this.value)||0;updateCtMargen()"/></div>
           </div>
           <div class="ff" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <div><label>Administración (%)</label><input id="ct-adm" type="number" value="${adminPct}" min="0" step="0.1" onchange="ctForm.adminPct=parseFloat(this.value)||2;renderCreateType()"/></div>
+            <div><label>Administración (%)</label><input id="ct-adm" type="number" value="${adminPct}" min="0" step="0.1" ${lockUA?'disabled style="opacity:.5"':''} onchange="ctForm.adminPct=parseFloat(this.value)||2;renderCreateType()"/></div>
             <div><label>Monto Admin ($)</label><input value="${fmt(admin)}" readonly style="color:var(--amb)"/></div>
           </div>
           <div class="ff"><label>Impuestos IVA 13% ($)</label><input value="${fmt(impuesto)}" readonly style="color:var(--pur)"/></div>
@@ -2417,9 +2428,14 @@ function renderCreateType(){
           ${ctCategories.map((cat,ci)=>renderCatBlock(cat,ci)).join('')}
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-          <button class="btn-cancel" onclick="showCreate=false;typeEditId=null;renderBreadcrumb();renderTypes()">Cancelar</button>
-          ${typeEditId?`<button class="btn-cancel" style="color:var(--red);border-color:var(--red)" onclick="deleteType(${typeEditId})">Eliminar</button>`:''}
-          <button class="btn-save" onclick="saveType()">Guardar Tipo</button>
+          ${isGar?`
+            <button class="btn-cancel" onclick="garCancelBudget()">Cancelar</button>
+            <button class="btn-save" onclick="saveGarBudget()">Guardar Presupuesto</button>
+          `:`
+            <button class="btn-cancel" onclick="showCreate=false;typeEditId=null;renderBreadcrumb();renderTypes()">Cancelar</button>
+            ${typeEditId?`<button class="btn-cancel" style="color:var(--red);border-color:var(--red)" onclick="deleteType(${typeEditId})">Eliminar</button>`:''}
+            <button class="btn-save" onclick="saveType()">Guardar Tipo</button>
+          `}
         </div>
       </div>
     </div>`;
@@ -4363,8 +4379,53 @@ function addGarantia(gid){
 }
 function garOpen(gid){ if(gid) addGarantia(gid); }
 function garGenerarPresupuesto(gid){
-  const g=garFind(gid); if(!g) return;
-  alert('Editor de presupuesto de garantía — en construcción (Fase 2 del workflow).\n\nLa Garantía '+g.num+' ya quedó guardada; el presupuesto se le asociará aquí.');
+  const g=garFind(gid); if(!g){alert('Garantía no encontrada');return;}
+  if(g.approval&&g.approval.status==='aprobado'){ alert('El presupuesto ya fue aprobado y no se puede editar. Solicita autorización al administrador para modificarlo.'); return; }
+  closeModal();
+  garBudgetGid=gid; showCreate=true; typeEditId=null;
+  const b=g.budget;
+  ctIVA = b? !!b.ivaOn : false;
+  if(b){
+    ctForm={name:b.name||('Garantía '+g.num),area:b.area||0,budget:b.matCost||0,salePrice:b.salePrice||0,
+      utilityPct:0,margen:b.margen||0,adminPct:b.adminPct||0,notes:b.notes||'',color:'#e8783a',
+      utilidad:b.billable?(b.utilidad||''):0,billable:!!b.billable,exchangeRate:b.exchangeRate||SYS.exchangeRate};
+    ctCategories=JSON.parse(JSON.stringify(b.categories||defaultCategories()));
+  } else {
+    ctForm={name:'Garantía '+g.num+(g.house?' - '+g.house:''),area:0,budget:0,salePrice:0,utilityPct:0,
+      margen:0,adminPct:0,notes:'',color:'#e8783a',utilidad:0,billable:false,exchangeRate:SYS.exchangeRate};
+    ctCategories=defaultCategories();
+  }
+  if(typeof renderBreadcrumb==='function')renderBreadcrumb();
+  renderCreateType();
+}
+function saveGarBudget(){
+  const g=garFind(garBudgetGid); if(!g){alert('Garantía no encontrada');return;}
+  const billable=!!ctForm.billable;
+  const matCost=calcAllCatCosts();
+  const margen=parseFloat(ctForm.margen)||0;
+  let utilidad=billable?(ctForm.utilidad!==''&&ctForm.utilidad!==undefined?parseFloat(ctForm.utilidad)||0:(margen>0&&margen<100?matCost/(1-margen/100)-matCost:0)):0;
+  const adminPct=billable?(parseFloat(document.getElementById('ct-adm')?.value)||ctForm.adminPct||0):0;
+  const admin=(matCost+utilidad)*(adminPct/100);
+  const impuesto=ctIVA?(matCost+utilidad+admin)*0.13:0;
+  const salePrice=matCost+utilidad+admin+impuesto;
+  const area=parseFloat(document.getElementById('ct-area')?.value)||ctForm.area||0;
+  const name=(document.getElementById('ct-name')?.value||'').trim()||ctForm.name||('Garantía '+g.num);
+  if(!ctCategories.some(c=>(c.lines||[]).some(l=>l.matId||l.manualName))){ alert('Agrega al menos un material al presupuesto de la garantía.'); return; }
+  g.budget={ name, area, categories:JSON.parse(JSON.stringify(ctCategories)),
+    matCost, utilidad, admin, adminPct, margen, iva:impuesto, ivaOn:!!ctIVA, salePrice, billable,
+    exchangeRate:parseFloat(ctForm.exchangeRate)||SYS.exchangeRate, savedAt:new Date().toLocaleString('es-CR') };
+  g.billable=billable;
+  logAction(`Presupuesto de Garantía ${g.num} guardado (${billable?'facturable':'no facturable'})`,'log-create','Garantías',null,{num:g.num,total:Math.round(salePrice)});
+  const gid=g.id; garBudgetGid=null; showCreate=false;
+  curProj.lastActivity=Date.now(); saveData();
+  if(typeof renderBreadcrumb==='function')renderBreadcrumb();
+  renderGarantias();
+  garShowSavedActions(gid);
+}
+function garCancelBudget(){
+  garBudgetGid=null; showCreate=false;
+  if(typeof renderBreadcrumb==='function')renderBreadcrumb();
+  renderGarantias();
 }
 function saveGarantia(gid){
   const p=curProj;
@@ -4398,19 +4459,32 @@ function saveGarantia(gid){
 // Tras guardar: no se cierra, se ofrecen los siguientes pasos
 function garShowSavedActions(gid){
   const g=garFind(gid); if(!g) return;
+  const b=g.budget;
+  const appr=g.approval&&g.approval.status;
+  const budgetInfo = b?`<div style="background:${b.billable?'rgba(29,184,122,.1)':'var(--bg3)'};border:1px solid ${b.billable?'rgba(29,184,122,.3)':'var(--border)'};border-radius:var(--r);padding:10px 12px;margin-bottom:12px;font-size:12px">
+      <div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--t2)">Presupuesto</span><strong style="color:var(--t1)">${fmt(b.salePrice)}${b.ivaOn?' (c/IVA)':''}</strong></div>
+      <div style="font-size:11px;color:var(--t3);margin-top:3px">${b.billable?'✅ Facturable al cliente':'No facturable (interno)'}${appr?` · <span style="color:${appr==='aprobado'?'var(--grn)':appr==='rechazado'?'var(--red)':'var(--amb)'}">${appr==='aprobado'?'Aprobado':appr==='rechazado'?'Rechazado':'Aprobación pendiente'}</span>`:''}</div>
+    </div>`:'';
   document.getElementById('modal-inner').innerHTML=`
-    <div class="modal-title">Garantía ${g.num} guardada
+    <div class="modal-title">Garantía ${g.num}
       <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
     </div>
-    <div style="background:var(--bg3);border-radius:var(--r);padding:11px 13px;margin-bottom:14px;font-size:12px;color:var(--t2)">
+    <div style="background:var(--bg3);border-radius:var(--r);padding:11px 13px;margin-bottom:12px;font-size:12px;color:var(--t2)">
       <div>Casa <strong style="color:var(--t1)">${g.house||'—'}</strong>${g.subcontractor?` · Subcontratista <strong style="color:var(--t1)">${g.subcontractor}</strong>`:''}</div>
       <div style="margin-top:5px;color:var(--t1)">${(g.desc||'').replace(/</g,'&lt;')}</div>
     </div>
-    <div class="modal-actions" style="gap:8px">
+    ${budgetInfo}
+    <div class="modal-actions" style="gap:8px;flex-wrap:wrap">
       <button class="btn-cancel" onclick="closeModal()">Cerrar</button>
-      <button class="btn-save" onclick="garGenerarPresupuesto('${g.id}')">Generar Presupuesto</button>
+      ${b?`<button class="btn-cancel" onclick="garGenerarPresupuesto('${g.id}')">${appr==='aprobado'?'Ver presupuesto':'Ver / Editar presupuesto'}</button>`:''}
+      ${b&&appr!=='aprobado'&&appr!=='pendiente'?`<button class="btn-save" style="background:var(--amb)" onclick="garSolicitarAprobacion('${g.id}')">Solicitar Aprobación</button>`:''}
+      ${!b?`<button class="btn-save" onclick="garGenerarPresupuesto('${g.id}')">Generar Presupuesto</button>`:''}
     </div>`;
   document.getElementById('modal').classList.remove('hidden');
+}
+function garSolicitarAprobacion(gid){
+  const g=garFind(gid); if(!g||!g.budget){ alert('Genera el presupuesto primero.'); return; }
+  alert('Solicitud de aprobación de garantía — Fase 3 del workflow (en construcción).\n\nEnviará la solicitud al administrador con la lista de materiales, cantidades, costos y total con IVA.');
 }
 function deleteGarantia(i){
   if(!confirm('¿Eliminar esta garantía?'))return;
