@@ -677,7 +677,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-13-RECUP · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-14-RECUP2 · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -743,7 +743,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-13-RECUP\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-13-RECUP</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-14-RECUP2\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-14-RECUP2</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -3018,12 +3018,6 @@ function renderCasas(){
   const totalSpent=projSpent(p);
   const totalSale=p.houses.reduce((s,h)=>{const t=p.types.find(x=>x.id===h.typeId);return s+(t?t.salePrice:0);},0);
   const totalUtil=totalSale>0?((totalSale-totalSpent)/totalSale*100):0;
-  // ── Recuperación de dinero (proyecto) ──
-  const totalBilled=p.houses.reduce((s,h)=>s+houseBilling(p,h).montoFact,0);
-  const recPend=Math.max(0,totalSpent-totalBilled);      // gasto aún no recuperado vía facturación
-  const porFacturar=Math.max(0,totalSale-totalBilled);   // del precio de venta, lo que falta facturar
-  const recPctRaw=totalSpent>0?Math.round(totalBilled/totalSpent*100):null;
-  const recPct=totalSpent>0?Math.min(100,totalBilled/totalSpent*100):0;
   let list=houseFilter==='Todos'?[...p.houses]:p.houses.filter(h=>h.status===houseFilter);
   if(houseSortCol){
     list.sort((a,b)=>{
@@ -3062,31 +3056,6 @@ function renderCasas(){
           <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">${l}</div>
           <div style="font-size:16px;font-weight:600;color:${c}">${v}</div>
         </div>`).join('')}
-    </div>
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;margin-bottom:10px">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:9px">
-        <div style="font-size:12px;font-weight:600;color:var(--t1)">💰 Recuperación de Dinero</div>
-        <div style="font-size:11px;font-weight:600;color:${recPctRaw==null?'var(--t3)':(recPctRaw>=100?'var(--grn)':'var(--amb)')}">${recPctRaw==null?'Sin gasto registrado':recPctRaw+'% del gasto recuperado'}</div>
-      </div>
-      <div style="height:14px;background:var(--border2);border-radius:7px;overflow:hidden;display:flex" title="Del gasto: verde = ya facturado (recuperado), ámbar = pendiente por recuperar">
-        <div style="width:${recPct}%;background:var(--grn);transition:width .3s"></div>
-        <div style="width:${100-recPct}%;background:var(--amb);transition:width .3s"></div>
-      </div>
-      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:10px;color:var(--t3)">
-        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--grn);margin-right:4px"></span>Facturado (recuperado)</span>
-        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--amb);margin-right:4px"></span>Pendiente por recuperar</span>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:8px;margin-top:11px;padding-top:10px;border-top:1px solid var(--border)">
-        ${[['Gastado total',fmt(totalSpent),'var(--t1)','Dinero ya gastado en el proyecto'],
-           ['Facturado al cliente',fmt(totalBilled),'var(--grn)','Total facturado al cliente'],
-           ['Pendiente por recuperar',fmt(recPend),recPend>0?'var(--amb)':'var(--grn)','Gasto que aún no se ha facturado'],
-           ['Aún no facturado',fmt(porFacturar),porFacturar>0?'var(--acc)':'var(--grn)','Del precio de venta, lo que falta por facturar']
-          ].map(([l,v,c,t])=>`
-          <div title="${t}">
-            <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">${l}</div>
-            <div style="font-size:15px;font-weight:600;color:${c}">${v}</div>
-          </div>`).join('')}
-      </div>
     </div>
     <div class="filter-bar" style="align-items:center">
       <span style="font-size:11px;color:var(--t3)">Filtrar:</span>
@@ -6539,6 +6508,7 @@ function renderInfoTab(){
       <div class="kpi"><div class="kpi-l">Disponible</div><div class="kpi-v grn">${fmt(m.remaining)}</div></div>
       <div class="kpi"><div class="kpi-l">% Avance</div><div class="kpi-v amb">${m.progPct}%</div></div>
     </div>
+    ${projectRecoveryCardHtml(p)}
     <div class="chart-card" style="margin-bottom:14px">
       <h4>Supuestos de flujo de efectivo</h4>
       <div class="csub">Se usan para proyectar el flujo. Se autoajustan cuando haya historial real de facturas/pagos.</div>
@@ -8605,6 +8575,78 @@ function projGastado(p){ return projSpent(p); }
 function projBilled(p){ return p.houses.reduce((s,h)=>s+houseBilling(p,h).montoFact,0); }
 function projPendienteGasto(p){ return Math.max(0,(p.budget||0)-projGastado(p)); }
 function projUnbilled(p){ return Math.max(0,projGastado(p)-projBilled(p)); }
+// ===== Recuperación de dinero (gastado vs facturado) =====
+function getProjectRecoveryData(p){
+  const spent=projGastado(p), billed=projBilled(p);
+  const saleH=(p.houses||[]).reduce((s,h)=>{const t=(p.types||[]).find(x=>x.id===h.typeId);return s+(t?(t.salePrice||0):0);},0);
+  const sale=saleH||(p.salePrice||0);
+  const pend=Math.max(0,spent-billed);
+  const porFacturar=Math.max(0,sale-billed);
+  return {spent,billed,sale,pend,porFacturar,
+    pctRaw: spent>0?Math.round(billed/spent*100):null,
+    pct: spent>0?Math.min(100,billed/spent*100):0};
+}
+function recoveryBarHtml(r){
+  return `<div style="height:14px;background:var(--border2);border-radius:7px;overflow:hidden;display:flex" title="Del gasto: verde = ya facturado (recuperado), ámbar = pendiente por recuperar">
+    <div style="width:${r.pct}%;background:var(--grn);transition:width .3s"></div>
+    <div style="width:${100-r.pct}%;background:var(--amb);transition:width .3s"></div>
+  </div>
+  <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:10px;color:var(--t3)">
+    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--grn);margin-right:4px"></span>Facturado (recuperado)</span>
+    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--amb);margin-right:4px"></span>Pendiente por recuperar</span>
+  </div>`;
+}
+function recoveryTilesHtml(r){
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:8px;margin-top:11px;padding-top:10px;border-top:1px solid var(--border)">
+    ${[['Gastado total',fmt(r.spent),'var(--t1)','Dinero ya gastado'],
+       ['Facturado al cliente',fmt(r.billed),'var(--grn)','Total facturado al cliente'],
+       ['Pendiente por recuperar',fmt(r.pend),r.pend>0?'var(--amb)':'var(--grn)','Gasto que aún no se ha facturado'],
+       ['Aún no facturado',fmt(r.porFacturar),r.porFacturar>0?'var(--acc)':'var(--grn)','Del precio de venta, lo que falta por facturar']
+      ].map(([l,v,c,t])=>`<div title="${t}"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">${l}</div><div style="font-size:15px;font-weight:600;color:${c}">${v}</div></div>`).join('')}
+  </div>`;
+}
+function projectRecoveryCardHtml(p){
+  const r=getProjectRecoveryData(p);
+  return `<div class="chart-card" style="margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:9px">
+      <h4 style="margin:0">💰 Recuperación de Dinero</h4>
+      <div style="font-size:11px;font-weight:600;color:${r.pctRaw==null?'var(--t3)':(r.pctRaw>=100?'var(--grn)':'var(--amb)')}">${r.pctRaw==null?'Sin gasto registrado':r.pctRaw+'% del gasto recuperado'}</div>
+    </div>
+    ${recoveryBarHtml(r)}
+    ${recoveryTilesHtml(r)}
+  </div>`;
+}
+function globalRecoveryCardHtml(list){
+  const s=dstats();
+  const rows=(list||[]).map(p=>({p, r:getProjectRecoveryData(p)}));
+  const agg=rows.reduce((a,x)=>({spent:a.spent+x.r.spent,billed:a.billed+x.r.billed,sale:a.sale+x.r.sale}),{spent:0,billed:0,sale:0});
+  const R={spent:agg.spent,billed:agg.billed,sale:agg.sale,
+    pend:Math.max(0,agg.spent-agg.billed), porFacturar:Math.max(0,agg.sale-agg.billed),
+    pctRaw: agg.spent>0?Math.round(agg.billed/agg.spent*100):null,
+    pct: agg.spent>0?Math.min(100,agg.billed/agg.spent*100):0};
+  const det=rows.slice().sort((a,b)=>b.r.pend-a.r.pend);
+  return `<div class="chart-card" style="margin-top:14px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <div><h4 style="margin:0">💰 Recuperación de Dinero · <span style="color:${R.pend>0?'var(--amb)':'var(--grn)'}">${fmt(R.pend)}</span> por recuperar</h4>
+        <div class="csub">Todos los proyectos (${rows.length})${R.pctRaw!=null?' · '+R.pctRaw+'% del gasto recuperado':''}</div></div>
+      <button class="btn-sm" onclick="statsToggle('recOpen')">${s.recOpen?'▴ Ocultar detalle':'▾ Ver detalle por proyecto'}</button>
+    </div>
+    ${recoveryBarHtml(R)}
+    ${recoveryTilesHtml(R)}
+    ${s.recOpen?`<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);overflow-x:auto">
+      <table class="rec-table" style="width:100%">
+        <thead><tr><th>Proyecto</th><th class="r">Gastado</th><th class="r">Facturado</th><th class="r">Pendiente</th><th style="width:120px">Recuperado</th></tr></thead>
+        <tbody>${det.length?det.map(({p,r})=>`<tr>
+          <td style="color:var(--t1)">${p.name}</td>
+          <td class="r">${fmt(r.spent)}</td>
+          <td class="r" style="color:var(--grn)">${fmt(r.billed)}</td>
+          <td class="r" style="color:${r.pend>0?'var(--amb)':'var(--grn)'}">${r.pend>0?fmt(r.pend):'—'}</td>
+          <td><div style="display:flex;align-items:center;gap:6px"><div class="rec-bar-wrap" style="flex:1;height:6px;margin-top:0"><div class="rec-bar" style="width:${r.pct}%;background:${r.pctRaw!=null&&r.pctRaw>=100?'var(--grn)':'var(--amb)'}"></div></div><span style="font-size:10px;color:var(--t3);min-width:32px;text-align:right">${r.pctRaw==null?'—':r.pctRaw+'%'}</span></div></td>
+        </tr>`).join(''):'<tr><td colspan="5" style="color:var(--t3);font-size:11px">Sin proyectos</td></tr>'}</tbody>
+      </table>
+    </div>`:''}
+  </div>`;
+}
 function projInTime(p,st){
   if(st.time==='todo')return true;
   const d=p.startDate?new Date(p.startDate):null; if(!d||isNaN(d))return true;
@@ -8737,6 +8779,7 @@ function renderDashStats(){
         ${svgChart1(items,s.showGastado,s.showPendiente)}
         ${legend([{label:'Valor de venta',color:'#2d8cf0'}].concat(s.showGastado?[{label:'Gastado',color:'#e8783a'}]:[]).concat(s.showPendiente?[{label:'Pendiente por gastar',color:'#d4941a'}]:[]))}
       </div>
+      ${globalRecoveryCardHtml(list)}
       <div class="info-grid" style="margin-top:14px">
         <div class="chart-card">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:6px">
