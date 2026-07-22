@@ -678,7 +678,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-17-GAR2 · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-18-GAR3 · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -744,7 +744,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-17-GAR2\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-17-GAR2</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-18-GAR3\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-18-GAR3</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -4322,8 +4322,10 @@ function renderGarantias(){
           ${p.garantias.length===0?`<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--t3)">Sin garantías registradas.</td></tr>`:''}
           ${p.garantias.map((g,i)=>{
             const sc={'Pendiente':'var(--red)','En proceso':'var(--amb)','Resuelto':'var(--grn)'}[g.status]||'var(--t2)';
+            const appr=g.approval&&g.approval.status;
+            const apprBadge=appr?`<span style="font-size:9px;font-weight:600;padding:1px 6px;border-radius:9px;margin-left:6px;background:${appr==='aprobado'?'rgba(29,184,122,.16)':appr==='rechazado'?'rgba(226,75,74,.16)':'rgba(212,148,26,.16)'};color:${appr==='aprobado'?'var(--grn)':appr==='rechazado'?'var(--red)':'var(--amb)'}">${appr==='aprobado'?'✓ Aprobada':appr==='rechazado'?'✗ Rechazada':'⏱ Pendiente'}</span>`:(g.budget?`<span style="font-size:9px;color:var(--t3);margin-left:6px">presup. listo</span>`:'');
             return `<tr style="cursor:pointer" onclick="garOpen('${g.id||''}')">
-              <td style="color:var(--amb);font-weight:600">${g.num?('Garantía '+g.num):'—'}</td>
+              <td style="color:var(--amb);font-weight:600;white-space:nowrap">${g.num?('Garantía '+g.num):'—'}${apprBadge}</td>
               <td style="color:var(--acc)">${g.house||'—'}</td><td>${g.desc||'—'}</td>
               <td style="color:var(--t2)">${g.subcontractor||'—'}</td>
               <td style="color:var(--t2)">${g.dateReport||'—'}</td><td style="color:var(--t2)">${g.dateLimit||'—'}</td>
@@ -4482,9 +4484,59 @@ function garShowSavedActions(gid){
     </div>`;
   document.getElementById('modal').classList.remove('hidden');
 }
+// Lista plana de materiales del presupuesto de garantía {name, qty, price, subtotal}
+function garBudgetMaterials(g){
+  const b=g&&g.budget; if(!b) return [];
+  const xr=b.exchangeRate||SYS.exchangeRate||1;
+  const out=[];
+  (b.categories||[]).forEach(cat=>(cat.lines||[]).filter(l=>l.matId||l.manualName).forEach(l=>{
+    const mat=l.matId?MATS.find(m=>m.id===l.matId):null;
+    const name=l.manualName||(mat?mat.name:'')||'(material)';
+    const unitUSD=(l.currency==='CRC')?(linePrice(l)/xr):linePrice(l);
+    const qty=l.qty||0;
+    out.push({name, qty, unit:l.matId?(MATS.find(m=>m.id===l.matId)?.unit||'unid'):'unid', price:unitUSD, subtotal:qty*unitUSD});
+  }));
+  return out;
+}
 function garSolicitarAprobacion(gid){
   const g=garFind(gid); if(!g||!g.budget){ alert('Genera el presupuesto primero.'); return; }
-  alert('Solicitud de aprobación de garantía — Fase 3 del workflow (en construcción).\n\nEnviará la solicitud al administrador con la lista de materiales, cantidades, costos y total con IVA.');
+  if(g.approval&&g.approval.status==='pendiente'){ alert('Ya hay una solicitud de aprobación pendiente para esta garantía.'); return; }
+  if(g.approval&&g.approval.status==='aprobado'){ alert('Esta garantía ya fue aprobada.'); return; }
+  const b=g.budget;
+  const mats=garBudgetMaterials(g);
+  const req={
+    id:'auth-'+Date.now(),
+    type:'garantia-budget',
+    status:'pendiente',
+    requestedBy:currentUser?currentUser.name:'Usuario',
+    requestedAt:Date.now(),
+    projId:curProj?curProj.id:null,
+    projName:curProj?curProj.name:'',
+    garId:g.id, garNum:g.num, house:g.house||'', desc:g.desc||'',
+    billable:!!b.billable, ivaOn:!!b.ivaOn, iva:b.iva||0, total:b.salePrice||0,
+    materials:mats.map(m=>({name:m.name, qty:m.qty, unit:m.unit, price:m.price, subtotal:m.subtotal}))
+  };
+  pendingAuthList().push(req);
+  g.approval={ status:'pendiente', reqId:req.id, requestedAt:req.requestedAt };
+  saveData();
+  logAction(`Solicitud de aprobación de Garantía ${g.num} enviada`,'log-create','Garantías',null,{num:g.num,total:Math.round(b.salePrice||0),billable:b.billable});
+  closeModal();
+  showToast('✅ Solicitud de aprobación enviada al administrador');
+  if(curTab==='garantias') renderGarantias();
+  if(currentUser&&(currentUser.role==='Administrador'||currentUser.role==='Supervisor')){
+    setTimeout(()=>showPendingAuthPopup(req.id),300);
+  } else {
+    startExtraAuthReminder();
+  }
+}
+// Aplica (idempotente) la aprobación/rechazo de una garantía en su sesión
+function applyGarApproval(req, decision){
+  const proj=projects.find(p=>p.id===req.projId)||curProj;
+  const g=(proj&&proj.garantias||[]).find(x=>String(x.id)===String(req.garId));
+  if(!g) return false;
+  g.approval={ status:decision, reqId:req.id, resolvedBy:req.resolvedBy||'', resolvedAt:req.resolvedAt||Date.now() };
+  if(decision==='aprobado'){ g.status=g.status==='Pendiente'?'En proceso':g.status; }
+  return true;
 }
 function deleteGarantia(i){
   if(!confirm('¿Eliminar esta garantía?'))return;
@@ -5554,6 +5606,35 @@ function showPendingAuthPopup(reqId){
   }
 
   // Solicitud de material fuera de lista desde FACTURA DE GASTO (proveedor)
+  if(req.type==='garantia-budget'){
+    const mats=req.materials||[];
+    document.getElementById('modal-inner').innerHTML=`
+      <div class="modal-title" style="color:var(--amb)">🛠 Aprobación de Presupuesto de Garantía
+        <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
+      </div>
+      <div style="font-size:12px;color:var(--t2);margin-bottom:10px">
+        <strong style="color:var(--t1)">${req.requestedBy}</strong> solicita aprobar la <strong style="color:var(--t1)">Garantía ${req.garNum}</strong>${req.house?` · Casa <strong>${req.house}</strong>`:''} en <strong style="color:var(--t1)">${req.projName}</strong>
+      </div>
+      ${req.desc?`<div style="font-size:12px;color:var(--t1);background:var(--bg3);border-radius:6px;padding:8px 10px;margin-bottom:10px"><span style="color:var(--t3)">Descripción:</span> ${(req.desc||'').replace(/</g,'&lt;')}</div>`:''}
+      <div style="max-height:230px;overflow:auto;border:1px solid var(--border);border-radius:var(--r);margin-bottom:10px">
+        <table class="rec-table" style="width:100%">
+          <thead><tr><th>Material</th><th class="r">Cant.</th><th class="r">Precio</th><th class="r">Subtotal</th></tr></thead>
+          <tbody>${mats.length?mats.map(m=>`<tr><td>${(m.name||'').replace(/</g,'&lt;')}</td><td class="r">${m.qty} ${m.unit||''}</td><td class="r">${fmt(m.price)}</td><td class="r">${fmt(m.subtotal)}</td></tr>`).join(''):'<tr><td colspan="4" style="color:var(--t3)">Sin materiales</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <span style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:10px;background:${req.billable?'rgba(29,184,122,.14)':'var(--bg3)'};color:${req.billable?'var(--grn)':'var(--t2)'};border:1px solid ${req.billable?'rgba(29,184,122,.35)':'var(--border)'}">${req.billable?'✅ Facturable al cliente':'No facturable (interno)'}</span>
+        <span style="font-size:14px;font-weight:700;color:var(--org)">Total: ${fmt(req.total)}${req.ivaOn?' (c/IVA)':''}</span>
+      </div>
+      <div class="modal-actions" style="gap:8px">
+        <button class="btn-cancel" onclick="resolveExtraAuth('${reqId}','rechazado')" style="border-color:var(--red);color:var(--red)">✗ Rechazar</button>
+        <button style="background:transparent;border:1px solid var(--amb);color:var(--amb);border-radius:7px;padding:7px 14px;font-size:12px;cursor:pointer" onclick="resolveExtraAuth('${reqId}','ver_luego')">⏱ Ver luego</button>
+        <button class="btn-save" onclick="resolveExtraAuth('${reqId}','aprobado')">✓ Aprobar</button>
+      </div>`;
+    document.getElementById('modal').classList.remove('hidden');
+    return;
+  }
+
   if(req.type==='vb-extra-material'){
     const vhName=req.houseName||(curProj&&curProj.houses?((curProj.houses.find(h=>h.id===req.houseId)||{}).num||req.houseId):'Casa');
     document.getElementById('modal-inner').innerHTML=`
@@ -5657,6 +5738,14 @@ async function resolveExtraAuth(reqId, decision){
       } else {
         alert('Se aprobó la solicitud, pero no se encontró la casa.');
       }
+    } else if(req.type==='garantia-budget'){
+      ok=applyGarApproval(req,'aprobado');
+      if(ok){
+        logAction(`Presupuesto de Garantía ${req.garNum} aprobado`,'log-edit','Garantías',null,{num:req.garNum,approvedBy:req.resolvedBy});
+        addNotif(`✅ Presupuesto de Garantía ${req.garNum} aprobado (${req.projName})`);
+      } else {
+        alert('Se aprobó la solicitud, pero no se encontró la garantía.');
+      }
     } else {
       ok=applyApprovedExtra(req);
       if(ok){
@@ -5670,15 +5759,17 @@ async function resolveExtraAuth(reqId, decision){
     SYS.notifications=(SYS.notifications||[]).filter(n=>n.link!=='pending-auth');
     saveData();
     closeModal();
-    showToast(ok?(req.type==='house-unlock'?'🔓 Tipo desbloqueado':'✅ Material aprobado y agregado a la OC'):'Solicitud aprobada');
+    showToast(ok?(req.type==='house-unlock'||req.type==='type-unlock'?'🔓 Desbloqueado':req.type==='garantia-budget'?'✅ Garantía aprobada':'✅ Material aprobado y agregado a la OC'):'Solicitud aprobada');
     updateNotifBadge();
+    if(req.type==='garantia-budget'&&curTab==='garantias')renderGarantias();
     // Detener recordatorio solo si no quedan más solicitudes pendientes
     if(!pendingAuthList().some(r=>r.status==='pendiente')) stopExtraAuthReminder();
   } else if(decision==='rechazado'){
+    if(req.type==='garantia-budget'){ applyGarApproval(req,'rechazado'); if(curTab==='garantias')renderGarantias(); }
     saveData();
     closeModal();
     showToast('Solicitud rechazada');
-    addNotif(`⛔ Solicitud de "${req.matName}" rechazada por ${req.resolvedBy}`);
+    addNotif(`⛔ Solicitud de "${req.matName||('Garantía '+req.garNum)}" rechazada por ${req.resolvedBy}`);
     if(!pendingAuthList().some(r=>r.status==='pendiente')) stopExtraAuthReminder();
   } else if(decision==='ver_luego'){
     req.status='pendiente'; // mantener pendiente
@@ -5701,8 +5792,8 @@ function startExtraAuthReminder(){
         <div style="font-size:24px;margin-bottom:6px">⏰</div>
         <div style="font-size:13px;font-weight:700;color:var(--amb);margin-bottom:6px">Aprobación pendiente</div>
         <div style="font-size:12px;color:var(--t2);margin-bottom:12px">
-          Hay ${pending.length} solicitud(es) de material extra esperando tu aprobación.<br>
-          <strong style="color:var(--t1)">"${r.matName}"</strong> — ${r.projName}
+          Hay ${pending.length} solicitud(es) esperando tu aprobación.<br>
+          <strong style="color:var(--t1)">${r.type==='garantia-budget'?('Garantía '+r.garNum):r.type==='type-unlock'?('Desbloqueo tipo '+r.typeName):r.type==='house-unlock'?('Desbloqueo '+r.houseNum):('"'+(r.matName||'')+'"')}</strong> — ${r.projName}
         </div>
         <div style="display:flex;gap:8px;justify-content:center">
           <button class="btn-cancel" onclick="closeModal()">Ignorar</button>
@@ -5773,15 +5864,22 @@ async function pollPendingAuth(){
           if(applyApprovedVbExtra(r)) _applied=true;
           showToast('✅ Tu solicitud de "'+r.matName+'" fue aprobada');
           addNotif('✅ Material "'+r.matName+'" aprobado por '+(r.resolvedBy||'administrador')+' para '+(r.houseName||'casa'));
+        } else if(r.type==='garantia-budget'){
+          if(applyGarApproval(r,'aprobado')) _applied=true;
+          showToast('✅ Presupuesto de Garantía '+r.garNum+' aprobado');
+          addNotif('✅ Presupuesto de Garantía '+r.garNum+' aprobado por '+(r.resolvedBy||'administrador'));
+          if(curTab==='garantias') setTimeout(renderGarantias,50);
         } else {
           if(applyApprovedExtra(r)) _applied=true;
           showToast('✅ Tu solicitud de "'+r.matName+'" fue aprobada y el material se agregó a la OC');
           addNotif('✅ Solicitud de "'+r.matName+'" aprobada por '+(r.resolvedBy||'administrador'));
         }
       } else if(r.status==='rechazado'){
+        if(r.type==='garantia-budget'){ applyGarApproval(r,'rechazado'); _applied=true; if(curTab==='garantias') setTimeout(renderGarantias,50); }
         let label='';
         if(r.type==='type-unlock') label='desbloqueo de tipo '+r.typeName;
         else if(r.type==='house-unlock') label='desbloqueo de '+r.houseNum;
+        else if(r.type==='garantia-budget') label='Garantía '+r.garNum;
         else label='"'+r.matName+'"';
         showToast('⛔ Tu solicitud de '+label+' fue rechazada');
         addNotif('⛔ Solicitud de '+label+' rechazada por '+(r.resolvedBy||'administrador'));
