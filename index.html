@@ -677,7 +677,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-12-SELLO · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-13-RECUP · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -743,7 +743,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-12-SELLO\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-12-SELLO</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-13-RECUP\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-13-RECUP</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -3018,6 +3018,12 @@ function renderCasas(){
   const totalSpent=projSpent(p);
   const totalSale=p.houses.reduce((s,h)=>{const t=p.types.find(x=>x.id===h.typeId);return s+(t?t.salePrice:0);},0);
   const totalUtil=totalSale>0?((totalSale-totalSpent)/totalSale*100):0;
+  // ── Recuperación de dinero (proyecto) ──
+  const totalBilled=p.houses.reduce((s,h)=>s+houseBilling(p,h).montoFact,0);
+  const recPend=Math.max(0,totalSpent-totalBilled);      // gasto aún no recuperado vía facturación
+  const porFacturar=Math.max(0,totalSale-totalBilled);   // del precio de venta, lo que falta facturar
+  const recPctRaw=totalSpent>0?Math.round(totalBilled/totalSpent*100):null;
+  const recPct=totalSpent>0?Math.min(100,totalBilled/totalSpent*100):0;
   let list=houseFilter==='Todos'?[...p.houses]:p.houses.filter(h=>h.status===houseFilter);
   if(houseSortCol){
     list.sort((a,b)=>{
@@ -3056,6 +3062,31 @@ function renderCasas(){
           <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">${l}</div>
           <div style="font-size:16px;font-weight:600;color:${c}">${v}</div>
         </div>`).join('')}
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:9px">
+        <div style="font-size:12px;font-weight:600;color:var(--t1)">💰 Recuperación de Dinero</div>
+        <div style="font-size:11px;font-weight:600;color:${recPctRaw==null?'var(--t3)':(recPctRaw>=100?'var(--grn)':'var(--amb)')}">${recPctRaw==null?'Sin gasto registrado':recPctRaw+'% del gasto recuperado'}</div>
+      </div>
+      <div style="height:14px;background:var(--border2);border-radius:7px;overflow:hidden;display:flex" title="Del gasto: verde = ya facturado (recuperado), ámbar = pendiente por recuperar">
+        <div style="width:${recPct}%;background:var(--grn);transition:width .3s"></div>
+        <div style="width:${100-recPct}%;background:var(--amb);transition:width .3s"></div>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:10px;color:var(--t3)">
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--grn);margin-right:4px"></span>Facturado (recuperado)</span>
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--amb);margin-right:4px"></span>Pendiente por recuperar</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:8px;margin-top:11px;padding-top:10px;border-top:1px solid var(--border)">
+        ${[['Gastado total',fmt(totalSpent),'var(--t1)','Dinero ya gastado en el proyecto'],
+           ['Facturado al cliente',fmt(totalBilled),'var(--grn)','Total facturado al cliente'],
+           ['Pendiente por recuperar',fmt(recPend),recPend>0?'var(--amb)':'var(--grn)','Gasto que aún no se ha facturado'],
+           ['Aún no facturado',fmt(porFacturar),porFacturar>0?'var(--acc)':'var(--grn)','Del precio de venta, lo que falta por facturar']
+          ].map(([l,v,c,t])=>`
+          <div title="${t}">
+            <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">${l}</div>
+            <div style="font-size:15px;font-weight:600;color:${c}">${v}</div>
+          </div>`).join('')}
+      </div>
     </div>
     <div class="filter-bar" style="align-items:center">
       <span style="font-size:11px;color:var(--t3)">Filtrar:</span>
