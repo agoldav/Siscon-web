@@ -678,7 +678,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       <div class="login-links">
         <a href="#" onclick="showForgotPassword(); return false;">¿Olvidaste contraseña?</a>
       </div>
-      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-15-ALIGN · 2026-07-20</div>
+      <div style="text-align:center;margin-top:14px;font-size:10px;color:var(--t3);letter-spacing:.5px">build: BUILD-16-GAR1 · 2026-07-20</div>
     </div>
 
     <!-- FORM: Forgot Password -->
@@ -744,7 +744,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
       </div>
     </div>
     <div class="tbr">
-      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-15-ALIGN\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-15-ALIGN</span>
+      <span onclick="(function(){var r=(typeof renderOCForm==='function'?renderOCForm.toString():'');var v=(typeof renderVendorBill==='function'?renderVendorBill.toString():'');alert('DIAGNÓSTICO DE CÓDIGO EN EJECUCIÓN\\n\\nBUILD: BUILD-16-GAR1\\n\\nOC usa IVA por línea: '+(r.includes('ocLineIVARate'))+'\\nProveedor usa IVA por línea: '+(v.includes('vbIVATotal'))+'\\n\\nSi ambos dicen TRUE = build nuevo OK.\\nSi alguno dice FALSE = tu navegador ejecuta JS viejo (recarga forzada).');})()" title="Clic para diagnóstico de versión" style="font-size:9px;color:var(--t3);letter-spacing:.5px;margin-right:6px;cursor:pointer;text-decoration:underline dotted">BUILD-16-GAR1</span>
       <span id="topbar-user-label">admin</span>
       <button id="btn-settings" class="icon-btn" onclick="openSettings()" title="Ajustes" style="display:none">⚙</button>
       <button class="btn-sm" onclick="logout()">Salir</button>
@@ -4301,52 +4301,116 @@ function renderGarantias(){
     </div>
     <div style="overflow:auto;max-height:calc(100vh - 220px);border:1px solid var(--border);border-radius:var(--r)">
       <table class="guar-table">
-        <thead><tr><th>Casa</th><th>Descripción</th><th>Categoría</th><th>Fecha Reporte</th><th>Fecha Límite</th><th>Responsable</th><th>Estatus</th><th></th></tr></thead>
+        <thead><tr><th>Garantía</th><th>Casa</th><th>Descripción</th><th>Subcontratista</th><th>Fecha Reporte</th><th>Fecha Límite</th><th>Responsable</th><th>Estatus</th><th></th></tr></thead>
         <tbody>
-          ${p.garantias.length===0?`<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--t3)">Sin garantías registradas.</td></tr>`:''}
+          ${p.garantias.length===0?`<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--t3)">Sin garantías registradas.</td></tr>`:''}
           ${p.garantias.map((g,i)=>{
             const sc={'Pendiente':'var(--red)','En proceso':'var(--amb)','Resuelto':'var(--grn)'}[g.status]||'var(--t2)';
-            return `<tr><td style="color:var(--acc)">${g.house||'—'}</td><td>${g.desc||'—'}</td>
-              <td><span style="background:var(--bg4);padding:2px 7px;border-radius:10px;font-size:11px">${g.category||'—'}</span></td>
+            return `<tr style="cursor:pointer" onclick="garOpen('${g.id||''}')">
+              <td style="color:var(--amb);font-weight:600">${g.num?('Garantía '+g.num):'—'}</td>
+              <td style="color:var(--acc)">${g.house||'—'}</td><td>${g.desc||'—'}</td>
+              <td style="color:var(--t2)">${g.subcontractor||'—'}</td>
               <td style="color:var(--t2)">${g.dateReport||'—'}</td><td style="color:var(--t2)">${g.dateLimit||'—'}</td>
               <td>${g.responsible||'—'}</td><td style="color:${sc};font-weight:500">${g.status||'Pendiente'}</td>
-              <td><button onclick="deleteGarantia(${i})" style="background:transparent;border:none;color:var(--t3);font-size:12px;cursor:pointer">✕</button></td>
+              <td><button onclick="event.stopPropagation();deleteGarantia(${i})" style="background:transparent;border:none;color:var(--t3);font-size:12px;cursor:pointer">✕</button></td>
             </tr>`;
           }).join('')}
         </tbody>
       </table>
     </div>`;
 }
-function addGarantia(){
+function garNextNum(p){ return ((p.garantias||[]).reduce((m,g)=>Math.max(m,g.num||0),0))+1; }
+function garFind(gid){ return (curProj.garantias||[]).find(x=>String(x.id)===String(gid)); }
+// Al elegir la casa, autocompletar el subcontratista asignado a esa casa
+function garSyncSub(){
+  const hid=(document.getElementById('g-house')||{}).value;
+  const h=(curProj.houses||[]).find(x=>String(x.id)===String(hid));
+  const sel=document.getElementById('g-sub');
+  if(sel) sel.value = (h&&h.subcontractorId!=null) ? String(h.subcontractorId) : '';
+}
+function addGarantia(gid){
+  const p=curProj, g=gid?garFind(gid):null;
+  const subs=SYS.subcontractors||[];
   document.getElementById('modal-inner').innerHTML=`
-    <div class="modal-title">Nueva Garantía</div>
-    <div class="ff-row">
-      <div class="ff"><label>Casa</label><select id="g-house"><option value="">— Seleccionar —</option>${curProj.houses.map(h=>`<option>${h.num}</option>`).join('')}</select></div>
-      <div class="ff"><label>Categoría</label><select id="g-cat"><option>Estructural</option><option>Eléctrica</option><option>Hidráulica</option><option>Acabados</option><option>Ventanas</option><option>Otro</option></select></div>
-    </div>
-    <div class="ff"><label>Descripción</label><textarea id="g-desc" rows="3" placeholder="Describir el problema..."></textarea></div>
-    <div class="ff-row">
-      <div class="ff"><label>Fecha de Reporte</label><input id="g-dr" type="date"/></div>
-      <div class="ff"><label>Fecha Límite</label><input id="g-dl" type="date"/></div>
+    <div class="modal-title">${g?('Garantía '+g.num):'Nueva Garantía'}
+      <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
     </div>
     <div class="ff-row">
-      <div class="ff"><label>Responsable</label><input id="g-resp" placeholder="Nombre"/></div>
-      <div class="ff"><label>Estatus</label><select id="g-status"><option>Pendiente</option><option>En proceso</option><option>Resuelto</option></select></div>
+      <div class="ff"><label>Casa</label>
+        <span class="ivasel" style="display:block"><select id="g-house" onchange="garSyncSub()"><option value="">— Seleccionar —</option>${(p.houses||[]).map(h=>`<option value="${h.id}"${g&&String(g.houseId)===String(h.id)?' selected':''}>${h.num}</option>`).join('')}</select></span>
+      </div>
+      <div class="ff"><label>Sub Contratista <span style="font-size:9px;color:var(--t3);text-transform:none">— se autocompleta según la casa</span></label>
+        <span class="ivasel" style="display:block"><select id="g-sub"><option value="">— Ninguno —</option>${subs.map(s=>`<option value="${s.id}"${g&&String(g.subcontractorId)===String(s.id)?' selected':''}>${s.name||'(Sin nombre)'}</option>`).join('')}</select></span>
+      </div>
+    </div>
+    <div class="ff"><label>Descripción <span style="color:var(--red)">*</span></label><textarea id="g-desc" rows="3" placeholder="Describir el problema...">${g?(g.desc||''):''}</textarea></div>
+    <div class="ff-row">
+      <div class="ff"><label>Fecha de Reporte</label><input id="g-dr" type="date" value="${g?(g.dateReport||''):new Date().toISOString().slice(0,10)}"/></div>
+      <div class="ff"><label>Fecha Límite</label><input id="g-dl" type="date" value="${g?(g.dateLimit||''):''}"/></div>
+    </div>
+    <div class="ff-row">
+      <div class="ff"><label>Responsable</label><input id="g-resp" placeholder="Nombre" value="${g?((g.responsible||'').replace(/"/g,'&quot;')):''}"/></div>
+      <div class="ff"><label>Estatus</label>
+        <span class="ivasel" style="display:block"><select id="g-status">${['Pendiente','En proceso','Resuelto'].map(s=>`<option${g&&g.status===s?' selected':''}>${s}</option>`).join('')}</select></span>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
-      <button class="btn-save" onclick="saveGarantia()">Guardar</button>
+      <button class="btn-save" onclick="saveGarantia('${g?g.id:''}')">Guardar</button>
     </div>`;
   document.getElementById('modal').classList.remove('hidden');
+  if(!g) garSyncSub();
 }
-function saveGarantia(){
-  const g={house:document.getElementById('g-house').value,category:document.getElementById('g-cat').value,
-    desc:document.getElementById('g-desc').value,dateReport:document.getElementById('g-dr').value,
-    dateLimit:document.getElementById('g-dl').value,responsible:document.getElementById('g-resp').value,
-    status:document.getElementById('g-status').value};
-  curProj.garantias.push(g);
-  logAction(`Garantía agregada para "${g.house}"`,'log-create','Garantías',null,g);
-  closeModal(); renderGarantias();
+function garOpen(gid){ if(gid) addGarantia(gid); }
+function garGenerarPresupuesto(gid){
+  const g=garFind(gid); if(!g) return;
+  alert('Editor de presupuesto de garantía — en construcción (Fase 2 del workflow).\n\nLa Garantía '+g.num+' ya quedó guardada; el presupuesto se le asociará aquí.');
+}
+function saveGarantia(gid){
+  const p=curProj;
+  const hid=(document.getElementById('g-house')||{}).value;
+  const desc=((document.getElementById('g-desc')||{}).value||'').trim();
+  if(!hid){ alert('Selecciona la casa de la garantía.'); return; }
+  if(!desc){ alert('La descripción es obligatoria.'); return; }
+  const h=(p.houses||[]).find(x=>String(x.id)===String(hid));
+  const subId=(document.getElementById('g-sub')||{}).value;
+  const sub=(SYS.subcontractors||[]).find(s=>String(s.id)===String(subId));
+  if(!p.garantias)p.garantias=[];
+  const base={
+    houseId:h?h.id:null, house:h?h.num:'', desc,
+    subcontractorId:sub?sub.id:null, subcontractor:sub?(sub.name||''):'',
+    dateReport:(document.getElementById('g-dr')||{}).value||'',
+    dateLimit:(document.getElementById('g-dl')||{}).value||'',
+    responsible:(document.getElementById('g-resp')||{}).value||'',
+    status:(document.getElementById('g-status')||{}).value||'Pendiente'
+  };
+  let g=gid?garFind(gid):null;
+  if(g){ Object.assign(g,base); logAction(`Garantía ${g.num} editada`,'log-edit','Garantías',null,{num:g.num,house:g.house}); }
+  else {
+    g=Object.assign({ id:'gar-'+Date.now(), num:garNextNum(p), budget:null, billable:false, approval:null,
+      createdAt:new Date().toLocaleDateString('es-CR'), createdBy:currentUser?currentUser.name:'Sistema' }, base);
+    p.garantias.push(g);
+    logAction(`Garantía ${g.num} creada para "${g.house}"`,'log-create','Garantías',null,{num:g.num,house:g.house});
+  }
+  saveData(); renderGarantias();
+  garShowSavedActions(g.id);   // no cerrar el panel
+}
+// Tras guardar: no se cierra, se ofrecen los siguientes pasos
+function garShowSavedActions(gid){
+  const g=garFind(gid); if(!g) return;
+  document.getElementById('modal-inner').innerHTML=`
+    <div class="modal-title">Garantía ${g.num} guardada
+      <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div style="background:var(--bg3);border-radius:var(--r);padding:11px 13px;margin-bottom:14px;font-size:12px;color:var(--t2)">
+      <div>Casa <strong style="color:var(--t1)">${g.house||'—'}</strong>${g.subcontractor?` · Subcontratista <strong style="color:var(--t1)">${g.subcontractor}</strong>`:''}</div>
+      <div style="margin-top:5px;color:var(--t1)">${(g.desc||'').replace(/</g,'&lt;')}</div>
+    </div>
+    <div class="modal-actions" style="gap:8px">
+      <button class="btn-cancel" onclick="closeModal()">Cerrar</button>
+      <button class="btn-save" onclick="garGenerarPresupuesto('${g.id}')">Generar Presupuesto</button>
+    </div>`;
+  document.getElementById('modal').classList.remove('hidden');
 }
 function deleteGarantia(i){
   if(!confirm('¿Eliminar esta garantía?'))return;
