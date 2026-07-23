@@ -1463,9 +1463,8 @@ function openSettings(){
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
           <button onclick="qboConnect()" style="background:var(--grn);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:11px;cursor:pointer">🔗 Conectar QuickBooks</button>
           <button onclick="qboTestConnection()" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">↻ Probar conexión</button>
-          <button onclick="qboCopyRefreshToken()" style="background:transparent;border:1px solid var(--t3);color:var(--t3);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer" title="Copia el Refresh Token para fijarlo en Render y que nunca se desconecte">🔑 Guardar token</button>
+          <!-- VUL-003: Botón "Guardar token" eliminado — refresh_token nunca sale del servidor (FASE 1) -->
         </div>
-        <div id="qbo-token-hint" style="display:none;font-size:10px;color:var(--amb);background:rgba(212,148,26,.1);border-radius:6px;padding:8px 10px;margin-top:6px;line-height:1.5"></div>
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
           <button onclick="qboFetchVendors()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">Sync Proveedores</button>
           <button onclick="qboFetchCustomers()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">Sync Clientes</button>
@@ -1512,8 +1511,9 @@ async function qboTestConnection(){
   showToast('Verificando conexión QBO…');
   const d=await qboStatus(); saveData();
   if(d.connected){
-    try{ const ci=await qboApiQuery('select * from CompanyInfo'); const name=ci.QueryResponse&&ci.QueryResponse.CompanyInfo&&ci.QueryResponse.CompanyInfo[0]&&ci.QueryResponse.CompanyInfo[0].CompanyName; alert('✓ Conectado a QuickBooks'+(name?' · '+name:'')+' · Realm '+d.realmId); }
-    catch(e){ alert('✓ Conectado (Realm '+d.realmId+'), pero la consulta de prueba falló: '+e.message); }
+    // VUL-006: qboApiQuery() desactivada — consultas arbitrarias a QB prohibidas (FASE 1)
+    // La verificación de conexión solo usa qboStatus() ahora
+    alert('✓ Conectado a QuickBooks · Realm '+d.realmId);
   } else if(!d.configured){ alert('El backend no tiene QBO_CLIENT_ID/SECRET configurados. Agrégalos en Render.'); }
   else { alert('Aún sin conectar. Pulsa "Conectar QuickBooks", autoriza en Intuit y reintenta.'); }
 }
@@ -6303,40 +6303,17 @@ async function qboStatus(){
     return d;
   }catch(e){ return {connected:false,error:e.message}; }
 }
+// VUL-006: qboApiQuery eliminada — consultas arbitrarias a QB ya no permitidas (FASE 1)
+// VUL-001: qboApiCreate eliminada — escribir a QB está prohibido (FASE 1)
+// Stubs para capturar intentos de uso y mostrar error descriptivo
 async function qboApiQuery(q){
-  const be=backendUrl(); if(!be) throw new Error('Configura el Backend en Ajustes');
-  const r=await fetch(be+'/api/qbo/query',{method:'POST',headers:qboHdr(),body:JSON.stringify({query:q})});
-  if(!r.ok){ const t=await r.text().catch(()=>''); throw new Error('QBO query '+r.status+' '+t.slice(0,200)); }
-  return r.json();
+  throw new Error('FASE 1: Consultas arbitrarias a QB (POST /api/qbo/query) están desactivadas. QB solo puede leerse a través de sincronización automática en FASE 4.');
 }
 async function qboApiCreate(entity,payload){
-  const be=backendUrl(); if(!be) throw new Error('Configura el Backend en Ajustes');
-  const r=await fetch(be+'/api/qbo/create',{method:'POST',headers:qboHdr(),body:JSON.stringify({entity,payload})});
-  const txt=await r.text(); let data; try{data=JSON.parse(txt);}catch{data={raw:txt};}
-  if(!r.ok){ console.error('QBO create full error:', txt); throw new Error('QBO create '+r.status+' '+txt.slice(0,600)); }
-  return data;
+  throw new Error('FASE 1: Crear entidades en QB (POST /api/qbo/create) está prohibido. QB es solo lectura. Los datos se crean en Siscon; la sincronización de QB ocurre en FASE 4.');
 }
 function qboConnect(){ const be=backendUrl(); if(!be){alert('Configura primero la URL del Backend en Ajustes.');return;} window.open(be+'/api/qbo/connect','_blank'); showToast('Conecta QuickBooks en la pestaña nueva, luego presiona "Probar conexión".'); }
-async function qboCopyRefreshToken(){
-  const be=backendUrl(); if(!be){alert('Configura primero la URL del Backend en Ajustes.');return;}
-  try{
-    const r=await fetch(be+'/api/qbo/refresh-token',{headers:{'x-siscon-token':SYS.backendToken||''}});
-    const d=await r.json();
-    if(!r.ok){alert('Error: '+(d.error||r.status));return;}
-    const hint=document.getElementById('qbo-token-hint');
-    if(hint){
-      hint.style.display='block';
-      hint.innerHTML=`<strong>Para que QB nunca se desconecte tras reinicios de Render:</strong><br>
-1. Ve a <strong>Render → siscon-backend → Environment</strong><br>
-2. Agrega (o actualiza) estas dos variables:<br>
-&nbsp;&nbsp;<code>QBO_REFRESH_TOKEN</code> = <strong>${d.refresh_token}</strong><br>
-&nbsp;&nbsp;<code>QBO_REALM_ID</code> = <strong>${d.realmId||'(ver Ajustes → QB → Realm ID)'}</strong><br>
-3. Haz "Save Changes" en Render (el servidor se reinicia y ya queda guardado).`;
-    }
-    try{navigator.clipboard.writeText(d.refresh_token);}catch(e){}
-    showToast('Refresh token copiado al portapapeles. Sigue las instrucciones en Ajustes.');
-  }catch(e){alert('Error al obtener refresh token: '+e.message);}
-}
+// VUL-003: qboCopyRefreshToken eliminada — refresh_token nunca sale del servidor (FASE 1)
 
 async function qboFetchVendors(){
   if(!qboConfigured()){ alert('Conecta QuickBooks en Ajustes → QuickBooks Online (botón Conectar).'); return; }
