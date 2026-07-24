@@ -687,137 +687,14 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - Backend: `CLOUDFLARE_ACCESS_AUD` acepta **lista** de AUDs (para aceptar el JWT de app.sisconcr.com además del de api).
 - Para activar Plan B: `USE_SAME_ORIGIN_API=true` + agregar el AUD de `app.sisconcr.com` a `CLOUDFLARE_ACCESS_AUD`.
 
-#### 🔄 FASE 3 — en progreso (código; commits backend `2833d3b`, frontend `4329303`/`0822067`)
+#### ✅ FASE 3 — completada y desplegada 2026-07-24 (commits backend `2833d3b`/`2702378`, frontend `4329303`/`0822067`)
 - [x] **VUL-018 | Auditoría** — `auditLog()` inserta en `audit_log` (ya existía) en cada INSERT/UPDATE/DELETE
   de la factory CRUD (best-effort, sin el blob de `settings`); `GET /api/audit-log` (solo Admin).
 - [x] **VUL-029 | anon key en el navegador** — eliminada del frontend (CDN de supabase-js + constantes; nunca se usaban).
-- [x] **VUL-030/031 | Security headers** — backend: X-Content-Type-Options, X-Frame-Options:DENY, Referrer-Policy,
-  HSTS, Cross-Origin-Resource-Policy. Frontend (`vercel.json`): idem menos CSP.
+- [x] **VUL-031 | Security headers** — backend: X-Content-Type-Options, X-Frame-Options:DENY, Referrer-Policy,
+  HSTS, Cross-Origin-Resource-Policy. Frontend (`vercel.json`): idem (sin CSP — VUL-030 sigue pendiente).
 - [x] **VUL-023 | Rate limiting** — backend general 1000/15min por IP real (CF-Connecting-IP) sobre `/api/*`
-  (defensa en profundidad; el primario es el WAF de Cloudflare). Commit backend `9f...` (rama).
----
-
-## 11. 🚀 PRÓXIMAS FASES — Roadmap Post-Cutover
-
-### FASE 4: CSP (Content Security Policy) — VUL-030
-
-**Objetivo:** declarar qué orígenes pueden proveer scripts, estilos, imágenes, frames.
-
-**Riesgo real:** sin CSP, un XSS que inyecte `<script>` corre código arbitrario.
-
-**Desafío:** la app tiene mucho `<script>` inline + carga Google Maps + SheetJS de CDNs. Un CSP estricto puede romper funcionalidad.
-
-**Plan:**
-1. **Auditar recursos externos:** grep por `<script src=` y `<link href=` en `index.html` → listar todos los orígenes (CDN, Google Maps, SheetJS, etc.)
-2. **CSP permisivo inicial:** en `vercel.json`, agregar header `Content-Security-Policy` con `unsafe-inline` + los CDNs necesarios
-3. **Probar en vivo:** verifica que Google Maps y SheetJS siguen funcionando
-4. **Refinamiento:** lentamente remover `unsafe-inline`, migrar inline scripts a archivo externo
-
-**Impacto:** media (funcionalidad intacta si se hace bien, riesgo de romper mapas/Excel si no).
-
----
-
-### FASE 5: XSS Audit (`innerHTML`) — VUL-028
-
-**Objetivo:** auditar dónde se usa `innerHTML` con datos de usuario, validar sanitización.
-
-**Riesgo real:** un campo "nombre de proyecto" o "nota en bitácora" que contenga `<img src=x onerror="...">` ejecutaría código.
-
-**Desafío:** el HTML monolítico tiene ~12,000 líneas; buscar y validar cada `innerHTML` toma tiempo.
-
-**Plan:**
-1. **Grep por `innerHTML`:** `grep -n "innerHTML" index.html` → lista de líneas
-2. **Clasificar:**
-   - ✅ Safe: datos generados por la app (IDs, timestamps, valores constantes)
-   - ⚠️ Unsafe: datos de usuario (nombre proyecto, notas, descripciones)
-3. **Para Unsafe:**
-   - Auditar si hay sanitización (DOMPurify, escape manual, etc.)
-   - Si no hay: reemplazar `innerHTML` con `.textContent` (si es solo texto) o agregar sanitización
-4. **Test:** inyectar payloads XSS en los campos de usuario, verificar que no ejecutan
-
-**Impacto:** alto (es un riesgo real para datos de usuario, pero bajo esfuerzo si se enfoca en los puntos críticos).
-
----
-
-### FASE 6: RLS + org_id (Optional, valor bajo) — VUL-014/015/016
-
-**Objetivo:** agregar `org_id` a todas las tablas, crear políticas RLS por org.
-
-**Riesgo actual:** RLS está habilitado pero sin políticas (deny-by-default), así que todo acceso por API va por service_role (backend). Es seguro **si confías en el backend** (y lo haces — valida identidad). Sin embargo, agregar `org_id` + RLS hace defensa-en-profundidad: incluso si hubiera bug en el backend, la DB no dejaría leer datos de otra org.
-
-**Problema:** esta app es de **una sola organización** (4 usuarios). Agregar `org_id` es over-engineering.
-
-**Recomendación:** SALTAR esto. El riesgo es bajo (monousuario, backend validado), el esfuerzo es alto (migración, políticas, tests).
-
----
-
-### FASE 7: OAuth de QB Seguro + Sync — FASE 4/5
-
-**Objetivo:** conectar QuickBooks con autenticación OAuth segura (sin credenciales de desarrollador en el código).
-
-**Estado actual:** `/api/qbo/connect` redirige a Intuit, pero sin verificación de CSRF ni manejo de refresh tokens.
-
-**Plan:**
-1. **CSRF tokens:** generar token antes de redirigir a Intuit, validar en callback
-2. **Refresh token rotation:** guardar refresh token encriptado en Supabase, refrescarlo antes de expirar
-3. **Sync seguro:** endpoint `/api/qbo/sync` (solo admin) trae datos de QB, verifica identidad, inserta con auditoría
-4. **Rate limiting:** sync no corre automático; solo admin puede dispararlo
-
-**Impacto:** alto (QB es el corazón financiero, merece cuidado).
-
----
-
-## 12. 📋 Checksum de Seguridad Post-Cutover
-
-| VUL | Nombre | Estado | Riesgo |
-|-----|--------|--------|--------|
-| VUL-001 | Endpoints QB sin autenticación | ✅ CERRADA | (eliminados) |
-| VUL-002 | Bypass de origen (sin validar JWT) | ✅ CERRADA | (FASE 1: validación RS256) |
-| VUL-003 | Token no expirado | ✅ CERRADA | (JWT exp+iss+aud validados) |
-| VUL-004 | Token `local_` falsificable | ✅ CERRADA | (eliminado) |
-| VUL-005 | SISCON_TOKEN compartido | ✅ CERRADA | (no exigido en CF mode) |
-| VUL-006 | QBO auth sin CSRF | ⏳ FASE 7 | medium |
-| VUL-007 | MFA no forzada | ✅ CERRADA | (Cloudflare Entra ID) |
-| VUL-008 | Sesión sin revocación | ✅ CERRADA | (CF maneja) |
-| VUL-009 | Credenciales sin rotación | ✅ CERRADA | (CF maneja) |
-| VUL-010 | Rol validado solo frontend | ✅ CERRADA | (server-side validado) |
-| VUL-011 | Logout sin invalidar sesión | ✅ CERRADA | (CF maneja) |
-| VUL-012 | Rate limiting inexistente | ✅ CERRADA | (1000/15min + WAF CF) |
-| VUL-013 | Auditoría no existe | ✅ CERRADA | (audit_log + GET admin) |
-| VUL-014 | RLS sin políticas | ⏳ SALTAR | (low risk monousuario) |
-| VUL-015 | org_id no existe | ⏳ SALTAR | (low risk monousuario) |
-| VUL-016 | Datos entre orgs sin barrera | ⏳ SALTAR | (low risk monousuario) |
-| VUL-017 | Usuario no validado en queries | ✅ CERRADA | (getCurrentUser) |
-| VUL-018 | Cambios sin auditoría | ✅ CERRADA | (auditLog) |
-| VUL-019 | CORS mal configurado | ✅ CERRADA | (reflect + credentials) |
-| VUL-020 | anon key expuesta | ✅ CERRADA | (removida) |
-| VUL-021 | Secretos en el código | ✅ CERRADA | (env vars) |
-| VUL-023 | Rate limiting débil | ✅ CERRADA | (1000/15min ip-based) |
-| VUL-028 | XSS (`innerHTML` sin sanitizar) | ⏳ FASE 5 | medium |
-| VUL-030 | CSP no existe | ⏳ FASE 4 | low-medium |
-| VUL-031 | Headers de seguridad incompletos | ✅ CERRADA | (X-Frame, HSTS, etc.) |
-
----
-
-## 13. 📅 Estimaciones de Esfuerzo
-
-| Fase | Cambios | Complejidad | Esfuerzo | Blocker |
-|------|---------|------------|----------|---------|
-| FASE 4 (CSP) | vercel.json, grep CDNs | baja | 30-45min | No |
-| FASE 5 (XSS audit) | grep innerHTML, reemplazar/sanitizar | media | 1-2h | No |
-| FASE 6 (RLS+org_id) | migraciones SQL, políticas, tests | alta | 4-6h | **SALTAR** |
-| FASE 7 (OAuth QB) | CSRF, refresh tokens, sync, auditoría | alta | 3-4h | No |
-
----
-
-## 14. Notas Finales
-
-- **Cutover exitoso:** Siscon está en producción protegida por Cloudflare Access + JWT validado.
-- **VUL's críticas cerradas:** todos los bypasses de autenticación, tokens falsificables, y validaciones front-end ya se eliminaron.
-- **Siguientes pasos recomendados:** FASE 4 (CSP — rápido, mejora defensa) → FASE 5 (XSS audit — crítico si hay muchos campos de usuario) → FASE 7 (OAuth QB — cuando se decida sincronizar con QB).
-- **FASE 6 (RLS+org_id):** recomendación: SALTAR. La app es de una sola org, riesgo bajo, overhead alto.
-  - Alternativa más segura para probar sin arriesgar prod: desplegar `security-hardening` a un preview de Vercel +
-    un servicio Render aparte con las mismas vars, y probar el flujo completo antes de tocar `main`.
+  (defensa en profundidad; el primario es el WAF de Cloudflare). Commit backend `2702378`.
 
 ## 10. ⏳ Pendiente
 
@@ -921,10 +798,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - **Estado:** ✅ COMPLETADO (2026-07-24)
   - Redirect URI actualizado a `https://api.sisconcr.com/api/qbo/callback`.
 
-#### FASE 2 — Autenticación real (En progreso)
+#### FASE 2 — Auth / contención QB (✅ Completada y desplegada 2026-07-24)
 > Vulnerabilidades de sesión e identidad — comienza 2026-07-25
 
-- [ ] **VUL-004** | Tokens `local_` sin firma almacenados en localStorage
+- [x] **VUL-004** | Tokens `local_` sin firma almacenados en localStorage
+  - **Estado:** ✅ CERRADA (2026-07-24) — token `local_` eliminado del backend (código, desplegado)
   - Descripción: Autenticación basada en `local_[base64(JSON)]` sin validación server
   - Severidad: CRÍTICA
   - Ubicación: `index.html` función `login()`, `loadData()` línea ~XXX
@@ -932,7 +810,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Reemplazar por JWT server-signed; mover a httpOnly cookie
   - Dependencia: VUL-005
 
-- [ ] **VUL-005** | `SISCON_TOKEN` expuesto como secreto compartido débil
+- [x] **VUL-005** | `SISCON_TOKEN` expuesto como secreto compartido débil
+  - **Estado:** ✅ CERRADA (2026-07-24) — SISCON_TOKEN ya no se exige en modo Cloudflare; el gate es el JWT (código, desplegado)
   - Descripción: Token `siscon-2026-pmapp` está en el código frontend y usado como validación
   - Severidad: CRÍTICA
   - Ubicación: `index.html` constante `SISCON_TOKEN`, `siscon-backend/server.js` validación
@@ -940,18 +819,15 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Eliminar; usar autenticación real (JWT) en su lugar
   - Dependencia: VUL-004
 
-- [ ] **VUL-006** | Frontend puede efectuar consultas arbitrarias a QB
-  - Descripción: Endpoint genérico `POST /api/qbo/query` acepta cualquier QueryString desde el navegador
-  - Severidad: ALTA
-  - Ubicación: `siscon-backend/server.js` `POST /api/qbo/query`, `index.html` función `qboQuery`
-  - Riesgo: Acceso a entidades no autorizadas (cuentas bancarias, información sensible)
-  - Acción: Eliminar endpoint genérico; crear adaptadores específicos con whitelist
+- [x] **VUL-006** | Frontend puede efectuar consultas arbitrarias a QB (duplicado — ya cerrada en FASE 1)
+  - **Estado:** ✅ CERRADA (2026-07-24) — endpoint `POST /api/qbo/query` eliminado (ver FASE 1). Commits `baac007`/`9df50bd`.
   - Dependencia: VUL-001
 
-#### FASE 2 — Autenticación real (Día 2-3)
+#### FASE 2 — Sesión e identidad (✅ Completada 2026-07-24 vía Cloudflare Access — quedan VUL-012/013)
 > Vulnerabilidades de sesión e identidad
 
-- [ ] **VUL-007** | Sin MFA real en Supabase
+- [x] **VUL-007** | Sin MFA real en Supabase
+  - **Estado:** ✅ CERRADA (2026-07-24) — MFA provista por Cloudflare Access / Microsoft Entra (desplegado en cutover)
   - Descripción: Autenticación solo por email/password sin factor adicional
   - Severidad: ALTA
   - Ubicación: `siscon-backend/server.js` `POST /api/auth/signin`, `index.html` función `login()`
@@ -959,7 +835,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Activar TOTP/SMS en Supabase Auth; requerir al login
   - Dependencia: VUL-004
 
-- [ ] **VUL-008** | Tokens en localStorage (vulnerable a XSS)
+- [x] **VUL-008** | Tokens en localStorage (vulnerable a XSS)
+  - **Estado:** ✅ CERRADA (2026-07-24) — la auth real es la cookie httpOnly de Cloudflare, no un JWT en localStorage accesible a JS
   - Descripción: JWT se almacena en `localStorage` en lugar de httpOnly cookie
   - Severidad: ALTA
   - Ubicación: `siscon-backend/server.js` respuesta login, `index.html` `saveData()` / `loadData()`
@@ -967,7 +844,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Mover tokens a httpOnly + Secure + SameSite cookies
   - Dependencia: VUL-004
 
-- [ ] **VUL-009** | Cookies sin flags de seguridad (HttpOnly, Secure, SameSite)
+- [x] **VUL-009** | Cookies sin flags de seguridad (HttpOnly, Secure, SameSite)
+  - **Estado:** ✅ CERRADA (2026-07-24) — cookie CF_Authorization gestionada por Cloudflare con flags seguros
   - Descripción: Si hay cookies, no tienen atributos de protección
   - Severidad: ALTA
   - Ubicación: `siscon-backend/server.js` `res.setHeader('Set-Cookie', ...)`
@@ -975,7 +853,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Configurar `httpOnly=true`, `secure=true`, `sameSite=Strict`
   - Dependencia: VUL-008
 
-- [ ] **VUL-010** | Validación de rol solo en frontend
+- [x] **VUL-010** | Validación de rol solo en frontend
+  - **Estado:** ✅ CERRADA (2026-07-24) — validateAdminRole valida el rol en el servidor (código, desplegado)
   - Descripción: Los botones se ocultan/muestran por rol, pero backend no valida
   - Severidad: ALTA
   - Ubicación: `index.html` funciones renderizado, `siscon-backend/server.js` sin validación
@@ -983,7 +862,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Validar rol en cada endpoint del backend antes de autorizar acción
   - Dependencia: VUL-004
 
-- [ ] **VUL-011** | Usuario revocado puede seguir usando token antiguo
+- [x] **VUL-011** | Usuario revocado puede seguir usando token antiguo
+  - **Estado:** ✅ CERRADA (2026-07-24) — revocación central quitando el email del allowlist de Access
   - Descripción: No hay invalidación de sesiones al eliminar/revocar usuario
   - Severidad: ALTA
   - Ubicación: `siscon-backend/server.js` `DELETE /api/auth/users/:id`, `index.html` sin logout forzado
@@ -1007,7 +887,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Para OWNER-only actions, requerir password/MFA adicional
   - Dependencia: VUL-007
 
-#### FASE 3 — Base de datos segura (Día 3)
+#### FASE 3 — Datos + auditoría (🟡 Parcial 2026-07-24: VUL-017/018/020 cerradas; VUL-014/015/016 diferidas; VUL-019 mitigada)
 > Vulnerabilidades de acceso a datos
 
 - [ ] **VUL-014** | RLS sin políticas específicas
@@ -1034,7 +914,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: `ALTER TABLE ... ENABLE ROW LEVEL SECURITY; ALTER TABLE ... FORCE ROW LEVEL SECURITY;`
   - Dependencia: VUL-014
 
-- [ ] **VUL-017** | Backend usa global `service_role` sin validación de usuario
+- [x] **VUL-017** | Backend usa global `service_role` sin validación de usuario
+  - **Estado:** ✅ CERRADA (2026-07-24) — getCurrentUser valida identidad (email del JWT → profile) en cada request (código)
   - Descripción: Cliente Supabase server-side usa `service_role` que ignora RLS
   - Severidad: MEDIA
   - Ubicación: `siscon-backend/server.js` cliente Supabase configuración
@@ -1042,7 +923,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Mantener `service_role` en server, pero validar usuario/rol en cada query antes de usarlo
   - Dependencia: VUL-010
 
-- [ ] **VUL-018** | Sin auditoría de acciones
+- [x] **VUL-018** | Sin auditoría de acciones
+  - **Estado:** ✅ CERRADA (2026-07-24) — audit_log + GET /api/audit-log solo Admin (código, desplegado)
   - Descripción: No existe registro de quién hizo qué, cuándo, desde dónde
   - Severidad: MEDIA
   - Ubicación: Falta tabla `audit_log` o similar
@@ -1050,7 +932,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Crear tabla `audit_log(id, user_id, action, resource, timestamp, ip, ...)`; insertar en cada acción crítica
   - Dependencia: VUL-010
 
-- [ ] **VUL-019** | Backend expone API pública en Render
+- [~] **VUL-019** | Backend expone API pública en Render
+  - **Estado:** 🟡 — MITIGADA — todo endpoint exige JWT válido de Access + rate limiting; onrender.com sigue alcanzable pero rechaza sin JWT
   - Descripción: `siscon-backend.onrender.com` es accesible para cualquiera sin validación de origen
   - Severidad: CRÍTICA
   - Ubicación: Render configuración de servicio, `siscon-backend/server.js` CORS
@@ -1058,7 +941,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Implementar Tailscale Serve O restricción de IP O mantener privado
   - Dependencia: VUL-001 (hasta que QB sea seguro)
 
-- [ ] **VUL-020** | Sin validación de identidad antes de exponer datos
+- [x] **VUL-020** | Sin validación de identidad antes de exponer datos
+  - **Estado:** ✅ CERRADA (2026-07-24) — identidad por JWT + rate limiting + auditoría en /api/db/* (código, desplegado)
   - Descripción: Endpoint `GET /api/db/settings/1` valida JWT pero no hay rate limit ni auditoría
   - Severidad: ALTA
   - Ubicación: `siscon-backend/server.js` rutas `/api/db/*`
@@ -1066,10 +950,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Rate limiting + auditoría + (luego) restricción Tailscale
   - Dependencia: VUL-019
 
-#### FASE 4 — Red privada + Monitoring (Después, en sesión separada)
+#### FASE 4 — Red privada + Monitoring (🟡 VUL-023 cerrada; VUL-021/022 superadas por Access; VUL-024 pendiente)
 > Infraestructura de defensa en profundidad
 
-- [ ] **VUL-021** | Sin capa de red privada (Tailscale)
+- [~] **VUL-021** | Sin capa de red privada (Tailscale)
+  - **Estado:** ➖ SUPERADA (2026-07-24) — superada por Cloudflare Access (la app queda detrás de Access con MFA, no de Tailscale)
   - Descripción: La app es públicamente accesible en Internet
   - Severidad: CRÍTICA
   - Ubicación: Vercel y Render configuración
@@ -1077,7 +962,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Implementar Tailscale Serve; acceso solo desde red privada
   - Dependencia: VUL-019
 
-- [ ] **VUL-022** | Sin validación de dispositivo aprobado
+- [~] **VUL-022** | Sin validación de dispositivo aprobado
+  - **Estado:** ➖ SUPERADA (2026-07-24) — superada por Cloudflare Access (allowlist + MFA de Entra en vez de device whitelist)
   - Descripción: No se rastrea ni se valida qué dispositivo se conecta
   - Severidad: ALTA
   - Ubicación: Falta integración con Tailscale devices
@@ -1085,7 +971,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Mantener whitelist de device IDs; requerir aprobación manual
   - Dependencia: VUL-021
 
-- [ ] **VUL-023** | Sin rate limiting
+- [x] **VUL-023** | Sin rate limiting
+  - **Estado:** ✅ CERRADA (2026-07-24) — express-rate-limit 1000/15min por IP real sobre /api/* (código, desplegado)
   - Descripción: No hay límite de intentos de login, sync, etc.
   - Severidad: MEDIA
   - Ubicación: `siscon-backend/server.js` sin middleware de rate limit
@@ -1128,7 +1015,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Implementar PKCE si Intuit lo permite; generar `code_verifier`, `code_challenge`
   - Dependencia: VUL-025
 
-#### FASE 6 — Frontend seguro (Integrado en fases anteriores)
+#### FASE 6 — Frontend seguro (🟡 VUL-029/031 cerradas 2026-07-24; VUL-028 XSS y VUL-030 CSP pendientes)
 > XSS y seguridad del navegador
 
 - [ ] **VUL-028** | Riesgo XSS almacenado (innerHTML inseguro)
@@ -1139,7 +1026,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Auditoría de `innerHTML`; reemplazar con `textContent` o `createElement` para datos dinámicos
   - Dependencia: Integrado en VUL-010
 
-- [ ] **VUL-029** | API keys expuestas en el navegador
+- [x] **VUL-029** | API keys expuestas en el navegador
+  - **Estado:** ✅ CERRADA (2026-07-24) — anon key + CDN de supabase-js removidos del frontend (código, desplegado)
   - Descripción: `ANTHROPIC_API_KEY`, `GOOGLE_MAPS_KEY`, etc. pueden estar en el HTML
   - Severidad: MEDIA
   - Ubicación: `index.html` búsqueda de `_KEY`, `apiKey`, etc.
@@ -1155,7 +1043,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Agregar header `Content-Security-Policy: default-src 'self'; ...`
   - Dependencia: VUL-028
 
-- [ ] **VUL-031** | Falta security headers completos
+- [x] **VUL-031** | Falta security headers completos
+  - **Estado:** ✅ CERRADA (2026-07-24) — security headers en backend y vercel.json (código, desplegado)
   - Descripción: No hay HSTS, X-Frame-Options, X-Content-Type-Options, etc.
   - Severidad: MEDIA
   - Ubicación: `siscon-backend/server.js` middleware de headers
@@ -1192,8 +1081,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 #### Sesión 2026-07-24+ (FASE 1 — JWT de Cloudflare validado de verdad)
 
-- [x] **Bypass de origen (soporte de VUL-002/019/020/021) — validación REAL del JWT de Access** ✅ CERRADA a nivel de código
-  - **Estado:** ✅ Código cerrado (commit `cb7d3e0`, rama `security-hardening`); ⏳ pendiente de despliegue.
+- [x] **Bypass de origen (soporte de VUL-002/019/020) — validación REAL del JWT de Access** ✅ CERRADA
+  - **Estado:** ✅ Cerrada y **desplegada 2026-07-24** (commit `cb7d3e0`, ahora en `main`). Verificada en vivo.
   - Descripción: el middleware de FASE 1 solo hacía `base64`-decode del payload **sin verificar la firma**;
     un `Cf-Access-Jwt-Assertion` forjado contra `onrender.com` era aceptado.
   - Acción: verificación RS256 contra el JWKS de Cloudflare + `iss` + `aud` (`cf-access.js` / `makeCfVerifier`);
@@ -1205,18 +1094,30 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > diseño" VUL-004, 005, 007, 008, 009, 010, 011, 012 y 013 con los commits `4df7078`/`3e22f6e`. La revisión
 > encontró que esa FASE 2 **no funcionaba**. Se **rehízo** correctamente (ver abajo).
 
-#### Sesión 2026-07-24+ (FASE 2 rehecha — código cerrado, pendiente de despliegue)
-> Commits: backend `2ad5f77`, frontend `e1a7498` (rama `security-hardening`). Verificado local; falta cutover.
+#### Sesión 2026-07-24 (FASE 2 rehecha — ✅ DESPLEGADA en el cutover)
+> Commits: backend `2ad5f77`, frontend `e1a7498`. Mergeado a `main` y verificado en vivo.
 
-- [x] **VUL-004 | Token `local_` sin firma** — ✅ código cerrado. Eliminado de `getSupabaseUser`; en prod la
-  identidad viene del JWT de Access (`getCurrentUser`).
-- [x] **VUL-005 | `SISCON_TOKEN` como secreto compartido** — ✅ código cerrado. `checkToken()` ya no exige el
-  token cuando `CLOUDFLARE_ENABLED`; el gate es el JWT. (El header sigue en el frontend pero es inerte.)
-- [x] **VUL-010 | Rol validado solo en frontend** — ✅ código cerrado. `validateAdminRole()` valida en servidor.
-- [~] **VUL-007/008/009/011/012/013** — se cierran **por diseño** cuando Access esté en vivo (MFA de Microsoft,
-  cookie `CF_Authorization` HttpOnly/Secure/SameSite gestionada por Cloudflare, revocación central). Dependen del
-  **cutover** (merge + infra de Cloudflare), no de más código.
-- Nota: estas VUL siguen listadas en **11.1 (Pendientes)** hasta que el despliegue esté hecho y verificado en vivo.
+- [x] **VUL-004 | Token `local_` sin firma** — ✅ eliminado de `getSupabaseUser`; en prod la identidad viene del
+  JWT de Access (`getCurrentUser`).
+- [x] **VUL-005 | `SISCON_TOKEN` como secreto compartido** — ✅ `checkToken()` ya no exige el token cuando
+  `CLOUDFLARE_ENABLED`; el gate es el JWT. (El header sigue en el frontend pero es inerte.)
+- [x] **VUL-010 | Rol validado solo en frontend** — ✅ `validateAdminRole()` valida en servidor.
+- [x] **VUL-007/008/009/011** — ✅ cerradas **por diseño con Access en vivo**: MFA de Microsoft Entra, cookie
+  `CF_Authorization` HttpOnly/Secure/SameSite gestionada por Cloudflare, revocación central por allowlist.
+- [ ] **VUL-012 (CSRF) / VUL-013 (reauth para acciones críticas)** — siguen **pendientes**: no se implementaron
+  tokens CSRF ni reautenticación. El enfoque same-origin + SameSite mitiga parte de CSRF, pero no se cierra formalmente.
+
+#### Sesión 2026-07-24 (Cutover + FASE 3 — ✅ desplegado y verificado en vivo)
+> Merge `security-hardening` → `main` en ambos repos. Frontend `81d0bcc`, backend `bec4120`. Probado en producción.
+
+- [x] **Cutover a Cloudflare Access** ✅ — login por Access/MFA, JWT validado, dashboard y CRUD funcionando en prod.
+  - **Plan B activado** (`USE_SAME_ORIGIN_API=true`): el frontend llama a `/api/*` en `app.sisconcr.com` → rewrite
+    de Vercel → Render (el DNS cross-subdominio `app.→api.` no resolvía en el navegador).
+  - `CLOUDFLARE_ACCESS_AUD` en Render ahora incluye **ambos** AUDs (app + api); el JWT llega con el AUD de `app`.
+- [x] **VUL-018 | Auditoría** ✅ — `auditLog()` en INSERT/UPDATE/DELETE + `GET /api/audit-log` (Admin). Backend `2833d3b`.
+- [x] **VUL-023 | Rate limiting** ✅ — 1000/15min por IP real sobre `/api/*`. Backend `2702378`.
+- [x] **VUL-029 | anon key en el navegador** ✅ — removida del frontend (con el CDN de supabase-js). Frontend `4329303`.
+- [x] **VUL-031 | Security headers** ✅ — backend + `vercel.json` (sin CSP aún). Backend `2833d3b`, frontend `0822067`.
 
 ---
 
