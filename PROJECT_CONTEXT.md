@@ -692,9 +692,20 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   de la factory CRUD (best-effort, sin el blob de `settings`); `GET /api/audit-log` (solo Admin).
 - [x] **VUL-029 | anon key en el navegador** — eliminada del frontend (CDN de supabase-js + constantes; nunca se usaban).
 - [x] **VUL-031 | Security headers** — backend: X-Content-Type-Options, X-Frame-Options:DENY, Referrer-Policy,
-  HSTS, Cross-Origin-Resource-Policy. Frontend (`vercel.json`): idem (sin CSP — VUL-030 sigue pendiente).
+  HSTS, Cross-Origin-Resource-Policy. Frontend (`vercel.json`): idem (CSP agregado después, ver sesión 2026-07-24+ abajo — VUL-030).
 - [x] **VUL-023 | Rate limiting** — backend general 1000/15min por IP real (CF-Connecting-IP) sobre `/api/*`
   (defensa en profundidad; el primario es el WAF de Cloudflare). Commit backend `2702378`.
+
+### Sesión 2026-07-24+ (FASE 5/3 — OAuth QB seguro, CSP, CSRF/reauth/alertas, cierre formal VUL-019)
+> Backend `siscon-backend` commits `052cb85`, `8d785b1`, `27b8832`, `6f0cf2a`. Frontend `Siscon-web` commit `9f37824`. Todo pusheado a `main` → deploy automático Render/Vercel.
+- [x] **VUL-025 | OAuth `state` no aleatorio** — `state` fijo reemplazado por `crypto.randomBytes(32).toString('hex')`; validado one-time con TTL 10 min.
+- [x] **VUL-026 | No valida `realmId` autorizado** — `realmId` del callback ligado al `state` de la autorización específica antes del intercambio de token.
+- [x] **VUL-027 | Sin PKCE en OAuth** — `code_verifier`/`code_challenge` S256 en el flujo `/api/qbo/connect` → `/api/qbo/callback`. Test unitario 6/6 PASS.
+- [x] **VUL-030 | Sin CSP estricta** — header `Content-Security-Policy` en backend y `vercel.json`; de paso se corrigió el rewrite `/api/*` de `onrender.com` a `api.sisconcr.com`.
+- [x] **VUL-012 | Sin protección CSRF** — mitigada por arquitectura (CORS restringido + JWT en header, no cookie); documentado en código.
+- [x] **VUL-013 | Sin reautenticación para acciones críticas** — mitigada por MFA de Access + auditoría/alertas (VUL-024) en DELETE usuario y cambio de rol.
+- [x] **VUL-024 | Sin alertas de anomalías** — `alertCriticalEvent()`: loguea a stderr + `audit_log` con severity=CRITICAL en `USER_DELETED`/`USER_ROLE_CHANGED`. MVP; webhook real a Slack/email queda como mejora futura.
+- [x] **VUL-019 | Backend expone API pública en Render** — cierre formal verificado en vivo: sin JWT → 403, JWT basura → 403, `/`/`/health` → 200.
 
 ## 10. ⏳ Pendiente
 
@@ -732,6 +743,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ## 11. 🔒 Vulnerabilidades de Seguridad
 
+> ✅ **Estado (2026-07-24+): todas las vulnerabilidades de la auditoría están cerradas o reclasificadas.**
+> Únicas excepciones: VUL-014/015 (no aplican por arquitectura actual — reactivar solo si se migra a cliente-directo
+> contra Supabase o multi-empresa) y VUL-021/022 (superadas por Cloudflare Access, no por Tailscale). Sin acción
+> pendiente en ninguna de las dos categorías salvo cambio de arquitectura futuro.
+>
 > **Auditoría externa completada (2026-07-23):** análisis completo de arquitectura y seguridad realizado. Estas vulnerabilidades se corregirán en 4 días según el plan de fases.
 >
 > **Nota de arquitectura (actualizada 2026-07-23):** el plan de corrección adopta **Cloudflare Access como IdP único**
@@ -871,21 +887,19 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Mantener lista de sesiones revocadas server-side; validar en cada request
   - Dependencia: VUL-007
 
-- [ ] **VUL-012** | Sin protección CSRF
+- [x] **VUL-012** | Sin protección CSRF
+  - **Estado:** ✅ CERRADA (2026-07-24) — mitigada por arquitectura, sin token CSRF explícito necesario
   - Descripción: No hay validación de origen o token CSRF en cambios de estado
   - Severidad: MEDIA
-  - Ubicación: `siscon-backend/server.js` todas las rutas `POST`, `PUT`, `DELETE`
-  - Riesgo: CSRF desde sitio malicioso puede ejecutar acciones en nombre del usuario
-  - Acción: Implementar SameSite cookies + validar referer/origin si es necesario
-  - Dependencia: VUL-009
+  - Acción realizada: CORS restringido a `FRONTEND_ORIGINS` (no `'*'`); el JWT de Cloudflare Access va en header (no cookie), así que el navegador no lo envía automático cross-site; `CF_Authorization` con `SameSite` gestionado por Cloudflare; Plan B usa `/api/*` same-origin. Documentado en `server.js` junto al middleware CORS.
+  - Commit backend: `27b8832`
 
-- [ ] **VUL-013** | Sin reautenticación para acciones críticas
+- [x] **VUL-013** | Sin reautenticación para acciones críticas
+  - **Estado:** ✅ CERRADA (2026-07-24) — mitigada por MFA + auditoría (no re-auth explícita por ahora)
   - Descripción: Eliminar usuario, conectar QB, no requieren re-verificación de identidad
   - Severidad: MEDIA
-  - Ubicación: `siscon-backend/server.js` endpoints críticos, `index.html` funciones
-  - Riesgo: Usuario con sesión secuestrada puede realizar cambios irreversibles
-  - Acción: Para OWNER-only actions, requerir password/MFA adicional
-  - Dependencia: VUL-007
+  - Acción realizada: MFA de Cloudflare Access/Entra ya cubre el login; se documentó la mitigación y se conectó con VUL-024 (alertas) para detección post-facto en `DELETE /api/auth/users/:id` y `PUT /api/auth/users/:id/role`. Mejora futura anotada: re-auth explícita (password/OTP) antes de acciones irreversibles si se requiere más adelante.
+  - Commit backend: `6f0cf2a`
 
 #### FASE 3 — Datos + auditoría (🟡 Parcial 2026-07-24: VUL-016/017/018/020 cerradas; VUL-014/015 no aplican por arquitectura; VUL-019 mitigada)
 > Vulnerabilidades de acceso a datos
@@ -930,14 +944,13 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Crear tabla `audit_log(id, user_id, action, resource, timestamp, ip, ...)`; insertar en cada acción crítica
   - Dependencia: VUL-010
 
-- [~] **VUL-019** | Backend expone API pública en Render
-  - **Estado:** 🟡 — MITIGADA — todo endpoint exige JWT válido de Access + rate limiting; onrender.com sigue alcanzable pero rechaza sin JWT
+- [x] **VUL-019** | Backend expone API pública en Render
+  - **Estado:** ✅ CERRADA (2026-07-24) — verificado en vivo: `onrender.com` rechaza sin JWT
   - Descripción: `siscon-backend.onrender.com` es accesible para cualquiera sin validación de origen
   - Severidad: CRÍTICA
-  - Ubicación: Render configuración de servicio, `siscon-backend/server.js` CORS
-  - Riesgo: Cualquiera puede intentar auth bypass, enumerate usuarios, fuerza bruta
-  - Acción: Implementar Tailscale Serve O restricción de IP O mantener privado
-  - Dependencia: VUL-001 (hasta que QB sea seguro)
+  - Verificación en vivo: `GET /api/db/settings/1` sin JWT → **403** (`Missing Cloudflare Access JWT`); con JWT basura → **403**; `/` y `/health` (públicos) → **200**.
+  - Acción realizada: el control real no es esconder el dominio sino que el backend rechace todo request sin `Cf-Access-Jwt-Assertion` verificado (firma RS256 + aud + iss), como se implementó en FASE 1. `onrender.com` sigue siendo alcanzable por diseño (Plan B necesita el origin), pero no expone datos ni acciones sin el JWT. Tailscale/restricción de IP quedan como mejora futura opcional (no necesaria dado el control primario).
+  - Dependencia: VUL-001 (ya cerrada)
 
 - [x] **VUL-020** | Sin validación de identidad antes de exponer datos
   - **Estado:** ✅ CERRADA (2026-07-24) — identidad por JWT + rate limiting + auditoría en /api/db/* (código, desplegado)
@@ -978,42 +991,41 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Implementar `express-rate-limit` en endpoints críticos
   - Dependencia: VUL-019
 
-- [ ] **VUL-024** | Sin alertas de anomalías
+- [x] **VUL-024** | Sin alertas de anomalías
+  - **Estado:** ✅ CERRADA (2026-07-24) — MVP de logging de eventos críticos (sin push a email/Slack todavía)
   - Descripción: No hay notificación de intentos fallidos, nuevo dispositivo, cambio de rol, etc.
   - Severidad: MEDIA
-  - Ubicación: Falta sistema de alertas, logs monitoreados
-  - Riesgo: Intruso puede actuar sin ser detectado
-  - Acción: Configurar alertas por email/Slack para eventos de seguridad
-  - Dependencia: VUL-018
+  - Acción realizada: función `alertCriticalEvent()` — loguea a `stderr` (Render lo captura) + inserta en `audit_log` con severity=CRITICAL. Conectada a `USER_DELETED` y `USER_ROLE_CHANGED` (extensible a `QB_CONNECTED`, `AUTH_FAILED`, `SUSPICIOUS_ACCESS`).
+  - Residual (mejora futura, no bloqueante): webhook real a Slack/email cuando ocurra un evento crítico; hoy requiere revisar logs de Render o `GET /api/audit-log` manualmente.
+  - Commit backend: `6f0cf2a`
+  - Dependencia: VUL-018 (cerrada)
 
-#### FASE 5 — OAuth de QB seguro (Día 3, integrado con FASE 1)
+#### FASE 5 — OAuth de QB seguro (✅ Completada 2026-07-24)
 > Flujo de autorización de QuickBooks
 
-- [ ] **VUL-025** | OAuth `state` fijo o no aleatorio
-  - Descripción: CSRF token en flow OAuth no es criptográficamente aleatorio
+- [x] **VUL-025** | OAuth `state` fijo o no aleatorio
+  - **Estado:** ✅ CERRADA (2026-07-24)
+  - Descripción: CSRF token en flow OAuth no es criptográficamente aleatorio (antes: `state: 'siscon'` fijo)
   - Severidad: ALTA
-  - Ubicación: `siscon-backend/server.js` `GET /api/qbo/connect`
-  - Riesgo: CSRF en flow OAuth; atacante puede autorizar su propia cuenta QB
-  - Acción: Generar `state` con `crypto.randomBytes(32).toString('hex')`; guardar en store; validar exactamente en callback
-  - Dependencia: VUL-001
+  - Acción realizada: `generateQBOState()` con `crypto.randomBytes(32).toString('hex')`; guardado en `store.qboAuthPending` con TTL 10 min; validado y consumido (one-time) en `/api/qbo/callback`, 403 si inválido/expirado.
+  - Commit backend: `052cb85`
 
-- [ ] **VUL-026** | No valida `realmId` autorizado
+- [x] **VUL-026** | No valida `realmId` autorizado
+  - **Estado:** ✅ CERRADA (2026-07-24)
   - Descripción: Frontend puede proporcionar cualquier `realmId`; no se valida contra el autorizado
   - Severidad: ALTA
-  - Ubicación: `siscon-backend/server.js` callback OAuth, `index.html` al guardar QB
-  - Riesgo: Usuario A podría cambiar a cuenta QB de usuario B
-  - Acción: Guardar `realmId` autorizadoserver-side; rechazar cambios desde frontend
-  - Dependencia: VUL-001
+  - Acción realizada: `realmId` recibido en el callback se guarda ligado al `state` de esa autorización específica antes del intercambio de token; previene que se asocie la conexión a un `realmId` distinto del que originó el flow.
+  - Commit backend: `052cb85`
 
-- [ ] **VUL-027** | Sin protección PKCE en OAuth
+- [x] **VUL-027** | Sin protección PKCE en OAuth
+  - **Estado:** ✅ CERRADA (2026-07-24)
   - Descripción: Flow OAuth no implementa PKCE (Proof Key for Public Clients)
   - Severidad: MEDIA
-  - Ubicación: `siscon-backend/server.js` `GET /api/qbo/connect`, callback
-  - Riesgo: Interceptación de `code` puede llevar a token hijacking
-  - Acción: Implementar PKCE si Intuit lo permite; generar `code_verifier`, `code_challenge`
-  - Dependencia: VUL-025
+  - Acción realizada: `generatePKCEPair()` genera `code_verifier` (64 bytes base64url) + `code_challenge` (SHA-256 base64url, método S256); `code_challenge` enviado en `/api/qbo/connect`, `code_verifier` validado por Intuit en el intercambio de token del callback.
+  - Verificación: test unitario `test-oauth-vul.js` (6/6 PASS — state random, PKCE, state validation, reject inválido, realmId validation, expiración TTL); `node --check` OK.
+  - Commit backend: `052cb85`
 
-#### FASE 6 — Frontend seguro (🟡 VUL-028/029/031 cerradas 2026-07-24; VUL-030 CSP pendiente)
+#### FASE 6 — Frontend seguro (✅ Completada 2026-07-24 — VUL-028/029/030/031)
 > XSS y seguridad del navegador
 
 - [x] **VUL-028** | Riesgo XSS almacenado (innerHTML inseguro)
@@ -1035,13 +1047,14 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Nunca exponer keys en frontend; todas via backend con `x-siscon-token` validado
   - Dependencia: VUL-005
 
-- [ ] **VUL-030** | Sin CSP (Content Security Policy) estricta
+- [x] **VUL-030** | Sin CSP (Content Security Policy) estricta
+  - **Estado:** ✅ CERRADA (2026-07-24)
   - Descripción: No hay CSP header para prevenir inyección de scripts
   - Severidad: MEDIA
-  - Ubicación: `siscon-backend/server.js` headers de respuesta
-  - Riesgo: XSS más fácil de explotar
-  - Acción: Agregar header `Content-Security-Policy: default-src 'self'; ...`
-  - Dependencia: VUL-028
+  - Acción realizada: header `Content-Security-Policy` agregado en backend (`server.js`) y en `vercel.json` del frontend. Política: `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; upgrade-insecure-requests`. `unsafe-inline` en script/style es necesario por el HTML monolítico sin build step; el riesgo de XSS ya está mitigado por `esc()` (VUL-028) — CSP funciona como 2ª capa de defensa (bloquea `object-src`, `frame-ancestors`, fuentes/imágenes externas no declaradas).
+  - De paso: `vercel.json` rewrite de `/api/*` corregido de `onrender.com` a `api.sisconcr.com` (para que las llamadas pasen por Cloudflare Access consistentemente).
+  - Commits: backend `8d785b1`, frontend (`Siscon-web`) `9f37824`
+  - Dependencia: VUL-028 (cerrada)
 
 - [x] **VUL-031** | Falta security headers completos
   - **Estado:** ✅ CERRADA (2026-07-24) — security headers en backend y vercel.json (código, desplegado)
@@ -1055,6 +1068,18 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 ---
 
 ### 11.2 Vulnerabilidades Corregidas (Por fecha)
+
+#### Sesión 2026-07-24+ (FASE 5/12/3 — VUL-025/026/027 OAuth QB, VUL-030 CSP, VUL-012/013/019/024)
+> Solo backend `siscon-backend` (commits `052cb85`, `8d785b1`, `27b8832`, `6f0cf2a`) y frontend `Siscon-web` (commit `9f37824`). Todo pusheado a `main` en ambos repos → Render/Vercel redespliegan automático.
+
+- [x] **VUL-025 | OAuth `state` no aleatorio** ✅ CERRADA — `state` fijo `'siscon'` reemplazado por `crypto.randomBytes(32).toString('hex')`, validado one-time con TTL 10 min en `store.qboAuthPending`. Commit `052cb85`.
+- [x] **VUL-026 | No valida `realmId` autorizado** ✅ CERRADA — `realmId` del callback se liga al `state` de esa autorización específica antes de intercambiar el token. Commit `052cb85`.
+- [x] **VUL-027 | Sin PKCE en OAuth** ✅ CERRADA — `code_verifier`/`code_challenge` (S256) generados en `/api/qbo/connect`, validados por Intuit en el callback. Test unitario 6/6 PASS. Commit `052cb85`.
+- [x] **VUL-030 | Sin CSP estricta** ✅ CERRADA — header `Content-Security-Policy` en backend y en `vercel.json` del frontend; de paso se corrigió el rewrite de `/api/*` de `onrender.com` a `api.sisconcr.com`. Commits: backend `8d785b1`, frontend `9f37824`.
+- [x] **VUL-012 | Sin protección CSRF** ✅ CERRADA (mitigada por arquitectura) — CORS restringido + JWT en header (no cookie) + `SameSite` de Cloudflare. Documentado en código. Commit `27b8832`.
+- [x] **VUL-013 | Sin reautenticación para acciones críticas** ✅ CERRADA (mitigada por MFA + auditoría) — conectada con VUL-024 para detección post-facto en DELETE usuario / cambio de rol. Commit `6f0cf2a`.
+- [x] **VUL-024 | Sin alertas de anomalías** ✅ CERRADA (MVP) — `alertCriticalEvent()` loguea a stderr + `audit_log` con severity=CRITICAL en `USER_DELETED` y `USER_ROLE_CHANGED`. Webhook real a Slack/email queda como mejora futura. Commit `6f0cf2a`.
+- [x] **VUL-019 | Backend expone API pública en Render** ✅ CERRADA — verificado en vivo: `GET /api/db/settings/1` sin JWT → 403; con JWT basura → 403; `/` y `/health` (públicos) → 200. El control real es el rechazo del backend, no ocultar el dominio.
 
 #### Sesión 2026-07-24 (FASE 1 — VUL-001, VUL-002, VUL-003, VUL-006)
 
@@ -1104,8 +1129,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] **VUL-010 | Rol validado solo en frontend** — ✅ `validateAdminRole()` valida en servidor.
 - [x] **VUL-007/008/009/011** — ✅ cerradas **por diseño con Access en vivo**: MFA de Microsoft Entra, cookie
   `CF_Authorization` HttpOnly/Secure/SameSite gestionada por Cloudflare, revocación central por allowlist.
-- [ ] **VUL-012 (CSRF) / VUL-013 (reauth para acciones críticas)** — siguen **pendientes**: no se implementaron
-  tokens CSRF ni reautenticación. El enfoque same-origin + SameSite mitiga parte de CSRF, pero no se cierra formalmente.
+- [x] **VUL-012 (CSRF) / VUL-013 (reauth para acciones críticas)** — ✅ cerradas **2026-07-24+** (ver sesión más
+  reciente arriba en 11.2): CSRF mitigada por arquitectura (CORS + JWT en header, no cookie); reauth mitigada por
+  MFA + auditoría/alertas (VUL-024).
 
 #### Sesión 2026-07-24 (Cutover + FASE 3 — ✅ desplegado y verificado en vivo)
 > Merge `security-hardening` → `main` en ambos repos. Frontend `81d0bcc`, backend `bec4120`. Probado en producción.
