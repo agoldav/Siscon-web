@@ -861,20 +861,31 @@ let _saveToastTimer=null;
 let _sbToken = localStorage.getItem('sb_token') || null;
 // FASE 2: en producción todo el tráfico va por api.sisconcr.com (detrás de Cloudflare Access).
 // SYS.backendUrl solo se respeta para desarrollo local (localhost); nunca una URL de onrender guardada.
-const BACKEND_URL = (SYS.backendUrl && /localhost|127\.0\.0\.1/.test(SYS.backendUrl))
-  ? SYS.backendUrl
+//
+// PLAN B (fallback): si el flujo cross-subdominio (app.→api.) diera problemas con la cookie de Access,
+// poner USE_SAME_ORIGIN_API=true → el frontend llama a /api/* en el MISMO dominio (rewrite de Vercel
+// en vercel.json → Render), eliminando CORS y el problema cross-subdominio. (Requiere que el backend
+// acepte el AUD de app.sisconcr.com: agregarlo a CLOUDFLARE_ACCESS_AUD en Render, separado por coma.)
+const USE_SAME_ORIGIN_API = false;
+const BACKEND_URL = USE_SAME_ORIGIN_API ? ''
+  : (SYS.backendUrl && /localhost|127\.0\.0\.1/.test(SYS.backendUrl)) ? SYS.backendUrl
   : 'https://api.sisconcr.com';
 
 // FASE 2: toda llamada al backend debe mandar la cookie de Cloudflare Access (CF_Authorization).
-// Envolvemos fetch para añadir credentials:'include' automáticamente a las llamadas a BACKEND_URL,
-// sin tener que tocar cada uno de los ~17 sitios de fetch del archivo.
+// Envolvemos fetch para añadir credentials:'include' automáticamente a las llamadas al backend,
+// sin tener que tocar cada uno de los ~17 sitios de fetch del archivo. Funciona en ambos modos:
+// BACKEND_URL absoluto (api.sisconcr.com) o Plan B ('' → rutas /api/* del mismo origen).
+function _isBackendUrl(url){
+  if(BACKEND_URL) return url.indexOf(BACKEND_URL)===0;
+  return url.indexOf('/api/')===0 || url.indexOf(location.origin+'/api/')===0;
+}
 if(!window._fetchWrappedCF){
   window._fetchWrappedCF=true;
   const _origFetch=window.fetch.bind(window);
   window.fetch=function(input,init){
     try{
       const url=typeof input==='string'?input:(input&&input.url)||'';
-      if(url.indexOf(BACKEND_URL)===0){ init=Object.assign({},init,{credentials:'include'}); }
+      if(_isBackendUrl(url)){ init=Object.assign({},init,{credentials:'include'}); }
     }catch(e){}
     return _origFetch(input,init);
   };

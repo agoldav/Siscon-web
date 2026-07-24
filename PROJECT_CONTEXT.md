@@ -634,24 +634,51 @@ marcadas como cerradas prematuramente).
   payload forjado→403, mal configurado→500, dev (CF off)→pasa.
 - Con esto **VUL-019/020/021 quedan realmente cerradas** (a nivel de código; falta el despliegue).
 
-#### ⏳ FASE 2 — reabierta (rehacer sobre la base ya sólida)
-Pendiente para que Access sea de verdad el IdP único (ver Sección 10 y 11.1):
-- `/api/db/*` y demás rutas deben **consumir `req.cf`** (identidad de Access), no `getSupabaseUser`.
-- **Eliminar el token `local_`** (VUL-004) y `SISCON_TOKEN` como auth (VUL-005).
-- Frontend: `BACKEND_URL` → **`api.sisconcr.com`** (hoy va directo a `onrender.com`, se salta Cloudflare).
-- Unificar **modelo de roles** (`Administrador/Supervisor/Regular` ↔ `OWNER/MEMBER`) y correr la migración
-  de `profiles` (columna `email`, rol). Sin eso `/api/me` y `validateOwnerRole` no resuelven bien el rol.
-- `/api/me` ya recibe `req.cf` (arreglado arriba), pero depende de la migración de `profiles` para el rol.
+#### ✅ FASE 2 — código rehecho (commits backend `2ad5f77`, frontend `e1a7498`)
+Rehecha sobre la validación de JWT ya sólida. **Decisión de diseño clave:** se mantiene el modelo de roles
+existente `Administrador/Supervisor/Regular` (hay un CHECK constraint en `profiles`; `OWNER/MEMBER` lo rompía)
+y se mapea `email → auth.users → profile` **sin cambio de esquema** (no se necesita columna `email` en profiles).
+- [x] **Identidad unificada** `getCurrentUser(req,res)`: en prod usa `req.cf.email` del JWT verificado →
+  `resolveUserByEmail()` (`auth.admin.listUsers` → profile por id, cache 60s); en dev, fallback al Bearer de Supabase.
+- [x] **VUL-004**: eliminado el token `local_` sin firma de `getSupabaseUser`.
+- [x] **VUL-005**: `checkToken()` deja de exigir `SISCON_TOKEN` cuando `CLOUDFLARE_ENABLED` (el gate es el JWT).
+- [x] **VUL-010**: `validateAdminRole()` valida rol server-side (`role==='Administrador'`); reemplaza `validateOwnerRole`.
+- [x] 15 handlers de datos migrados a `getCurrentUser`; `/api/me` devuelve `{id,email,role,name}`.
+- [x] **CORS con credentials**: refleja el origin exacto (`app.sisconcr.com` vía `FRONTEND_ORIGINS`) + `Allow-Credentials:true`.
+- [x] Frontend: `BACKEND_URL` → `api.sisconcr.com`; wrapper de `fetch` añade `credentials:'include'` a toda llamada al backend.
+- [x] Red de seguridad opcional: env `SISCON_ADMIN_EMAILS` fuerza rol `Administrador` (no dejar fuera al admin).
+- Verificado local: sin JWT→403, CORS refleja app.sisconcr.com+credentials, evil.com bloqueado, cf-access 9/9,
+  frontend carga sin errores y cae al login en dev.
+
+##### ⏳ FASE 2 — falta para el cutover (infra + datos + prueba en vivo)
+1. **Cloudflare Access (consola):** en la Access App de `api.sisconcr.com`, habilitar **`options_preflight_bypass`**
+   (para que el preflight CORS OPTIONS no lo intercepte Access) y confirmar/añadir **CORS settings** con
+   `app.sisconcr.com`. Sin esto el navegador no podrá hacer las llamadas cross-subdominio.
+2. **Datos en Supabase:** cada uno de los 4 emails `@sisconcr.com` de Access debe tener **cuenta en Supabase Auth
+   con su `profile`** (rol correcto). El rol vive en `profiles.role`. (Opcional: `SISCON_ADMIN_EMAILS` como red.)
+3. **Prueba en vivo (riesgo real):** el establecimiento de la cookie `CF_Authorization` de `api.sisconcr.com` para
+   llamadas `fetch` cross-subdominio necesita verificarse en vivo. Plan B si falla: enrutar el API bajo el mismo
+   host (`app.sisconcr.com/api/*` vía rewrite de Vercel) para evitar CORS/cross-subdominio.
+4. **Cutover:** ver "Estado de despliegue".
 
 #### Estado de despliegue (importante)
 - **Producción sigue en `main`:** backend `833f686` (sin middleware CF, con endpoints QB de escritura aún
-  vivos) y frontend `b0c184e`. **Ni FASE 1 ni FASE 2 están desplegadas.** La afirmación previa de "FASE 1
-  desplegada y verificada en vivo" era inexacta.
-- **Turn-on real** (`CLOUDFLARE_ENABLED=true` en Render) **requiere** que la FASE 2 frontend esté lista
-  (llamar a `api.sisconcr.com`), o la app se rompe (403 en todo). Secuencia segura: mergear FASE 1 con
-  `CLOUDFLARE_ENABLED=false` (no cambia el comportamiento en prod) y activar Access en el cutover de FASE 2.
-- Falta (acción del OWNER en consola): obtener el **AUD tag** de la Access App de `api.sisconcr.com` y
-  ponerlo como `CLOUDFLARE_ACCESS_AUD` en Render, junto con `CLOUDFLARE_TEAM` y `CLOUDFLARE_ENABLED`.
+  vivos) y frontend `b0c184e`. **Ni FASE 1 ni FASE 2 están desplegadas.** FASE 1 **y** FASE 2 (código) viven en
+  `security-hardening`: backend hasta `2ad5f77`, frontend hasta `e1a7498`.
+- **Env vars de Cloudflare YA configuradas en Render** (2026-07-24):
+  - `CLOUDFLARE_TEAM = little-poetry-5640` (team domain: `little-poetry-5640.cloudflareaccess.com`)
+  - `CLOUDFLARE_ACCESS_AUD = 0f0369cc6d5b8f9dc47cb208e6acac04d70370360796a2560e4111f06d4bca76` (AUD de la Access App `api.sisconcr.com`)
+  - `CLOUDFLARE_ENABLED = true` — ⚠️ **inerte hoy** porque `main` (código vivo) no tiene el middleware.
+  - (Pendiente opcional en Render: `FRONTEND_ORIGINS` si el origin no fuera `app.sisconcr.com`; `SISCON_ADMIN_EMAILS`.)
+- ⚠️ **RIESGO de secuencia:** como `CLOUDFLARE_ENABLED=true` ya está puesto, **mergear a `main` sin el frontend
+  de FASE 2 rompería la app** (403 en todo). 
+- **Secuencia de cutover recomendada:**
+  1. Completar los pasos de infra/datos de arriba (Access `options_preflight_bypass`+CORS; 4 usuarios en Supabase).
+  2. Mergear `security-hardening` → `main` en **ambos** repos (Vercel + Render redepliegan).
+  3. Con `CLOUDFLARE_ENABLED=true`, probar en vivo el login vía Access + una llamada `/api/db/*`.
+  4. Si algo falla, rollback: `git revert` o poner `CLOUDFLARE_ENABLED=false` (deja pasar el modo dev) mientras se depura.
+  - Alternativa más segura para probar sin arriesgar prod: desplegar `security-hardening` a un preview de Vercel +
+    un servicio Render aparte con las mismas vars, y probar el flujo completo antes de tocar `main`.
 
 ## 10. ⏳ Pendiente
 
@@ -1037,10 +1064,20 @@ Pendiente para que Access sea de verdad el IdP único (ver Sección 10 y 11.1):
 
 > ⚠️ **REVERTIDO — cierres prematuros de FASE 2.** En una sesión previa se marcaron como "cerradas por
 > diseño" VUL-004, 005, 007, 008, 009, 010, 011, 012 y 013 con los commits `4df7078`/`3e22f6e`. La revisión
-> encontró que esa FASE 2 **no funcionaba** (ver Sección 9, "Revisión de seguridad"): `/api/me` no recibía
-> identidad, el frontend se saltaba Cloudflare, `/api/db/*` seguía aceptando el token `local_`, y los roles
-> chocaban (`OWNER` vs `Administrador`). Por eso **estas VUL vuelven a 11.1 (Pendientes)** hasta rehacer
-> FASE 2 correctamente sobre la validación de JWT ya arreglada.
+> encontró que esa FASE 2 **no funcionaba**. Se **rehízo** correctamente (ver abajo).
+
+#### Sesión 2026-07-24+ (FASE 2 rehecha — código cerrado, pendiente de despliegue)
+> Commits: backend `2ad5f77`, frontend `e1a7498` (rama `security-hardening`). Verificado local; falta cutover.
+
+- [x] **VUL-004 | Token `local_` sin firma** — ✅ código cerrado. Eliminado de `getSupabaseUser`; en prod la
+  identidad viene del JWT de Access (`getCurrentUser`).
+- [x] **VUL-005 | `SISCON_TOKEN` como secreto compartido** — ✅ código cerrado. `checkToken()` ya no exige el
+  token cuando `CLOUDFLARE_ENABLED`; el gate es el JWT. (El header sigue en el frontend pero es inerte.)
+- [x] **VUL-010 | Rol validado solo en frontend** — ✅ código cerrado. `validateAdminRole()` valida en servidor.
+- [~] **VUL-007/008/009/011/012/013** — se cierran **por diseño** cuando Access esté en vivo (MFA de Microsoft,
+  cookie `CF_Authorization` HttpOnly/Secure/SameSite gestionada por Cloudflare, revocación central). Dependen del
+  **cutover** (merge + infra de Cloudflare), no de más código.
+- Nota: estas VUL siguen listadas en **11.1 (Pendientes)** hasta que el despliegue esté hecho y verificado en vivo.
 
 ---
 

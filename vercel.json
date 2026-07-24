@@ -1,6 +1,9 @@
 {
   "buildCommand": "echo 'Single-page app - no build needed'",
   "outputDirectory": ".",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://siscon-backend.onrender.com/api/:path*" }
+  ],
   "headers": [
     {
       "source": "/(.*)",
