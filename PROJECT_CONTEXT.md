@@ -717,7 +717,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 ### Infraestructura / Producción
 - [ ] Persistencia de tokens en base de datos Supabase (no en `/tmp`)
 - [ ] Seguridad: API keys siempre vía backend, nunca expuestas en el navegador
-- [ ] Habilitar RLS correctamente en Supabase (políticas por usuario/rol)
+- [x] Habilitar RLS correctamente en Supabase — deny-by-default verificado + `FORCE` en las 21 tablas (VUL-016, 2026-07-24). Las políticas por-rol/usuario (VUL-014/015) se reclasificaron como *no aplican por arquitectura* (service_role ignora RLS + el frontend no accede directo); ver Sección 11.
 
 ### Informes adicionales (pendiente de implementar)
 - [ ] Informe de Flujo de Caja proyectado
@@ -887,32 +887,30 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Para OWNER-only actions, requerir password/MFA adicional
   - Dependencia: VUL-007
 
-#### FASE 3 — Datos + auditoría (🟡 Parcial 2026-07-24: VUL-017/018/020 cerradas; VUL-014/015/016 diferidas; VUL-019 mitigada)
+#### FASE 3 — Datos + auditoría (🟡 Parcial 2026-07-24: VUL-016/017/018/020 cerradas; VUL-014/015 no aplican por arquitectura; VUL-019 mitigada)
 > Vulnerabilidades de acceso a datos
 
-- [ ] **VUL-014** | RLS sin políticas específicas
+- [~] **VUL-014** | RLS sin políticas específicas
+  - **Estado:** ➖ NO APLICA POR ARQUITECTURA (diferida) — 2026-07-24
   - Descripción: RLS activado pero sin `create policy` por rol/usuario
-  - Severidad: ALTA
-  - Ubicación: Supabase SQL editor, tablas `public.*` sin políticas
-  - Riesgo: Si se accede directo a Supabase (con anon key), devuelve `[]` vacío; pero no hay protección real
-  - Acción: Crear políticas que solo permitan acceso a datos de la propia organización
+  - Severidad: ALTA → reclasificada (sin amenaza activa en esta arquitectura)
+  - Por qué no aplica: todo acceso a datos pasa por el backend con `service_role` (BYPASSRLS → ignora RLS) y el frontend nunca habla directo con Supabase (anon key eliminada, VUL-029). Una política por rol en la BD no tendría efecto sobre el tráfico real; el rol ya se valida server-side (`getCurrentUser`/`validateAdminRole`). Reactivar solo si se migra a cliente-directo contra Supabase.
   - Dependencia: VUL-015
 
-- [ ] **VUL-015** | No valida organización por usuario
+- [~] **VUL-015** | No valida organización por usuario
+  - **Estado:** ➖ NO APLICA POR ARQUITECTURA (diferida) — 2026-07-24
   - Descripción: Registros no están asociados a `org_id`; falta constraint de propiedad
-  - Severidad: ALTA
-  - Ubicación: Supabase schema, tablas `projects`, `settings`, etc.
-  - Riesgo: Usuario A podría acceder a datos de usuario B si descubre el ID
-  - Acción: Agregar columna `org_id` a todas las tablas; validar en RLS policies
+  - Severidad: ALTA → reclasificada (sin amenaza activa en esta arquitectura)
+  - Por qué no aplica: un solo inquilino (una empresa; los 4 usuarios comparten TODOS los datos — no hay partición por usuario en el producto) y en runtime la app guarda todo en un único blob `settings/1` vía service_role (las tablas normalizadas no están en la ruta de datos viva). `org_id` no cerraría ninguna amenaza y tocaría código Completado (factory CRUD, import, `normalizeRecord`). Reactivar solo si se migra a multi-empresa.
   - Dependencia: VUL-014
 
-- [ ] **VUL-016** | Deny-by-default no implementado en RLS
-  - Descripción: Tablas tienen RLS pero sin `alter table ... enable row level security`
+- [x] **VUL-016** | Deny-by-default no implementado en RLS
+  - **Estado:** ✅ CERRADA (2026-07-24) — verificada en vivo + `FORCE` aplicado
+  - Descripción: RLS debe quedar deny-by-default (enable + force) para que un acceso directo no lea sin política explícita
   - Severidad: ALTA
-  - Ubicación: Supabase SQL para cada tabla
-  - Riesgo: Por defecto, todos pueden leer si no hay política explícita
-  - Acción: `ALTER TABLE ... ENABLE ROW LEVEL SECURITY; ALTER TABLE ... FORCE ROW LEVEL SECURITY;`
-  - Dependencia: VUL-014
+  - Verificación en vivo (2026-07-24): las 21 tablas de `public` tienen `rls_on = true` y **0 políticas**; `service_role` y `postgres` con `BYPASSRLS` (backend y SQL editor OK), `anon`/`authenticated` **sin** él → acceso directo con anon key devuelve vacío, incluida `settings` (blob con todos los datos).
+  - Acción realizada: `ENABLE` + `FORCE ROW LEVEL SECURITY` idempotente sobre todas las tablas de `public` (do-block). El deny-by-default real ya venía desde 2026-07-20; `FORCE` cierra el criterio al pie de la letra (no-op funcional hoy: los dueños tienen BYPASSRLS).
+  - Dependencia: (ninguna — independiente de VUL-014/015)
 
 - [x] **VUL-017** | Backend usa global `service_role` sin validación de usuario
   - **Estado:** ✅ CERRADA (2026-07-24) — getCurrentUser valida identidad (email del JWT → profile) en cada request (código)
@@ -1015,15 +1013,17 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Acción: Implementar PKCE si Intuit lo permite; generar `code_verifier`, `code_challenge`
   - Dependencia: VUL-025
 
-#### FASE 6 — Frontend seguro (🟡 VUL-029/031 cerradas 2026-07-24; VUL-028 XSS y VUL-030 CSP pendientes)
+#### FASE 6 — Frontend seguro (🟡 VUL-028/029/031 cerradas 2026-07-24; VUL-030 CSP pendiente)
 > XSS y seguridad del navegador
 
-- [ ] **VUL-028** | Riesgo XSS almacenado (innerHTML inseguro)
-  - Descripción: Uso de `innerHTML` con datos de usuario sin sanitización completa
+- [x] **VUL-028** | Riesgo XSS almacenado (innerHTML inseguro)
+  - **Estado:** ✅ CERRADA (2026-07-24) — remediación **dirigida por riesgo** + verificada (código, sin commit/deploy aún)
+  - Descripción: Uso de `innerHTML` con datos de usuario/externos sin sanitización
   - Severidad: ALTA
-  - Ubicación: `index.html` múltiples funciones renderizado (búsqueda necesaria con grep)
-  - Riesgo: Script malicioso en nombre de proyecto, descripción, etc. se ejecuta para todos los usuarios
-  - Acción: Auditoría de `innerHTML`; reemplazar con `textContent` o `createElement` para datos dinámicos
+  - Vector confirmado (remoto, sin insider): factura PDF a `facturas@sisconcr.com` con proveedor `<img onerror=…>` → OCR → guardado → pintado en la lista de transacciones → ejecutaba en el navegador del admin.
+  - Acción realizada: helper `esc()` (escapa `& < > " '`, seguro en texto y en atributos con comillas) + envueltos ~90 sinks de campos controlables por atacante en ~40 funciones de render: OCR/QB/Outlook (party, invoiceNumber, vendorName, consecutivo, desc de línea, nombre de documento) y datos de usuario cruzado (nombre de proyecto/cliente/tipo/casa, notas, proforma, responsable, cuadrilla, CRM, bitácora, usuarios). Helpers `fld()`/`ro()`/`crewDropHtml()` corregidos en origen. `<textarea>` incluidos (breakout de `</textarea>`).
+  - Verificación: el `<script>` completo compila sin `SyntaxError` (`new Function`); `esc()` neutraliza payloads de tag/atributo/textarea; 0 doble-escape; 0 sinks de texto crudos de los campos clave.
+  - Residual (defensa en profundidad, NO bloqueante): no se auditó cada uno de los 134 `innerHTML` individualmente (sí un barrido exhaustivo de los campos controlables conocidos); los `on*="fn(${id})"` usan ids internos (no texto libre); **CSP estricta (VUL-030) sigue pendiente** como backstop.
   - Dependencia: Integrado en VUL-010
 
 - [x] **VUL-029** | API keys expuestas en el navegador
@@ -1118,6 +1118,18 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] **VUL-023 | Rate limiting** ✅ — 1000/15min por IP real sobre `/api/*`. Backend `2702378`.
 - [x] **VUL-029 | anon key en el navegador** ✅ — removida del frontend (con el CDN de supabase-js). Frontend `4329303`.
 - [x] **VUL-031 | Security headers** ✅ — backend + `vercel.json` (sin CSP aún). Backend `2833d3b`, frontend `0822067`.
+
+#### Sesión 2026-07-24 (FASE 3 — VUL-016 cerrada; VUL-014/015 reclasificadas por arquitectura)
+> Solo cambios en Supabase (SQL) + documentación. NO tocó código de backend/frontend. Verificado en vivo antes de actuar.
+> Nota de higiene: al inicio, el checkout local de `siscon-backend` estaba 9 commits atrás de `origin/main` (código pre-hardening, sin `cf-access.js`); se corrigió con `git pull --ff-only` (fast-forward limpio) antes de trabajar. El repo `Siscon-web` ya estaba al día.
+
+- [x] **VUL-016 | Deny-by-default en RLS** ✅ CERRADA — verificación en vivo: las 21 tablas de `public` con RLS `on` + **0 políticas**; `service_role`/`postgres` con `BYPASSRLS` (backend y SQL editor operan), `anon`/`authenticated` **sin** él → acceso directo con la anon key (incluida `settings`, que contiene todo el blob) devuelve vacío. Aplicado `ENABLE` + `FORCE ROW LEVEL SECURITY` idempotente en todas las tablas de `public`. (`FORCE` = belt-and-suspenders: no-op funcional hoy porque los dueños tienen `BYPASSRLS`, pero cierra VUL-016 literalmente y deja el flag consistente.) El deny-by-default real ya venía desde 2026-07-20.
+- [~] **VUL-014 / VUL-015 | políticas por rol / `org_id`** ➖ **NO APLICAN POR ARQUITECTURA** (diferidas). Motivo: backend-as-guardian con `service_role` (ignora RLS) + frontend que nunca habla directo con Supabase (anon key eliminada, VUL-029) + un solo inquilino (una empresa, 4 usuarios que comparten TODOS los datos) + runtime sobre un único blob `settings/1` (las tablas normalizadas no están en la ruta de datos viva). Políticas por-rol/usuario y `org_id` no cerrarían amenaza activa y tocarían código Completado (factory CRUD, `/api/db/import`, `normalizeRecord`). Reactivar **solo** si se migra a cliente-directo contra Supabase o a multi-empresa.
+
+#### Sesión 2026-07-24 (FASE 6 — VUL-028 XSS remediación dirigida)
+> Solo frontend (`siscon-web/index.html`). Sin cambios de backend ni de datos. **Sin commit/deploy todavía.**
+
+- [x] **VUL-028 | XSS almacenado por `innerHTML`** ✅ CERRADA (dirigida) — helper `esc()` (`& < > " '`) + ~90 sinks de datos controlables por atacante envueltos en ~40 funciones de render: vector remoto de OCR (party/invoiceNumber/vendorName/desc de línea) + datos de usuario cruzado (proyecto/cliente/tipo/casa/notas/proforma/responsable/cuadrilla/CRM/bitácora/usuarios); helpers `fld()`/`ro()`/`crewDropHtml()` corregidos en origen; `<textarea>` cubiertos. Verificado: compila sin SyntaxError, `esc()` neutraliza payloads, 0 doble-escape. **Residual:** CSP estricta (VUL-030) pendiente como defensa en profundidad; los `on*=` usan solo ids internos.
 
 ---
 

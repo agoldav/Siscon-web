@@ -1465,9 +1465,9 @@ function openSettings(){
       <button onclick="openUsersModal()" style="background:var(--acc);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:11px;cursor:pointer;margin-bottom:10px">👥 Cuentas de acceso (login)</button>
       ${SYS.users.map(u=>`
         <div class="user-row" style="position:relative">
-          <div class="user-avatar" style="background:${u.color}20;color:${u.color}">${u.name.split(' ').map(w=>w[0]).join('').slice(0,2)}</div>
+          <div class="user-avatar" style="background:${u.color}20;color:${u.color}">${esc(u.name.split(' ').map(w=>w[0]).join('').slice(0,2))}</div>
           <div style="flex:1">
-            <div class="user-name">${u.name}</div>
+            <div class="user-name">${esc(u.name)}</div>
             <div class="user-role">${u.role}${u.email?' · '+u.email:''}</div>
           </div>
           ${u.username!=='admin'?`
@@ -1613,7 +1613,7 @@ function _userRoleOptions(sel){
 
 function _userFormFields(u){
   return `
-    <div class="ff"><label>Nombre completo</label><input id="uf-name" value="${u.name||''}" placeholder="Juan Pérez"/></div>
+    <div class="ff"><label>Nombre completo</label><input id="uf-name" value="${esc(u.name||'')}" placeholder="Juan Pérez"/></div>
     <div class="ff-row">
       <div class="ff"><label>Tipo de Usuario</label><select id="uf-role">${_userRoleOptions(u.role||'Regular')}</select></div>
       <div class="ff"><label>Correo electrónico</label><input id="uf-email" type="email" value="${u.email||''}" placeholder="juan@empresa.com"/></div>
@@ -1871,8 +1871,8 @@ function renderDash(){
               ${projPending>0?`<span class="notif-badge" style="bottom:6px;right:6px;top:auto;left:auto">${projPending>99?'99+':projPending}</span>`:''}
               <div style="display:flex;justify-content:space-between;align-items:flex-start">
                 <div>
-                  <div class="pc-name">${p.name}</div>
-                  <div class="pc-sub">${p.num} · ${p.client}</div>
+                  <div class="pc-name">${esc(p.name)}</div>
+                  <div class="pc-sub">${esc(p.num)} · ${esc(p.client)}</div>
                 </div>
                 <div style="position:relative" onclick="event.stopPropagation()">
                   <button class="icon-btn" style="font-size:15px;padding:2px 5px" onclick="projMenuToggle(${p.id},event)" title="Opciones">⋯</button>
@@ -2161,9 +2161,9 @@ function renderMetric(){
   const locked=p.locked!==false;
   const IS='background:var(--bg3);border:1px solid var(--acc);border-radius:5px;color:var(--t1);font-size:11px;padding:2px 5px;width:100%;font-family:var(--font);-moz-appearance:textfield;appearance:textfield';
   const fld=(label,val,key,type='text')=>`<div class="mi"><div class="mi-label">${label}</div>${locked
-    ?`<div class="mi-val" title="${val}">${val}</div>`
+    ?`<div class="mi-val" title="${esc(val)}">${esc(val)}</div>`
     :`<input type="${type}" value="${String(val||'').replace(/"/g,'&quot;')}" style="${IS}" onchange="updateProjField('${key}',this.value,'${type}')"/>`}</div>`;
-  const ro=(label,val,cls='')=>`<div class="mi"><div class="mi-label">${label}</div><div class="mi-val ${cls}" title="${val}">${val}</div></div>`;
+  const ro=(label,val,cls='')=>`<div class="mi"><div class="mi-label">${label}</div><div class="mi-val ${cls}" title="${esc(val)}">${esc(val)}</div></div>`;
   const statusFld=`<div class="mi"><div class="mi-label">Estatus</div>
     <select style="background:var(--bg3);border:1px solid var(--acc);border-radius:5px;color:var(--t1);font-size:11px;padding:2px 5px;width:100%" onchange="updateProjStatus(this)">
       ${['Sin iniciar','Iniciado','En Pausa','Terminado','Facturado','Pagado'].map(s=>`<option${p.status===s?' selected':''}>${s}</option>`).join('')}
@@ -2339,7 +2339,7 @@ function renderTypes(){
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
             <div style="width:10px;height:10px;border-radius:50%;background:${t.color};flex-shrink:0"></div>
             <div style="font-size:14px;font-weight:600;color:var(--t1);flex:1;cursor:pointer;display:flex;align-items:center;gap:6px" onclick="openCreateType(${t.id})">
-              ${t.name}
+              ${esc(t.name)}
               ${t.typeLocked?`<span title="Tipo bloqueado — solicita desbloqueo al administrador para editarlo" style="font-size:12px">🔒</span>`:''}
             </div>
             <button title="Duplicar tipo" onclick="duplicateType(${t.id})" style="background:transparent;border:none;color:var(--t3);font-size:14px;padding:2px 4px;cursor:pointer;border-radius:5px" onmouseenter="this.style.color='var(--acc)'" onmouseleave="this.style.color='var(--t3)'">⧉</button>
@@ -2352,7 +2352,7 @@ function renderTypes(){
               </div>`).join('')}
           </div>
           <div style="font-size:11px;color:var(--t2);cursor:pointer" onclick="openCreateType(${t.id})">Costo materiales: <span style="color:var(--grn)">${fmt(cost)}</span></div>
-          ${t.notes?`<div style="font-size:11px;color:var(--t2);margin-top:4px">📝 ${t.notes}</div>`:''}
+          ${t.notes?`<div style="font-size:11px;color:var(--t2);margin-top:4px">📝 ${esc(t.notes)}</div>`:''}
         </div>`;
       }).join('')}
     </div>`;
@@ -2480,7 +2480,7 @@ function renderCreateType(){
           <div class="ff"><label>Precio de Venta <span style="font-size:9px;color:var(--t3)">${ctIVA?'con IVA':'sin IVA'}</span></label>
             <input id="ct-sale" type="number" value="${salePrice.toFixed(2)}" onchange="ctForm.salePrice=parseFloat(this.value)||0"/>
           </div>
-          <div class="ff"><label>Notas</label><textarea id="ct-notes" rows="2" onchange="ctForm.notes=this.value">${ctForm.notes||''}</textarea></div>
+          <div class="ff"><label>Notas</label><textarea id="ct-notes" rows="2" onchange="ctForm.notes=this.value">${esc(ctForm.notes||'')}</textarea></div>
           <div class="ff"><label>Color</label>
             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:2px">
               ${COLORS_LIST.map(c=>`<div onclick="ctForm.color='${c}';renderCreateType()" style="width:20px;height:20px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${c===(ctForm.color||COLORS_LIST[0])?'#fff':'transparent'}"></div>`).join('')}
@@ -3061,11 +3061,11 @@ function casasCellTD(col,h,t,p,bill){
   const avancePct=area>0?Math.round(h.areaInstalled/area*100):0;
   const sc=HSTATUS_COLOR[h.status]||'#e8edf5'; const tc=t?t.color:'var(--t2)';
   switch(col){
-    case 'num': return `<td onclick="event.stopPropagation()" style="white-space:nowrap"><input class="cell-input" value="${h.num}" style="width:78px" onchange="updateHouseNum(${h.id},this.value)"/>${h.typeLocked?`<span class="lock-ico" title="Tipo bloqueado — clic para desbloquear" onclick="houseUnlockReq(event,${h.id})">🔒</span>`:''}</td>`;
+    case 'num': return `<td onclick="event.stopPropagation()" style="white-space:nowrap"><input class="cell-input" value="${esc(h.num)}" style="width:78px" onchange="updateHouseNum(${h.id},this.value)"/>${h.typeLocked?`<span class="lock-ico" title="Tipo bloqueado — clic para desbloquear" onclick="houseUnlockReq(event,${h.id})">🔒</span>`:''}</td>`;
     case 'type':
-      if(h.typeLocked) return `<td onclick="event.stopPropagation()" style="color:${tc};font-weight:500">${t?t.name:'—'}</td>`;
-      return `<td onclick="event.stopPropagation()"><select class="cell-select" style="color:${tc}" onchange="updateHouseTypeFromSheet(${h.id},this.value)"><option value="">— Tipo —</option>${p.types.map(tp=>`<option value="${tp.id}" style="color:${tp.color}"${h.typeId===tp.id?' selected':''}>${tp.name}</option>`).join('')}</select></td>`;
-    case 'subcontractor': { const sub=SYS.subcontractors.find(s=>s.id===h.subcontractorId); return `<td>${sub?sub.name:'—'}</td>`; }
+      if(h.typeLocked) return `<td onclick="event.stopPropagation()" style="color:${tc};font-weight:500">${t?esc(t.name):'—'}</td>`;
+      return `<td onclick="event.stopPropagation()"><select class="cell-select" style="color:${tc}" onchange="updateHouseTypeFromSheet(${h.id},this.value)"><option value="">— Tipo —</option>${p.types.map(tp=>`<option value="${tp.id}" style="color:${tp.color}"${h.typeId===tp.id?' selected':''}>${esc(tp.name)}</option>`).join('')}</select></td>`;
+    case 'subcontractor': { const sub=SYS.subcontractors.find(s=>s.id===h.subcontractorId); return `<td>${sub?esc(sub.name):'—'}</td>`; }
     case 'area': return `<td>${area||'—'}</td>`;
     case 'budget': return `<td>${budget?fmt(budget):'—'}</td>`;
     case 'spent': return `<td style="color:${h.spent>budget&&budget>0?'var(--red)':'var(--grn)'}">${fmt(h.spent)}</td>`;
@@ -3336,7 +3336,7 @@ function renderHPBody(){
       <input class="hp-name-inp" id="hp-name-inp" value="${(h.num||'').replace(/"/g,'&quot;')}" onchange="updateHouseName(this.value)" style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:5px 9px;font-size:14px;font-weight:600;width:150px"/>
       <select id="hp-type-sel" style="font-size:12px;max-width:170px" ${h.typeLocked?'disabled':''} onchange="updateHouseType(this.value)">
         <option value="">— Sin tipo —</option>
-        ${curProj.types.map(tp=>`<option value="${tp.id}"${h.typeId===tp.id?' selected':''}>${tp.name}</option>`).join('')}
+        ${curProj.types.map(tp=>`<option value="${tp.id}"${h.typeId===tp.id?' selected':''}>${esc(tp.name)}</option>`).join('')}
       </select>
       ${h.typeLocked?`<span class="lock-ico" title="Tipo bloqueado — clic para desbloquear" onclick="houseUnlockReq(event,${h.id})">🔒</span>`:''}
       <button class="btn-history" style="margin-left:auto" onclick="showHouseLog(${h.id})">📋 Bitácora</button>
@@ -3823,11 +3823,11 @@ function renderGantt(){
           const s=ganttDate(h.ganttStart),e=ganttDate(h.ganttStart+h.ganttDur);
           const lbl=`${s.getDate()}/${s.getMonth()+1} – ${e.getDate()}/${e.getMonth()+1}`;
           return `<div style="display:flex;align-items:center;margin-bottom:3px;height:26px">
-            <div class="gantt-label-cell" style="width:${lw}px">${h.num}</div>
+            <div class="gantt-label-cell" style="width:${lw}px">${esc(h.num)}</div>
             <div class="gantt-track-inner" style="width:${totalPx}px;height:22px;position:relative">
               ${dayBlocks.filter(db=>db.isWE).map(db=>`<div style="position:absolute;left:${db.d*DAY_PX}px;width:${DAY_PX}px;top:0;bottom:0;background:rgba(232,120,58,0.05)"></div>`).join('')}
               ${widthPx>0?`<div class="gantt-bar" id="bar-${h.id}" style="left:${leftPx}px;width:${widthPx}px;background:${color};min-width:4px"
-                onmousedown="startDrag(event,${h.id},'move')" title="${h.num}: ${lbl}">
+                onmousedown="startDrag(event,${h.id},'move')" title="${esc(h.num)}: ${lbl}">
                 <span style="overflow:hidden;text-overflow:ellipsis;font-size:10px">${lbl}</span>
                 <div class="resize-handle" onmousedown="startDrag(event,${h.id},'resize');event.stopPropagation()"></div>
               </div>`:''}
@@ -4230,8 +4230,8 @@ function docEditNotes(docId){
   const d=_findDoc(docId); if(!d)return;
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">Notas del documento</div>
-    <div style="font-size:11px;color:var(--t3);margin-bottom:8px">${d.name}</div>
-    <div class="ff"><textarea id="dn-notes" style="width:100%;min-height:100px;resize:vertical">${d.notes||''}</textarea></div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:8px">${esc(d.name)}</div>
+    <div class="ff"><textarea id="dn-notes" style="width:100%;min-height:100px;resize:vertical">${esc(d.notes||'')}</textarea></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
       <button class="btn-save" onclick="_saveDocNotes('${docId}')">Guardar</button>
@@ -4424,7 +4424,7 @@ function addGarantia(gid){
     </div>
     <div class="ff-row">
       <div class="ff"><label>Casa</label>
-        <span class="ivasel" style="display:block"><select id="g-house" onchange="garSyncSub()"><option value="">— Seleccionar —</option>${(p.houses||[]).map(h=>`<option value="${h.id}"${g&&String(g.houseId)===String(h.id)?' selected':''}>${h.num}</option>`).join('')}</select></span>
+        <span class="ivasel" style="display:block"><select id="g-house" onchange="garSyncSub()"><option value="">— Seleccionar —</option>${(p.houses||[]).map(h=>`<option value="${h.id}"${g&&String(g.houseId)===String(h.id)?' selected':''}>${esc(h.num)}</option>`).join('')}</select></span>
       </div>
       <div class="ff"><label>Sub Contratista <span style="font-size:9px;color:var(--t3);text-transform:none">— se autocompleta según la casa</span></label>
         <span class="ivasel" style="display:block"><select id="g-sub"><option value="">— Ninguno —</option>${subs.map(s=>`<option value="${s.id}"${g&&String(g.subcontractorId)===String(s.id)?' selected':''}>${s.name||'(Sin nombre)'}</option>`).join('')}</select></span>
@@ -4509,7 +4509,7 @@ function saveGarantia(gid){
   const sub=(SYS.subcontractors||[]).find(s=>String(s.id)===String(subId));
   if(!p.garantias)p.garantias=[];
   const base={
-    houseId:h?h.id:null, house:h?h.num:'', desc,
+    houseId:h?h.id:null, house:h?esc(h.num):'', desc,
     subcontractorId:sub?sub.id:null, subcontractor:sub?(sub.name||''):'',
     dateReport:(document.getElementById('g-dr')||{}).value||'',
     dateLimit:(document.getElementById('g-dl')||{}).value||'',
@@ -4679,10 +4679,10 @@ function renderOCList(){
       return `<div class="oc-list-item" onclick="openOCForm('${oc.id}')">
         <span class="oc-num-badge">${oc.num}</span>
         <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${oc.vendorName||'— Sin proveedor —'}</div>
+          <div style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(oc.vendorName||'— Sin proveedor —')}</div>
           <div style="font-size:10px;color:var(--t2);margin-top:2px">
-            ${oc.houseIds&&oc.houseIds.length ? 'Casas: '+oc.houseIds.map(id=>{const h=p.houses.find(x=>x.id===id);return h?h.num:'?';}).join(', ') : oc.bodegaMode?'Bodega':'Sin casas'}
-            ${oc.proforma ? ' · Proforma: '+oc.proforma : ''}
+            ${oc.houseIds&&oc.houseIds.length ? 'Casas: '+oc.houseIds.map(id=>{const h=p.houses.find(x=>x.id===id);return h?esc(h.num):'?';}).join(', ') : oc.bodegaMode?'Bodega':'Sin casas'}
+            ${oc.proforma ? ' · Proforma: '+esc(oc.proforma) : ''}
           </div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
@@ -4834,7 +4834,7 @@ function renderOCForm(){
     const hType = h.typeId ? p.types.find(x=>x.id===h.typeId) : null;
     const opts = allHouses.map(ah =>
       `<option value="${ah.id}"${ah.id===h.id?' selected':''}${st.houseIds.includes(ah.id)&&ah.id!==h.id?' disabled':''}>
-        ${ah.num}${st.houseIds.includes(ah.id)&&ah.id!==h.id?' ✓':''}</option>`
+        ${esc(ah.num)}${st.houseIds.includes(ah.id)&&ah.id!==h.id?' ✓':''}</option>`
     ).join('');
     return `<div class="oc-house-chip" style="flex-direction:column;align-items:flex-start;gap:1px;padding:5px 10px 5px 12px">
       <div style="display:flex;align-items:center;gap:0">
@@ -4862,7 +4862,7 @@ function renderOCForm(){
   } else {
     tabsHtml = `<button class="oc-mat-tab resumen${st.activeTab==='resumen'?' active':''}" onclick="ocSetTab('resumen')">Resumen</button>`;
     tabsHtml += selectedHouses.map(h =>
-      `<button class="oc-mat-tab${st.activeTab===h.id?' active':''}" onclick="ocSetTab(${h.id})">${h.num}</button>`
+      `<button class="oc-mat-tab${st.activeTab===h.id?' active':''}" onclick="ocSetTab(${h.id})">${esc(h.num)}</button>`
     ).join('');
   }
 
@@ -4893,13 +4893,13 @@ function renderOCForm(){
         <div class="oc-fields-row">
           <div class="oc-fld">
             <div class="oc-fld-label">Proyecto</div>
-            <div style="font-size:13px;font-weight:500;color:var(--t1);padding:6px 10px;background:var(--bg3);border-radius:7px;border:1px solid var(--border2)">${p.name}</div>
+            <div style="font-size:13px;font-weight:500;color:var(--t1);padding:6px 10px;background:var(--bg3);border-radius:7px;border:1px solid var(--border2)">${esc(p.name)}</div>
           </div>
 
           <div class="oc-fld" style="min-width:220px">
             <div class="oc-fld-label">Proveedor <span style="font-size:9px;text-transform:none;letter-spacing:0;color:var(--t3);margin-left:4px">— lista desde QuickBooks</span></div>
             <div style="position:relative;min-width:220px">
-              <input id="oc-vendor-inp" type="text" value="${st.vendorName||''}" placeholder="Buscar proveedor..."
+              <input id="oc-vendor-inp" type="text" value="${esc(st.vendorName||'')}" placeholder="Buscar proveedor..."
                 style="width:100%;font-size:12px;padding-right:26px"
                 oninput="ocFilterVendors(this.value)"
                 onfocus="document.getElementById('oc-vendor-drop').style.display='block';ocFilterVendors(this.value)"
@@ -4921,7 +4921,7 @@ function renderOCForm(){
 
           <div class="oc-fld" style="min-width:160px">
             <div class="oc-fld-label">N° Proforma <span style="font-size:9px;text-transform:none;letter-spacing:0;color:var(--t3)">— opcional</span></div>
-            <input type="text" value="${st.proforma||''}" placeholder="Ej: PRO-2026-001" style="font-size:12px;width:100%"
+            <input type="text" value="${esc(st.proforma||'')}" placeholder="Ej: PRO-2026-001" style="font-size:12px;width:100%"
               onchange="ocState.proforma=this.value"/>
           </div>
 
@@ -4969,7 +4969,7 @@ function renderOCForm(){
                     const reason=alreadyAdded?'Ya agregada':(!h.typeId?'Sin tipo':!hasRemaining?'Sin materiales disponibles':'');
                     return `<div style="padding:8px 14px;cursor:${disabled?'default':'pointer'};opacity:${disabled?0.4:1};border-bottom:1px solid var(--border)"
                       ${!disabled?`onmousedown="ocPickHouse(${h.id})"`:''}>
-                      <div style="font-size:12px;color:var(--t1)">${h.num}</div>
+                      <div style="font-size:12px;color:var(--t1)">${esc(h.num)}</div>
                       <div style="font-size:10px;color:var(--t3)">${ht?ht.name:'Sin tipo'}${reason?' · '+reason:''}</div>
                     </div>`;
                   }).join('')}
@@ -5015,7 +5015,7 @@ function renderOCForm(){
         <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;font-weight:500;margin-bottom:5px">Notas</div>
         <textarea style="width:100%;resize:vertical;min-height:50px;font-size:12px;line-height:1.5;padding:7px 10px"
           placeholder="Observaciones, instrucciones de entrega, condiciones especiales…"
-          onchange="ocState.notes=this.value">${st.notes||''}</textarea>
+          onchange="ocState.notes=this.value">${esc(st.notes||'')}</textarea>
       </div>
 
       <!-- Totales -->
@@ -5172,7 +5172,7 @@ function ocSetTab(tab){
   const selectedHouses = p.houses.filter(h => st.houseIds.includes(h.id));
   bar.innerHTML = `<button class="oc-mat-tab resumen${st.activeTab==='resumen'?' active':''}" onclick="ocSetTab('resumen')">Resumen</button>` +
     selectedHouses.map(h =>
-      `<button class="oc-mat-tab${st.activeTab===h.id?' active':''}" onclick="ocSetTab(${h.id})">${h.num}</button>`
+      `<button class="oc-mat-tab${st.activeTab===h.id?' active':''}" onclick="ocSetTab(${h.id})">${esc(h.num)}</button>`
     ).join('');
 }
 function ocSelectVendor(v){
@@ -5287,7 +5287,7 @@ function ocRenderResumenBody(body){
         map[key].totalValue+=line.qty*(line.price||0)*(1-(line.discPct||0)/100);
         map[key].ivaValue+=line.qty*(line.price||0)*(1-(line.discPct||0)/100)*ocLineIVARate(line);
         const h=curProj.houses.find(h=>h.id===hid);
-        map[key].houses.push((h?h.num:'?')+': '+line.qty);
+        map[key].houses.push((h?esc(h.num):'?')+': '+line.qty);
       }
     });
   });
@@ -5496,7 +5496,7 @@ function ocOpenBudgetModal(houseId){
     <div style="font-size:12px;color:var(--t2);margin-bottom:12px">Agrega a la OC un material del presupuesto de la casa que aún tiene cantidad disponible. No requiere autorización.</div>
     <div class="ff"><label>Casa</label>
       <select id="oc-bud-house" onchange="ocOpenBudgetModal(this.value)">
-        ${ocHouses.map(h=>`<option value="${h.id}"${String(h.id)===String(hid)?' selected':''}>${h.num}</option>`).join('')}
+        ${ocHouses.map(h=>`<option value="${h.id}"${String(h.id)===String(hid)?' selected':''}>${esc(h.num)}</option>`).join('')}
       </select>
     </div>
     <div class="ff"><label>Producto (disponible en presupuesto)</label>
@@ -5568,7 +5568,7 @@ function ocOpenExtraModal(){
     </div>
     <div class="ff"><label>Casa asignada</label>
       <select id="oc-extra-house">
-        ${curProj.houses.filter(h=>st.houseIds.includes(h.id)).map(h=>`<option value="${h.id}"${h.id===houseId?' selected':''}>${h.num}</option>`).join('')}
+        ${curProj.houses.filter(h=>st.houseIds.includes(h.id)).map(h=>`<option value="${h.id}"${h.id===houseId?' selected':''}>${esc(h.num)}</option>`).join('')}
         <option value="all">Todas las casas</option>
       </select>
     </div>
@@ -6035,15 +6035,15 @@ function ocGeneratePDF(oc){
   const sym=v=>isCRC?('₡'+(v*(oc.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})):fmt(v);
   let rows='';
   (oc.houseIds||[]).forEach(hid=>{ const h=p.houses.find(x=>x.id===hid);
-    (oc.lines[hid]||[]).forEach(l=>{ rows+=`<tr><td>${h?h.num:''}</td><td>${l.manualName||''}</td><td class="r">${l.qty}</td><td class="r">${sym(l.price||0)}</td><td class="r">${sym((l.qty||0)*(l.price||0))}</td></tr>`; }); });
+    (oc.lines[hid]||[]).forEach(l=>{ rows+=`<tr><td>${h?esc(h.num):''}</td><td>${l.manualName||''}</td><td class="r">${l.qty}</td><td class="r">${sym(l.price||0)}</td><td class="r">${sym((l.qty||0)*(l.price||0))}</td></tr>`; }); });
   (oc.bodegaLines||[]).forEach(l=>{ rows+=`<tr><td>Bodega</td><td>${l.name||''}</td><td class="r">${l.qty}</td><td class="r">${sym(l.price||0)}</td><td class="r">${sym((l.qty||0)*(l.price||0))}</td></tr>`; });
   const css='*{font-family:Segoe UI,system-ui,sans-serif;box-sizing:border-box}body{padding:28px;color:#1a2332}h1{font-size:20px;color:#2d8cf0}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}th,td{border:1px solid #e2e2e2;padding:6px 9px;text-align:left}th{background:#f4f6fa}td.r,th.r{text-align:right}';
   win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${oc.num}</title><style>${css}</style></head><body>
     <h1>Orden de Compra ${oc.num}</h1>
-    <div style="font-size:12px;color:#555;margin:4px 0 12px">Proyecto: ${p.name} · Proveedor: ${oc.vendorName||'—'} · Fecha: ${fmtDate(new Date())}${oc.proforma?' · Proforma: '+oc.proforma:''}</div>
+    <div style="font-size:12px;color:#555;margin:4px 0 12px">Proyecto: ${esc(p.name)} · Proveedor: ${esc(oc.vendorName||'—')} · Fecha: ${fmtDate(new Date())}${oc.proforma?' · Proforma: '+oc.proforma:''}</div>
     <table><tr><th>Casa</th><th>Material</th><th class="r">Cantidad</th><th class="r">Precio Unitario</th><th class="r">Total</th></tr>${rows||'<tr><td colspan=5>Sin líneas</td></tr>'}</table>
     ${(()=>{const iva=(oc.ivaUSD!=null?oc.ivaUSD:0);const subv=(oc.totalUSD||0)-iva;return `<table style="margin-top:14px"><tr><td class="r" style="border:none">Subtotal</td><td class="r" style="width:140px">${sym(subv)}</td></tr><tr><td class="r" style="border:none">IVA</td><td class="r">${sym(iva)}</td></tr><tr><td class="r" style="border:none;font-weight:700">TOTAL</td><td class="r" style="font-weight:700">${sym(oc.totalUSD||0)}</td></tr></table>`;})()}
-    ${oc.notes?`<div style="margin-top:12px;font-size:12px"><strong>Notas:</strong> ${oc.notes}</div>`:''}
+    ${oc.notes?`<div style="margin-top:12px;font-size:12px"><strong>Notas:</strong> ${esc(oc.notes)}</div>`:''}
   </body></html>`);
   win.document.close(); setTimeout(()=>{try{win.focus();win.print();}catch(e){}},300);
   showToast('OC guardada · PDF generado'); curOCId=null; renderOCList();
@@ -6244,6 +6244,9 @@ function notifAgo(ts){
   return Math.floor(diff/86400000)+'d';
 }
 function escHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+// esc(): escape HTML seguro para TEXTO y para valores de atributo entre comillas.
+// Escapa & < > " ' — usar SIEMPRE al interpolar datos de usuario/externos (OCR/Outlook/QB) en innerHTML. (VUL-028)
+function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function notifRead(id){
   const n=(SYS.notifications||[]).find(x=>x.id===id);
   if(n&&!n.read){ n.read=true; saveData(); updateNotifBadge(); }
@@ -6515,7 +6518,7 @@ async function qboCreateBill(oc, invoiceNum, invoiceDate, account){
         <div style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:16px">
           <div style="font-size:10px;color:var(--t3);margin-bottom:4px">Número de Factura de Gasto (QBO)</div>
           <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 14px;display:inline-block;font-size:13px;font-weight:600;color:var(--org)">FG-QBO-${billId}</div>
-          <div style="font-size:10px;color:var(--t3);margin-top:8px">Proveedor: <span style="color:var(--t1)">${oc.vendorName}</span> · OC: ${oc.num}</div>
+          <div style="font-size:10px;color:var(--t3);margin-top:8px">Proveedor: <span style="color:var(--t1)">${esc(oc.vendorName)}</span> · OC: ${oc.num}</div>
         </div>
         <button class="btn-save" onclick="closeModal();renderOCList()">Cerrar</button>
       </div>`;
@@ -6766,7 +6769,7 @@ function renderInfoTab(){
   const addr=p.address||(p.name+', Costa Rica');
   document.getElementById('content').innerHTML=`
     <div class="th-row">
-      <div class="th-title">Información General — ${p.name}</div>
+      <div class="th-title">Información General — ${esc(p.name)}</div>
       <div style="display:flex;gap:8px">
         <button class="btn-history" onclick="showLogModal('Proyecto',curProj.id)">Log</button>
         <button class="btn-add" onclick="generateReport()">📄 Generar Informe (PDF)</button>
@@ -6812,7 +6815,7 @@ function generateReport(){
   const today=new Date().toLocaleDateString('es-CR');
   const typesRows=p.types.map(t=>{
     const cnt=p.houses.filter(h=>h.typeId===t.id).length;
-    return `<tr><td>${t.name}</td><td class="r">${t.area} m²</td><td class="r">${fmt(getCatTotal(t)||t.budget||0)}</td><td class="r">${fmt(t.salePrice||0)}</td><td class="r">${cnt}</td></tr>`;
+    return `<tr><td>${esc(t.name)}</td><td class="r">${t.area} m²</td><td class="r">${fmt(getCatTotal(t)||t.budget||0)}</td><td class="r">${fmt(t.salePrice||0)}</td><td class="r">${cnt}</td></tr>`;
   }).join('');
   const statusRows=HOUSE_STATUSES.map(s=>`<tr><td>${s}</td><td class="r">${p.houses.filter(h=>h.status===s).length}</td></tr>`).join('');
   const css=`
@@ -6835,9 +6838,9 @@ function generateReport(){
     td.r,th.r{text-align:right;}
     @media print{body{padding:0;}}
   `;
-  const doc=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Informe Financiero — ${p.name}</title><style>${css}</style></head><body>
+  const doc=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Informe Financiero — ${esc(p.name)}</title><style>${css}</style></head><body>
     <h1>Informe Financiero del Proyecto</h1>
-    <div class="meta"><strong>${p.name}</strong> · ${p.num||''} · Cliente: ${p.client||'—'} · Generado: ${today}</div>
+    <div class="meta"><strong>${esc(p.name)}</strong> · ${esc(p.num||'')} · Cliente: ${esc(p.client||'—')} · Generado: ${today}</div>
     <h2>Indicadores Clave</h2>
     <div class="kpi-row">
       <div class="kpi"><div class="kpi-l">Presupuesto</div><div class="kpi-v" style="color:#2d8cf0">${fmt(m.budget)}</div></div>
@@ -6927,10 +6930,10 @@ function renderGenericList(type){
            <span style="font-size:10px;color:var(--t3)">${fmt(totalUSDdisp)} USD</span>`
         : `<span style="font-size:12px;font-weight:600;color:var(--grn)">${fmt(tx.totalUSD||0)}</span>`;
       return `<div class="oc-list-item" onclick="openGenericTxn('${type}','${tx.id}')" style="${tx._pending?'border-left:3px solid var(--red)':''}">
-        <span class="oc-num-badge" style="color:${def.color}">${type==='proveedor'&&tx.invoiceNumber?tx.invoiceNumber:tx.num}</span>
+        <span class="oc-num-badge" style="color:${def.color}">${esc(type==='proveedor'&&tx.invoiceNumber?tx.invoiceNumber:tx.num)}</span>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —'}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}</div>
-          <div style="font-size:10px;color:var(--t2);margin-top:2px">${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.consecutivo?' · Consec: '+tx.consecutivo:''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}</div>
+          <div style="font-size:10px;color:var(--t2);margin-top:2px">${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.consecutivo?' · Consec: '+esc(tx.consecutivo):''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
           ${txnBadge(tx.status)}
@@ -6980,7 +6983,7 @@ function openGenericTxn(type,id){
 function txnPartyField(def){
   if(def.partySrc==='user'){
     return `<select style="width:100%;font-size:12px" onchange="txnState.party=this.value">
-      ${SYS.users.map(u=>`<option${txnState.party===u.name?' selected':''}>${u.name}</option>`).join('')}
+      ${SYS.users.map(u=>`<option${txnState.party===u.name?' selected':''}>${esc(u.name)}</option>`).join('')}
     </select>`;
   }
   let datalist='';
@@ -7067,7 +7070,7 @@ function renderGenericForm(type){
       </div>
       <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;font-weight:500;margin-bottom:5px">Notas</div>
-        <textarea style="width:100%;resize:vertical;min-height:46px;font-size:12px;line-height:1.5;padding:7px 10px" placeholder="Observaciones..." onchange="txnState.notes=this.value">${st.notes||''}</textarea>
+        <textarea style="width:100%;resize:vertical;min-height:46px;font-size:12px;line-height:1.5;padding:7px 10px" placeholder="Observaciones..." onchange="txnState.notes=this.value">${esc(st.notes||'')}</textarea>
       </div>
       <div class="oc-totals-row">
         <div class="oc-tot-box">
@@ -7187,7 +7190,7 @@ async function qboCreateGeneric(type,tx){
 let ciState={};
 
 function pricePerM2(t){ return (t&&t.area>0)?(t.salePrice/t.area):0; }
-function houseNumLabel(h){ return h?h.num:''; }
+function houseNumLabel(h){ return h?esc(h.num):''; }
 
 // % ya facturado de una casa en OTRAS facturas (no anuladas), excluyendo la factura indicada
 function houseBilledPct(p, houseId, excludeInvId){
@@ -7465,7 +7468,7 @@ function renderClientInvForm(){
   const items=qboItems();
   const itemOpts=(sel)=>items.map(it=>`<option value="${it.id}"${sel===it.id?' selected':''}>${it.name}</option>`).join('');
   const taxCodes=qboTaxCodes();
-  const taxOpts=(sel)=>`<option value="">— IVA —</option>`+taxCodes.map(c=>`<option value="${c.id}"${sel===c.id?' selected':''}>${c.name}</option>`).join('');
+  const taxOpts=(sel)=>`<option value="">— IVA —</option>`+taxCodes.map(c=>`<option value="${c.id}"${sel===c.id?' selected':''}>${esc(c.name)}</option>`).join('');
   const customers=(SYS.qbo&&SYS.qbo.customerCache&&SYS.qbo.customerCache.length)?SYS.qbo.customerCache:[];
   const clientCur=ciClientCurrency(st.client);
 
@@ -7473,7 +7476,7 @@ function renderClientInvForm(){
   const chips=st.houseLines.map((l,idx)=>{
     const h=p.houses.find(x=>x.id===l.houseId);
     const ht=h&&h.typeId?p.types.find(x=>x.id===h.typeId):null;
-    const opts=ciAvailHouses().concat(h?[h]:[]).map(ah=>`<option value="${ah.id}"${ah.id===l.houseId?' selected':''}>${ah.num}</option>`).join('');
+    const opts=ciAvailHouses().concat(h?[h]:[]).map(ah=>`<option value="${ah.id}"${ah.id===l.houseId?' selected':''}>${esc(ah.num)}</option>`).join('');
     return `<div class="oc-house-chip" style="flex-direction:column;align-items:flex-start;gap:1px;padding:5px 10px 5px 12px">
       <div style="display:flex;align-items:center;gap:0">
         <select class="oc-chip-sel" onchange="ciChangeHouse(${idx},parseInt(this.value))">${opts}</select>
@@ -7563,12 +7566,12 @@ function renderClientInvForm(){
           <div class="oc-fld" style="min-width:220px">
             <div class="oc-fld-label">Cliente <span style="font-size:9px;text-transform:none;letter-spacing:0;color:var(--t3)">— la factura siempre va a nombre del cliente</span></div>
             <input list="ci-cust-list" value="${(st.client||'').replace(/"/g,'&quot;')}" placeholder="Nombre del cliente..." style="font-size:12px;width:100%" oninput="ciState.client=this.value" onchange="ciOnClientChange(this.value)"/>
-            <datalist id="ci-cust-list">${customers.map(c=>`<option value="${c.name}">`).join('')}</datalist>
+            <datalist id="ci-cust-list">${customers.map(c=>`<option value="${esc(c.name)}">`).join('')}</datalist>
           </div>
           <div class="oc-fld"><div class="oc-fld-label">N.º de Factura (QB)</div>
             <input value="${st.num}" style="font-size:12px;width:120px" onchange="ciState.num=this.value"/></div>
           <div class="oc-fld"><div class="oc-fld-label">Núm Consecutivo <span style="font-size:9px;text-transform:none;letter-spacing:0;color:var(--t3)">— factura electrónica (QB)</span></div>
-            <input value="${st.consecutivo||''}" placeholder="— asignado al enviar a QB —" readonly style="font-size:12px;width:160px;background:var(--bg2);color:var(--t2)"/></div>
+            <input value="${esc(st.consecutivo||'')}" placeholder="— asignado al enviar a QB —" readonly style="font-size:12px;width:160px;background:var(--bg2);color:var(--t2)"/></div>
         </div>
         <div class="oc-fields-row">
           <div class="oc-fld"><div class="oc-fld-label">Términos</div>
@@ -7598,7 +7601,7 @@ function renderClientInvForm(){
                     const ht=ah.typeId?curProj.types.find(x=>x.id===ah.typeId):null;
                     return `<div style="padding:8px 14px;cursor:${full||alreadyAdded?'default':'pointer'};opacity:${full||alreadyAdded?0.4:1};border-bottom:1px solid var(--border)"
                       ${!full&&!alreadyAdded?`onmousedown="ciPickHouse(${ah.id})"`:''}>
-                      <div style="font-size:12px;color:var(--t1)">Casa ${ah.num}${full?' · 100% facturado':billedPct>0?' · '+Math.round(100-billedPct)+'% pendiente':''}</div>
+                      <div style="font-size:12px;color:var(--t1)">Casa ${esc(ah.num)}${full?' · 100% facturado':billedPct>0?' · '+Math.round(100-billedPct)+'% pendiente':''}</div>
                       ${ht?`<div style="font-size:10px;color:var(--t3)">${ht.name}</div>`:'<div style="font-size:10px;color:var(--red)">Sin tipo</div>'}
                     </div>`;
                   }).join('')}
@@ -7625,7 +7628,7 @@ function renderClientInvForm(){
 
       <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;font-weight:500;margin-bottom:5px">Nota para el cliente</div>
-        <textarea style="width:100%;resize:vertical;min-height:46px;font-size:12px;line-height:1.5;padding:7px 10px" onchange="ciState.notes=this.value">${st.notes||''}</textarea>
+        <textarea style="width:100%;resize:vertical;min-height:46px;font-size:12px;line-height:1.5;padding:7px 10px" onchange="ciState.notes=this.value">${esc(st.notes||'')}</textarea>
       </div>
       <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
         <div class="drop-zone" id="ci-drop" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="ciDrop(event)" onclick="document.getElementById('ci-file').click()">
@@ -8060,7 +8063,7 @@ function showHouseLog(houseId){
   const h=curProj.houses.find(x=>x.id===houseId); if(!h)return;
   const log=h.log||[];
   document.getElementById('modal-inner').innerHTML=`
-    <div class="modal-title">Bitácora — ${h.num}<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
+    <div class="modal-title">Bitácora — ${esc(h.num)}<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div class="log-list">${log.length?log.map(e=>`<div class="log-item log-edit"><div class="log-action">${e.action}</div>${e.reason?`<div class="log-detail">Razón: ${e.reason}</div>`:''}<div class="log-meta"><span>👤 ${e.user}</span><span>🕐 ${e.ts}</span></div></div>`).join(''):'<div style="color:var(--t3);text-align:center;padding:20px;font-size:12px">Sin registros.</div>'}</div>
     <div class="modal-actions"><button class="btn-cancel" onclick="closeModal()">Cerrar</button></div>`;
   document.getElementById('modal').classList.remove('hidden');
@@ -8413,7 +8416,7 @@ function calcLineHtml(p,si,l,li){
     const advPct=houseSubAdvancedPct(p,h.id);
     const statusBlocked=['Facturado','Pagado','Pagado Parcial'].includes(h.status);
     const dis=(statusBlocked||advPct>=100)&&l.houseId!==h.id;
-    return `<option value="${h.id}"${l.houseId===h.id?' selected':''}${dis?' disabled':''}>${h.num}${dis?' (no disponible)':''}</option>`;
+    return `<option value="${h.id}"${l.houseId===h.id?' selected':''}${dis?' disabled':''}>${esc(h.num)}${dis?' (no disponible)':''}</option>`;
   }).join('');
   const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId);
   const price=t?installPricePerM2(p,t):0; const total=calcLineTotal(p,l); const iva=total*0.13;
@@ -8433,12 +8436,12 @@ function calcSectionHtml(sec,si){
   const p=projects.find(x=>x.id===sec.projId); if(!p)return '';
   const sub=calcSectionSubtotal(sec); const iva=sub*0.13;
   return `<div class="calc-projbox">
-    <h5>${p.name}<button class="oc-btn-del" onclick="calcDelProject(${si})">✕</button></h5>
+    <h5>${esc(p.name)}<button class="oc-btn-del" onclick="calcDelProject(${si})">✕</button></h5>
     <div class="calc-line" style="${calcCols()}"><div class="cl-h">Instalador</div><div class="cl-h">Cuadrilla</div><div class="cl-h">Número de Casa</div><div class="cl-h" style="text-align:center">% Avance</div><div class="cl-h" style="text-align:center">Área (m²)</div><div class="cl-h" style="text-align:center">$/m²</div><div class="cl-h" style="text-align:center">Total</div>${calcState.ivaShow?'<div class="cl-h" style="text-align:center">IVA</div>':''}<div></div></div>
     ${sec.lines.map((l,li)=>calcLineHtml(p,si,l,li)).join('')}
     <button class="btn-oc-extra" style="margin-top:6px" onclick="calcAddLine(${si})">+ Agregar</button>
     ${sec.err?`<div class="calc-err">${sec.err}</div>`:''}
-    <div style="text-align:right;font-size:12px;margin-top:8px">${calcState.ivaShow?`Subtotal: ${fmt(sub)} · IVA: <span style="color:var(--amb)">${fmt(iva)}</span> · `:''}<strong>Total ${p.name}: <span style="color:var(--grn)">${fmt(calcState.ivaShow?sub+iva:sub)}</span></strong></div>
+    <div style="text-align:right;font-size:12px;margin-top:8px">${calcState.ivaShow?`Subtotal: ${fmt(sub)} · IVA: <span style="color:var(--amb)">${fmt(iva)}</span> · `:''}<strong>Total ${esc(p.name)}: <span style="color:var(--grn)">${fmt(calcState.ivaShow?sub+iva:sub)}</span></strong></div>
   </div>`;
 }
 function calcCanApprove(){ return currentUser && (currentUser.role==='Administrador' || currentUser.role==='Supervisor' || /allan/i.test(currentUser.name||'')); }
@@ -8462,7 +8465,7 @@ function renderCalcBody(){
         <label style="font-size:11px;color:var(--t2);display:flex;align-items:center;gap:6px"><input type="checkbox" ${calcState.ivaShow?'checked':''} onchange="calcState.ivaShow=this.checked;renderCalcBody()" style="width:auto"/> IVA</label>
         ${!calcState.approvedBy?`<button class="btn-sm" onclick="calcSendApproval()">Enviar a aprobación</button>`:''}
         ${calcCanApprove()&&!calcState.approvedBy?`<button class="btn-sm" style="border-color:var(--grn);color:var(--grn)" onclick="calcApprove()">✓ Aprobar informe</button>`:''}
-        <select id="calc-proj-pick" data-no-search style="font-size:12px"><option value="">— Proyecto —</option>${projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
+        <select id="calc-proj-pick" data-no-search style="font-size:12px"><option value="">— Proyecto —</option>${projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
         <button class="btn-add" onclick="calcAddProject()">+ Agregar Avance de Proyecto</button>
       </div>
     </div>
@@ -8485,9 +8488,9 @@ function crewDropHtml(sub,selected,onAttr){
   const names=sub?(sub.crew||[]).filter(m=>sel.includes(m.id)).map(m=>m.name).join(', '):'';
   const label=sel.includes('__unknown__')?'Info. desconocida'+(names?', '+names:''):(names||'— Cuadrilla —');
   let opts=`<label style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 6px"><input type="checkbox" style="width:auto" ${sel.includes('__unknown__')?'checked':''} onchange="${onAttr('__unknown__')}"/>Información desconocida</label>`;
-  if(sub) opts+=(sub.crew||[]).map(m=>`<label style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 6px"><input type="checkbox" style="width:auto" ${sel.includes(m.id)?'checked':''} onchange="${onAttr(m.id)}"/>${m.name||'(sin nombre)'} <span style="color:var(--t3)">· ${m.role}</span></label>`).join('');
+  if(sub) opts+=(sub.crew||[]).map(m=>`<label style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 6px"><input type="checkbox" style="width:auto" ${sel.includes(m.id)?'checked':''} onchange="${onAttr(m.id)}"/>${esc(m.name||'(sin nombre)')} <span style="color:var(--t3)">· ${esc(m.role)}</span></label>`).join('');
   return `<div style="position:relative">
-    <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='block'?'none':'block'" style="font-size:11px;border:1px solid var(--border2);border-radius:6px;padding:4px 8px;cursor:pointer;background:var(--bg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label} ▾</div>
+    <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='block'?'none':'block'" style="font-size:11px;border:1px solid var(--border2);border-radius:6px;padding:4px 8px;cursor:pointer;background:var(--bg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)} ▾</div>
     <div style="display:none;position:absolute;top:100%;left:0;min-width:190px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;z-index:50;max-height:170px;overflow:auto;box-shadow:0 6px 18px rgba(0,0,0,.4)">${opts}</div>
   </div>`;
 }
@@ -8587,7 +8590,7 @@ function calcConvertToBill(){
           if(subL){ subLineId=subL.id; break; }
         }
       }
-      return {productId:'',desc:'Instalación PC — '+(h?h.num:''),qty:l.area||0,price,discPct:0,assign:[{houseId:l.houseId,qty:l.area||0,lineId:subLineId}],lineId:subLineId}; });
+      return {productId:'',desc:'Instalación PC — '+(h?esc(h.num):''),qty:l.area||0,price,discPct:0,assign:[{houseId:l.houseId,qty:l.area||0,lineId:subLineId}],lineId:subLineId}; });
     const subUSD=lines.reduce((s,l)=>s+(l.qty*l.price),0);
     const bill={id:'fp-'+Date.now()+made,type:'proveedor',num:txnNextNumFor(p,'proveedor'),
       party:sub?sub.name:'',invoiceNumber:'',date:new Date().toISOString().slice(0,10),status:'Registrada',
@@ -8615,7 +8618,7 @@ function calcReport(format){
   const rows=[];
   calcState.sections.forEach(sec=>{ const p=projects.find(x=>x.id===sec.projId); if(!p)return;
     sec.lines.forEach(l=>{ if(!l.houseId)return; const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId); const price=t?installPricePerM2(p,t):0; const sub=SYS.subcontractors.find(s=>s.id===l.subId);
-      rows.push({proj:p.name,sub:sub?sub.name:'—',casa:h?h.num:'',pct:l.pct||0,area:l.area||0,price,total:(l.area||0)*price}); }); });
+      rows.push({proj:p.name,sub:sub?sub.name:'—',casa:h?esc(h.num):'',pct:l.pct||0,area:l.area||0,price,total:(l.area||0)*price}); }); });
   if(!rows.length){ alert('No hay datos para el informe.'); return; }
   const grand=rows.reduce((s,r)=>s+r.total,0); const grandShown=calcState.ivaShow?grand*1.13:grand;
   if(format==='excel'){
@@ -8843,7 +8846,7 @@ function routeSendWhatsApp(){
   const stops=routeState.stops.filter(s=>s.address&&s.address.trim());
   if(!stops.length){ alert('Agrega al menos una parada.'); return; }
   const lines=['*Ruta de transporte — Siscon*','Salida: '+(routeState.origin||SISCON_ADDR)+(routeState.departTime?(' a las '+routeState.departTime):'')]
-    .concat(stops.map((s,i)=>`${i+1}. ${s.label||s.address}${s.stayMin?(' ('+s.stayMin+' min)'):''}`))
+    .concat(stops.map((s,i)=>`${i+1}. ${esc(s.label||s.address)}${s.stayMin?(' ('+s.stayMin+' min)'):''}`))
     .concat(['','📍 Google Maps: '+routeURL(),'🚗 Waze (destino final): '+routeWazeURL()]);
   const txt=encodeURIComponent(lines.join('\n'));
   window.open('https://wa.me/?text='+txt,'_blank');
@@ -8920,7 +8923,7 @@ function globalRecoveryCardHtml(list){
       <table class="rec-table" style="width:100%">
         <thead><tr><th>Proyecto</th><th class="r">Gastado</th><th class="r">Facturado</th><th class="r">Pendiente</th><th style="width:120px">Recuperado</th></tr></thead>
         <tbody>${det.length?det.map(({p,r})=>`<tr>
-          <td style="color:var(--t1)">${p.name}</td>
+          <td style="color:var(--t1)">${esc(p.name)}</td>
           <td class="r">${fmt(r.spent)}</td>
           <td class="r" style="color:var(--grn)">${fmt(r.billed)}</td>
           <td class="r" style="color:${r.pend>0?'var(--amb)':'var(--grn)'}">${r.pend>0?fmt(r.pend):'—'}</td>
@@ -9070,7 +9073,7 @@ function renderDashStats(){
             <div style="display:flex;gap:6px;align-items:center">
               <select onchange="statsSet('cashWindow',this.value)">${Object.keys(CASH_WINDOWS).map(k=>`<option value="${k}"${s.cashWindow===k?' selected':''}>${CASH_WINDOWS[k][1]}</option>`).join('')}</select>
               <div style="position:relative"><button class="btn-sm" onclick="statsToggle('_menuCash')">Proyectos</button>
-                ${s._menuCash?`<div class="stats-menu">${projects.filter(projActive).map(p=>`<label><input type="checkbox" ${cashSel.includes(p.id)?'checked':''} onchange="statsToggleCash(${p.id})"/> ${p.name}</label>`).join('')||'<div style="font-size:11px;color:var(--t3)">Sin proyectos activos</div>'}</div>`:''}
+                ${s._menuCash?`<div class="stats-menu">${projects.filter(projActive).map(p=>`<label><input type="checkbox" ${cashSel.includes(p.id)?'checked':''} onchange="statsToggleCash(${p.id})"/> ${esc(p.name)}</label>`).join('')||'<div style="font-size:11px;color:var(--t3)">Sin proyectos activos</div>'}</div>`:''}
               </div>
             </div>
           </div>
@@ -9080,7 +9083,7 @@ function renderDashStats(){
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:6px">
             <div><h4>Gastos No Facturados · <span style="color:var(--red)">${fmt(totUnb)}</span></h4><div class="csub">Gastado sin facturar (por recuperar)</div></div>
             <div style="position:relative"><button class="btn-sm" onclick="statsToggle('_menuUnbilled')">Proyectos</button>
-              ${s._menuUnbilled?`<div class="stats-menu">${projects.map(p=>`<label><input type="checkbox" ${unbSel.includes(p.id)?'checked':''} onchange="statsToggleUnb(${p.id})"/> ${p.name}</label>`).join('')}</div>`:''}
+              ${s._menuUnbilled?`<div class="stats-menu">${projects.map(p=>`<label><input type="checkbox" ${unbSel.includes(p.id)?'checked':''} onchange="statsToggleUnb(${p.id})"/> ${esc(p.name)}</label>`).join('')}</div>`:''}
             </div>
           </div>
           ${svgBars(unbItems)}
@@ -9229,7 +9232,7 @@ function renderRequisForm(){
   // tabs
   const tabsHtml=`<div class="oc-mat-tabbar">
     <button class="oc-mat-tab resumen${reqActiveTab==='resumen'?' active':''}" onclick="reqActiveTab='resumen';renderRequisForm()">Resumen</button>
-    ${st.houseIds.map(hid=>{const h=p.houses.find(x=>x.id===hid);return`<button class="oc-mat-tab${reqActiveTab===hid?' active':''}" onclick="reqActiveTab=${hid};renderRequisForm()">${h?h.num:'Casa'}</button>`;}).join('')}
+    ${st.houseIds.map(hid=>{const h=p.houses.find(x=>x.id===hid);return`<button class="oc-mat-tab${reqActiveTab===hid?' active':''}" onclick="reqActiveTab=${hid};renderRequisForm()">${h?esc(h.num):'Casa'}</button>`;}).join('')}
   </div>`;
   // house body
   let bodyHtml='';
@@ -9314,12 +9317,12 @@ function renderRequisForm(){
           <div class="oc-fld" style="flex:1">
             <div class="oc-fld-label">Casas incluidas</div>
             <div style="display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap">
-              ${st.houseIds.map(hid=>{const h=p.houses.find(x=>x.id===hid);const ht=h&&h.typeId?p.types.find(x=>x.id===h.typeId):null;return`<div class="oc-house-chip" style="flex-direction:column;gap:1px;padding:5px 10px 5px 12px"><div style="display:flex;align-items:center;gap:4px"><span style="font-size:12px;font-weight:500">${h?h.num:'?'}</span><button class="oc-chip-x" onclick="reqRemoveHouse(${hid})">✕</button></div>${ht?`<span style="font-size:9px;color:var(--t3)">${ht.name}</span>`:''}</div>`;}).join('')}
+              ${st.houseIds.map(hid=>{const h=p.houses.find(x=>x.id===hid);const ht=h&&h.typeId?p.types.find(x=>x.id===h.typeId):null;return`<div class="oc-house-chip" style="flex-direction:column;gap:1px;padding:5px 10px 5px 12px"><div style="display:flex;align-items:center;gap:4px"><span style="font-size:12px;font-weight:500">${h?esc(h.num):'?'}</span><button class="oc-chip-x" onclick="reqRemoveHouse(${hid})">✕</button></div>${ht?`<span style="font-size:9px;color:var(--t3)">${ht.name}</span>`:''}</div>`;}).join('')}
               <div style="position:relative">
                 <button class="btn-add-house-oc" onclick="reqShowHousePicker(event)">+ Agregar Casa</button>
                 <div id="req-house-picker" style="display:none;position:absolute;top:100%;left:0;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);min-width:180px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.4);max-height:220px;overflow-y:auto">
                   ${allHouses.map(h=>{const ht=h.typeId?p.types.find(x=>x.id===h.typeId):null;const added=st.houseIds.includes(h.id);return`<div style="padding:8px 14px;cursor:${added?'default':'pointer'};opacity:${added?0.4:1};border-bottom:1px solid var(--border)" ${!added?`onmousedown="reqPickHouse(${h.id})"`:''}>
-                    <div style="font-size:12px;color:var(--t1)">${h.num}${added?' ✓':''}</div>
+                    <div style="font-size:12px;color:var(--t1)">${esc(h.num)}${added?' ✓':''}</div>
                     <div style="font-size:10px;color:var(--t3)">${ht?ht.name:'Sin tipo'}</div></div>`;}).join('')}
                 </div>
               </div>
@@ -9330,7 +9333,7 @@ function renderRequisForm(){
       ${tabsHtml}
       <div style="padding:0">${bodyHtml}</div>
       <div style="padding:10px 16px;border-top:1px solid var(--border)">
-        <textarea style="width:100%;resize:vertical;min-height:40px;font-size:12px;padding:6px 10px" placeholder="Notas..." onchange="reqState.notes=this.value">${st.notes||''}</textarea>
+        <textarea style="width:100%;resize:vertical;min-height:40px;font-size:12px;padding:6px 10px" placeholder="Notas..." onchange="reqState.notes=this.value">${esc(st.notes||'')}</textarea>
       </div>
       <div class="oc-form-actions">
         <button class="btn-cancel" onclick="curTxnId=null;renderTxnSub()">Cancelar</button>
@@ -9364,7 +9367,7 @@ function vbFilterOC(q){
   drop.innerHTML=`<div style="padding:6px 10px;font-size:11px;cursor:pointer;color:var(--t3);border-bottom:1px solid var(--border)" onmousedown="vbLinkToOC('');document.getElementById('vb-oc-inp').value='sin ligar'">— Sin OC —</div>`
     +filtered.map(o=>`<div style="padding:7px 10px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--border)" onmousedown="vbLinkToOC('${o.id}');document.getElementById('vb-oc-inp').value='${((o.num||'OC')+(o.vendorName?' — '+o.vendorName.slice(0,20):'')).replace(/'/g,"\\'")}';document.getElementById('vb-oc-drop').style.display='none'">
       <div style="font-weight:600;color:var(--t1)">${o.num||'OC'}${o.bodegaMode?' 📦':''}</div>
-      ${o.vendorName?`<div style="font-size:10px;color:var(--t3)">${o.vendorName}</div>`:''}
+      ${o.vendorName?`<div style="font-size:10px;color:var(--t3)">${esc(o.vendorName)}</div>`:''}
     </div>`).join('')
     +(filtered.length===0?`<div style="padding:8px 10px;font-size:11px;color:var(--t3)">Sin resultados</div>`:'');
   drop.style.display='block';
@@ -9514,7 +9517,7 @@ function renderVendorBill(){
   const hasHouseTabs=!!(st.houseMode&&st.ocHouseIds&&st.ocHouseIds.length);
   const tabsHtml=hasHouseTabs?`<div class="oc-mat-tabbar" style="margin-bottom:0">
     <button class="oc-mat-tab resumen${vbActiveTab==='resumen'?' active':''}" onclick="vbSetTab('resumen')">Resumen (Factura)</button>
-    ${(st.ocHouseIds||[]).map(hid=>{const h=p.houses.find(x=>x.id===hid);return`<button class="oc-mat-tab${vbActiveTab===hid?' active':''}" onclick="vbSetTab(${hid})">${h?h.num:'Casa'}</button>`;}).join('')}
+    ${(st.ocHouseIds||[]).map(hid=>{const h=p.houses.find(x=>x.id===hid);return`<button class="oc-mat-tab${vbActiveTab===hid?' active':''}" onclick="vbSetTab(${hid})">${h?esc(h.num):'Casa'}</button>`;}).join('')}
   </div>`:'';
   const showResumen=!hasHouseTabs||vbActiveTab==='resumen';
   const houseBodyHtml=hasHouseTabs&&vbActiveTab!=='resumen'?`<div class="oc-tbl-body" style="min-height:60px">${vbHouseTabBody(vbActiveTab)}</div>`:'';
@@ -9606,7 +9609,7 @@ function renderVendorBill(){
       <div class="oc-fields-area">
         <div class="oc-fields-row">
           <div class="oc-fld"><div class="oc-fld-label">Proyecto</div>
-            <div style="font-size:13px;font-weight:500;color:var(--t1);padding:6px 10px;background:var(--bg3);border-radius:7px;border:1px solid var(--border2)">${p.name}</div></div>
+            <div style="font-size:13px;font-weight:500;color:var(--t1);padding:6px 10px;background:var(--bg3);border-radius:7px;border:1px solid var(--border2)">${esc(p.name)}</div></div>
           <div class="oc-fld" style="min-width:220px;flex:1"><div class="oc-fld-label">Proveedor <span style="font-size:9px;text-transform:none;letter-spacing:0;color:var(--t3)">— lista desde QuickBooks</span></div>
             <input list="vb-vendor-list" style="font-size:12px;width:100%;height:28px" value="${(st.party||'').replace(/"/g,'&quot;')}" placeholder="Buscar proveedor..." oninput="vbState.party=this.value"/>
             <datalist id="vb-vendor-list">${((SYS.qbo&&SYS.qbo.vendorCache&&SYS.qbo.vendorCache.length)?SYS.qbo.vendorCache:[{name:'Distribuidora Glanze CR'},{name:'ByT Systems S.A.'},{name:'Ferretería El Clavo'},{name:'Silicon Masters Inc.'},{name:'FastBuild Tools'}]).map(v=>`<option value="${v.name}">`).join('')}</datalist>
@@ -9625,7 +9628,7 @@ function renderVendorBill(){
             <div class="oc-fld-label">Ligar a OC</div>
             <div style="position:relative">
               <input id="vb-oc-inp" type="text" autocomplete="off"
-                value="${st.linkedOcId?(p.ocs||[]).reduce((s,o)=>String(o.id)===String(st.linkedOcId)?(o.num||'OC')+(o.vendorName?' — '+o.vendorName.slice(0,20):''):s,''):'sin ligar'}"
+                value="${esc(st.linkedOcId?(p.ocs||[]).reduce((s,o)=>String(o.id)===String(st.linkedOcId)?(o.num||'OC')+(o.vendorName?' — '+o.vendorName.slice(0,20):''):s,''):'sin ligar')}"
                 placeholder="Buscar OC..."
                 style="width:100%;font-size:12px;padding-right:22px"
                 oninput="vbFilterOC(this.value)"
@@ -9637,7 +9640,7 @@ function renderVendorBill(){
                 <div style="padding:6px 10px;font-size:11px;cursor:pointer;color:var(--t3);border-bottom:1px solid var(--border)" onmousedown="vbLinkToOC('');document.getElementById('vb-oc-inp').value='sin ligar'">— Sin OC —</div>
                 ${(p.ocs||[]).map(o=>`<div style="padding:7px 10px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--border)" onmousedown="vbLinkToOC('${o.id}');document.getElementById('vb-oc-inp').value='${((o.num||'OC')+(o.vendorName?' — '+o.vendorName.slice(0,20):'')).replace(/'/g,"\\'")}';document.getElementById('vb-oc-drop').style.display='none'">
                   <div style="font-weight:600;color:var(--t1)">${o.num||'OC'}${o.bodegaMode?' 📦':''}</div>
-                  ${o.vendorName?`<div style="font-size:10px;color:var(--t3)">${o.vendorName}</div>`:''}
+                  ${o.vendorName?`<div style="font-size:10px;color:var(--t3)">${esc(o.vendorName)}</div>`:''}
                 </div>`).join('')}
                 ${!(p.ocs&&p.ocs.length)?`<div style="padding:8px 10px;font-size:11px;color:var(--t3)">No hay OCs en este proyecto</div>`:''}
               </div>
@@ -9671,7 +9674,7 @@ function renderVendorBill(){
 
       <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;font-weight:500;margin-bottom:5px">Notas</div>
-        <textarea style="width:100%;resize:vertical;min-height:46px;font-size:12px;line-height:1.5;padding:7px 10px" placeholder="Observaciones..." onchange="vbState.notes=this.value">${st.notes||''}</textarea>
+        <textarea style="width:100%;resize:vertical;min-height:46px;font-size:12px;line-height:1.5;padding:7px 10px" placeholder="Observaciones..." onchange="vbState.notes=this.value">${esc(st.notes||'')}</textarea>
       </div>
       ${txnOcrZoneHtml()}
 
@@ -9817,15 +9820,15 @@ function vbOpenAssign(i){
 function vbAssignHouseOpts(projId, selHouseId){
   const p=projects.find(x=>x.id===projId)||curProj;
   return `<option value="__bodega__"${selHouseId==='__bodega__'?' selected':''}>📦 Bodega</option>`
-    +(p.houses||[]).map(h=>`<option value="${h.id}"${h.id===selHouseId?' selected':''}>${h.num}</option>`).join('');
+    +(p.houses||[]).map(h=>`<option value="${h.id}"${h.id===selHouseId?' selected':''}>${esc(h.num)}</option>`).join('');
 }
 function vbRenderAssignModal(i){
   const l=vbState.lines[i];
   const assigned=vbAssignedQty(l), diff=Math.abs(assigned-(l.qty||0));
   const activeProjs=projects.filter(p=>p.status!=='Completado'&&p.status!=='Cancelado');
-  const projOpts=(selId)=>activeProjs.map(p=>`<option value="${p.id}"${p.id===selId?' selected':''}>${p.name}</option>`).join('');
+  const projOpts=(selId)=>activeProjs.map(p=>`<option value="${p.id}"${p.id===selId?' selected':''}>${esc(p.name)}</option>`).join('');
   document.getElementById('modal-inner').innerHTML=`
-    <div class="modal-title">Asignar destino — ${l.desc||'línea'} <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
+    <div class="modal-title">Asignar destino — ${esc(l.desc||'línea')} <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="font-size:12px;color:var(--t2);margin-bottom:10px">Cantidad en factura: <strong>${l.qty||0}</strong>. La suma de asignaciones debe ser igual.</div>
     <div style="display:grid;grid-template-columns:90px 1fr 1fr 28px;gap:6px;margin-bottom:4px">
       <div style="font-size:10px;color:var(--t3);font-weight:600">Cantidad</div>
@@ -9907,7 +9910,7 @@ function vbRequestMatAuth(lineIdx, houseId){
   const houseName=vbAssignLabel(houseId);
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--amb)">Solicitud de autorización<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
-    <div style="font-size:12px;color:var(--t2);margin-bottom:10px">Agregando <strong style="color:var(--t1)">${l.desc||'producto'}</strong> a <strong style="color:var(--t1)">${houseName}</strong> fuera de lista presupuestada.</div>
+    <div style="font-size:12px;color:var(--t2);margin-bottom:10px">Agregando <strong style="color:var(--t1)">${esc(l.desc||'producto')}</strong> a <strong style="color:var(--t1)">${houseName}</strong> fuera de lista presupuestada.</div>
     <div class="ff"><label>Motivo</label><textarea id="mat-auth-reason" style="width:100%;min-height:60px" placeholder="Explique por qué necesita agregar este material..."></textarea></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
@@ -9968,7 +9971,7 @@ function vbAssignAllOpen(){
     <div class="modal-title">Asignar destino a todas las líneas <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="font-size:12px;color:var(--t2);margin-bottom:10px">Cada línea se asignará completa al destino seleccionado.</div>
     <div class="ff"><label>Proyecto / Casa</label>
-      <select id="vb-all-dest" style="width:100%"><option value="__bodega__">Bodega</option>${p.houses.map(h=>`<option value="${h.id}">${h.num}</option>`).join('')}</select>
+      <select id="vb-all-dest" style="width:100%"><option value="__bodega__">Bodega</option>${p.houses.map(h=>`<option value="${h.id}">${esc(h.num)}</option>`).join('')}</select>
     </div>
     <div class="modal-actions"><button class="btn-cancel" onclick="closeModal()">Cancelar</button><button class="btn-save" onclick="vbAssignAllConfirm()">Aplicar</button></div>`;
   document.getElementById('modal').classList.remove('hidden');
@@ -10042,7 +10045,7 @@ function vbOpenPaymentModal(){
     <div class="modal-title">Registrar pago
       <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
     </div>
-    <div style="font-size:12px;color:var(--t2);margin-bottom:12px">Factura <strong>${st.num}</strong> — ${st.party||''}</div>
+    <div style="font-size:12px;color:var(--t2);margin-bottom:12px">Factura <strong>${st.num}</strong> — ${esc(st.party||'')}</div>
     <div class="ff-row">
       <div class="ff"><label>Monto pagado (${sym})</label><input id="vb-pay-amount" type="number" step="0.01" min="0" value="${defAmt}"/></div>
       <div class="ff"><label>Fecha de pago</label><input id="vb-pay-date" type="date" value="${today}"/></div>
@@ -10654,7 +10657,7 @@ function renderCompareBody(state){
           <div style="flex:1"><div style="font-size:12px;color:var(--t1)">${d.party||'—'}</div><div style="font-size:10px;color:var(--t3)">${d.date||''} · ${fmt(d.total||0)} · ${d.project?('Proyecto: '+d.project):'sin proyecto'}</div></div>
           <button class="btn-sm" onclick="compareList[${i}]._open=!compareList[${i}]._open;renderCompareBody('done')">${d._open?'▴':'▾'}</button>
         </div>
-        ${d._open?`<div style="padding:8px 12px;background:var(--bg2);font-size:11px;color:var(--t2)">${(d.lines||[]).map(l=>`<div>${l.desc} · ${l.qty} × ${fmt(l.price)}</div>`).join('')||'Sin detalle de líneas'}</div>`:''}
+        ${d._open?`<div style="padding:8px 12px;background:var(--bg2);font-size:11px;color:var(--t2)">${(d.lines||[]).map(l=>`<div>${esc(l.desc)} · ${l.qty} × ${fmt(l.price)}</div>`).join('')||'Sin detalle de líneas'}</div>`:''}
       </div>`).join(''):'<div style="color:var(--grn);text-align:center;padding:24px;font-size:12px">✓ Todo está sincronizado.</div>'}`;
 }
 async function compareRun(){
@@ -10847,7 +10850,7 @@ function renderUnclassBody(){
     ${docs.length?docs.map((d,i)=>`<div class="oc-list-item">
       <span class="oc-num-badge">${d.docNumber||d.type||'Doc'}</span>
       <div style="flex:1"><div style="font-size:12px;color:var(--t1)">${d.party||'—'}</div><div style="font-size:10px;color:var(--t3)">${d.date||''} · ${fmt(d.total||0)}</div></div>
-      <select id="unc-proj-${i}" style="font-size:11px">${projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select>
+      <select id="unc-proj-${i}" style="font-size:11px">${projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
       <button class="btn-sm" onclick="assignUnclassified(${i})">Asignar</button>
     </div>`).join(''):'<div style="color:var(--t3);text-align:center;padding:24px;font-size:12px">No hay documentos sin clasificar.</div>'}`;
 }
@@ -10909,7 +10912,7 @@ function renderReportBody(){
   const rth=(col,label)=>`<th style="cursor:pointer;user-select:none" onclick="reportSort='${col}';reportSortDir=(reportSort==='${col}'?-reportSortDir:1);renderReportBody()">${label}${reportSort===col?(reportSortDir>0?' ↑':' ↓'):''}</th>`;
   el.innerHTML=`<table class="sheet" style="width:100%">
     <thead><tr>${rth('project','Proyecto')}${rth('date','Fecha')}${rth('vendor','Proveedor')}<th>N° Factura</th>${rth('amount','Monto')}${rth('status','Estado')}</tr></thead>
-    <tbody>${rows.length?rows.map(r=>`<tr><td style="font-size:11px">${r.project}</td><td style="font-size:11px">${r.date}</td><td style="font-size:11px">${r.vendor}</td><td style="font-size:11px;color:var(--t3)">${r.invoiceNum}</td><td style="font-size:11px;text-align:right;color:var(--org)">${fmt(r.amount)}</td><td style="font-size:11px;color:var(--t3)">${r.status}</td></tr>`).join('')
+    <tbody>${rows.length?rows.map(r=>`<tr><td style="font-size:11px">${r.project}</td><td style="font-size:11px">${r.date}</td><td style="font-size:11px">${esc(r.vendor)}</td><td style="font-size:11px;color:var(--t3)">${r.invoiceNum}</td><td style="font-size:11px;text-align:right;color:var(--org)">${fmt(r.amount)}</td><td style="font-size:11px;color:var(--t3)">${r.status}</td></tr>`).join('')
     :'<tr><td colspan="6" style="text-align:center;color:var(--t3);padding:20px">Sin registros en el período seleccionado.</td></tr>'}
     ${rows.length?`<tr style="font-weight:600"><td colspan="4" style="text-align:right;font-size:12px;padding:8px 12px">Total:</td><td style="text-align:right;font-size:12px;color:var(--org);padding:8px 12px">${fmt(total)}</td><td></td></tr>`:''}
     </tbody></table>`;
@@ -11332,14 +11335,14 @@ let bitaSort='priority', bitaSortDir=1;
 function bitaAdd(){ bitaNewModal(); }
 function bitaNewModal(editId){
   const b=editId?curProj.bitacora.find(x=>x.id===editId):null;
-  const houseOpts=(curProj.houses||[]).map(h=>`<option value="${h.id}"${b&&b.houseId===h.id?' selected':''}>${h.num}</option>`).join('');
+  const houseOpts=(curProj.houses||[]).map(h=>`<option value="${h.id}"${b&&b.houseId===h.id?' selected':''}>${esc(h.num)}</option>`).join('');
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">${editId?'Editar entrada':'Nueva entrada'} — Bitácora <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
       <div class="ff"><label>Tipo</label><select id="bm-type" style="font-size:12px">${BITA_TYPES.map(t=>`<option${b&&b.type===t?' selected':''}>${t}</option>`).join('')}</select></div>
       <div class="ff"><label>Casa</label><select id="bm-house" style="font-size:12px"><option value="">— Todas —</option>${houseOpts}</select></div>
       <div class="ff"><label>Fecha</label><input id="bm-date" type="date" value="${b?b.created:new Date().toISOString().slice(0,10)}" style="font-size:12px"/></div>
-      <div class="ff"><label>Responsable</label><input id="bm-resp" value="${b?(b.responsable||''):(currentUser?currentUser.name:'')}" style="font-size:12px"/></div>
+      <div class="ff"><label>Responsable</label><input id="bm-resp" value="${esc(b?(b.responsable||''):(currentUser?currentUser.name:''))}" style="font-size:12px"/></div>
       <div class="ff"><label>Prioridad</label><select id="bm-prior" style="font-size:12px">${BITA_PRIOR.map(pr=>`<option${b&&b.priority===pr?' selected':''}>${pr}</option>`).join('')}</select></div>
       <div class="ff"><label>Estado</label><select id="bm-resolved" style="font-size:12px"><option value="0"${b&&!b.resolved?' selected':''}>Abierto</option><option value="1"${b&&b.resolved?' selected':''}>Resuelto</option></select></div>
     </div>
@@ -11411,9 +11414,9 @@ function renderBitacora(){
         return `<tr style="${b.resolved?'opacity:.5':''}">
         <td><input type="date" class="cell-input" value="${b.created||''}" onchange="bitaSet('${b.id}','created',this.value)"/></td>
         <td><select class="cell-select" onchange="bitaSet('${b.id}','type',this.value)">${BITA_TYPES.map(t=>`<option${b.type===t?' selected':''}>${t}</option>`).join('')}</select></td>
-        <td style="font-size:11px;color:var(--t2)">${h?h.num:'—'}</td>
+        <td style="font-size:11px;color:var(--t2)">${h?esc(h.num):'—'}</td>
         <td><input class="cell-input" value="${(b.responsable||'').replace(/"/g,'&quot;')}" onchange="bitaSet('${b.id}','responsable',this.value)"/></td>
-        <td class="bita-summ-cell" style="position:relative;font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(b.desc||'').replace(/"/g,'&quot;')}">${b.summary||b.desc||'—'}<div class="bita-tooltip">${(b.desc||'').replace(/</g,'&lt;')}</div></td>
+        <td class="bita-summ-cell" style="position:relative;font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(b.desc||'').replace(/"/g,'&quot;')}">${esc(b.summary||b.desc||'—')}<div class="bita-tooltip">${(b.desc||'').replace(/</g,'&lt;')}</div></td>
         <td><select class="cell-select" style="color:${BITA_PRIOR_COLOR[b.priority]}" onchange="bitaSet('${b.id}','priority',this.value)">${BITA_PRIOR.map(pr=>`<option${b.priority===pr?' selected':''}>${pr}</option>`).join('')}</select></td>
         <td><label style="font-size:11px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" style="width:auto" ${b.resolved?'checked':''} onchange="bitaSet('${b.id}','resolved',this.checked)"/>${b.resolved?'Resuelto':'Abierto'}</label></td>
         <td style="position:relative">
@@ -11442,14 +11445,14 @@ function taskList(){ if(!curProj.tasks)curProj.tasks=[]; return curProj.tasks; }
 function taskUser(id){ return (SYS.users||[]).find(u=>String(u.id)===String(id)); }
 function taskUserName(id){ const u=taskUser(id); return u?u.name:''; }
 function taskUserColor(id){ const u=taskUser(id); return u?u.color:'var(--t3)'; }
-function taskHouseNum(id){ const h=(curProj.houses||[]).find(x=>String(x.id)===String(id)); return h?h.num:''; }
+function taskHouseNum(id){ const h=(curProj.houses||[]).find(x=>String(x.id)===String(id)); return h?esc(h.num):''; }
 function taskOverdue(t){ if(!t.due||t.status==='Completado')return false; return t.due<new Date().toISOString().slice(0,10); }
 
 function taskAdd(status){ taskModal(null,status); }
 function taskModal(editId,presetStatus){
   const t=editId?taskList().find(x=>x.id===editId):null;
-  const houseOpts=(curProj.houses||[]).map(h=>`<option value="${h.id}"${t&&String(t.houseId)===String(h.id)?' selected':''}>${h.num}</option>`).join('');
-  const userOpts=(SYS.users||[]).map(u=>`<option value="${u.id}"${t&&String(t.assigneeId)===String(u.id)?' selected':''}>${u.name}</option>`).join('');
+  const houseOpts=(curProj.houses||[]).map(h=>`<option value="${h.id}"${t&&String(t.houseId)===String(h.id)?' selected':''}>${esc(h.num)}</option>`).join('');
+  const userOpts=(SYS.users||[]).map(u=>`<option value="${u.id}"${t&&String(t.assigneeId)===String(u.id)?' selected':''}>${esc(u.name)}</option>`).join('');
   const curStatus=t?t.status:(presetStatus||'Pendiente');
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">${editId?'Editar tarea':'Nueva tarea'} <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
@@ -11562,7 +11565,7 @@ function renderTareas(){
         const over=taskOverdue(t);
         return `<tr style="${t.status==='Completado'?'opacity:.55':''}">
           <td style="font-size:12px;max-width:280px"><div style="font-weight:600;color:var(--t1);cursor:pointer" onclick="taskModal('${t.id}')">${(t.title||'').replace(/</g,'&lt;')}</div>${t.desc?`<div style="font-size:10.5px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px">${(t.desc||'').replace(/</g,'&lt;')}</div>`:''}</td>
-          <td><select class="cell-select" onchange="taskSet('${t.id}','assigneeId',this.value,true)"><option value="">— Sin asignar —</option>${(SYS.users||[]).map(u=>`<option value="${u.id}"${String(t.assigneeId)===String(u.id)?' selected':''}>${u.name}</option>`).join('')}</select></td>
+          <td><select class="cell-select" onchange="taskSet('${t.id}','assigneeId',this.value,true)"><option value="">— Sin asignar —</option>${(SYS.users||[]).map(u=>`<option value="${u.id}"${String(t.assigneeId)===String(u.id)?' selected':''}>${esc(u.name)}</option>`).join('')}</select></td>
           <td style="font-size:11px;color:var(--t2)">${taskHouseNum(t.houseId)||'—'}</td>
           <td><input type="date" class="cell-input" style="${over?'color:var(--red)':''}" value="${t.due||''}" onchange="taskSet('${t.id}','due',this.value,true)"/></td>
           <td><select class="cell-select" style="color:${TASK_PRIOR_COLOR[t.priority]}" onchange="taskSet('${t.id}','priority',this.value,true)">${TASK_PRIOR.map(pr=>`<option${t.priority===pr?' selected':''}>${pr}</option>`).join('')}</select></td>
@@ -11595,7 +11598,7 @@ function renderTareas(){
 function renderMapaTab(){
   const p=curProj; const addr=p.address||(p.name+', Costa Rica');
   document.getElementById('content').innerHTML=`
-    <div class="th-row"><div class="th-title">Mapa — ${p.name}</div>
+    <div class="th-row"><div class="th-title">Mapa — ${esc(p.name)}</div>
       <div style="display:flex;gap:6px;align-items:center">
         <input id="mapa-addr" value="${(p.address||'').replace(/"/g,'&quot;')}" placeholder="Dirección o coordenadas..." style="font-size:12px;width:280px"/>
         <button class="btn-sm" onclick="curProj.address=document.getElementById('mapa-addr').value.trim();saveData();renderMapaTab()">Actualizar</button>
@@ -11761,7 +11764,7 @@ function renderCotizForm(el){
       </div>
 
       <div class="ff" style="margin-top:10px"><label>Notas / Observaciones</label>
-        <textarea style="width:100%;min-height:60px;font-size:12px;line-height:1.5;padding:7px 10px;resize:vertical" placeholder="Condiciones, alcance, exclusiones..." onchange="cotizWork.find(x=>x.id==='${q.id}').notes=this.value">${q.notes||''}</textarea>
+        <textarea style="width:100%;min-height:60px;font-size:12px;line-height:1.5;padding:7px 10px;resize:vertical" placeholder="Condiciones, alcance, exclusiones..." onchange="cotizWork.find(x=>x.id==='${q.id}').notes=this.value">${esc(q.notes||'')}</textarea>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
         <button class="btn-cancel" onclick="cotizBack()">Cancelar</button>
