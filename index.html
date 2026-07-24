@@ -859,7 +859,26 @@ let currentUser = null;
 const LS_KEY = 'siscon_v5_data';
 let _saveToastTimer=null;
 let _sbToken = localStorage.getItem('sb_token') || null;
-const BACKEND_URL = SYS.backendUrl || 'https://siscon-backend.onrender.com';
+// FASE 2: en producción todo el tráfico va por api.sisconcr.com (detrás de Cloudflare Access).
+// SYS.backendUrl solo se respeta para desarrollo local (localhost); nunca una URL de onrender guardada.
+const BACKEND_URL = (SYS.backendUrl && /localhost|127\.0\.0\.1/.test(SYS.backendUrl))
+  ? SYS.backendUrl
+  : 'https://api.sisconcr.com';
+
+// FASE 2: toda llamada al backend debe mandar la cookie de Cloudflare Access (CF_Authorization).
+// Envolvemos fetch para añadir credentials:'include' automáticamente a las llamadas a BACKEND_URL,
+// sin tener que tocar cada uno de los ~17 sitios de fetch del archivo.
+if(!window._fetchWrappedCF){
+  window._fetchWrappedCF=true;
+  const _origFetch=window.fetch.bind(window);
+  window.fetch=function(input,init){
+    try{
+      const url=typeof input==='string'?input:(input&&input.url)||'';
+      if(url.indexOf(BACKEND_URL)===0){ init=Object.assign({},init,{credentials:'include'}); }
+    }catch(e){}
+    return _origFetch(input,init);
+  };
+}
 
 // Merge de solicitudes de autorización local↔remoto: una resolución (aprobado/rechazado)
 // siempre gana sobre 'pendiente', sin importar qué sesión guarda de último.
@@ -1386,8 +1405,9 @@ async function bootstrapCloudflareAuth(){
     }
     const data=await resp.json();
     console.log('[FASE2] Usuario autenticado:', data.email, 'Rol:', data.role);
-    currentUser={id:data.id,email:data.email,name:data.email.split('@')[0],role:data.role==='OWNER'?'Administrador':'Regular'};
-    _sbToken='cf_'+data.id; // token ficticio (no se usa para auth, CF lo maneja)
+    // El backend ya devuelve el rol real (Administrador/Supervisor/Regular) y el nombre.
+    currentUser={id:data.id,email:data.email,name:data.name||data.email.split('@')[0],role:data.role||'Regular'};
+    _sbToken='cf_'+data.id; // token ficticio (no se usa para auth en modo CF; Cloudflare maneja la sesión)
     document.getElementById('login-screen').style.display='none';
     document.getElementById('app').style.display='flex';
     document.getElementById('topbar-user-label').textContent=currentUser.email;
