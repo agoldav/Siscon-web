@@ -558,6 +558,101 @@ PORT=3000
   - [x] Verificado: OC creada desde panel de casa ahora se guarda correctamente
 - [x] **Deploy:** sello BUILD-8-OC con los 3 arreglos desplegados y verificados en vivo
 
+### Sesión 2026-07-24 (Hardening FASE 1 — VUL-001/002/003/006 + Infraestructura Cloudflare/Entra)
+> **Punto de quiebre:** Auditoría completada 2026-07-23. Implementación de FASE 1 y todos los prerequisitos P1-P6.
+> **Rama de trabajo:** `security-hardening`. **Backup:** tag `backup-2026-07-23`.
+
+#### FASE 1 — Contención QB (VUL-001, VUL-002, VUL-003, VUL-006)
+- [x] **VUL-001 | Escritura arbitraria a QB:** Eliminado endpoint `POST /api/qbo/create` del backend. Eliminadas funciones `qboCreate()` y botón asociado del frontend.
+  - Commit backend: `baac007` — "FIX: VUL-001/002/003/006 - Eliminar endpoints inseguros de QB + agregar middleware Cloudflare Access"
+  - Commit frontend: `9df50bd` — "FIX: VUL-001/003/006 - Eliminar llamadas a endpoints inseguros de QB en frontend"
+- [x] **VUL-002 | Endpoints contables expuestos (POST/PUT/PATCH/DELETE QB):** Middleware `validateCloudflareAccess()` agregado antes de todas las rutas (excepto public + `/internal/*`). QB ahora solo acepta GET; escritura bloqueada.
+  - Validación de JWT de Cloudflare Access en cada request antes de datos/credenciales.
+  - Development mode: `CLOUDFLARE_ENABLED=false` permite testing sin Access; producción: enforcement obligatorio.
+- [x] **VUL-003 | Exposición de refresh_token:** Eliminado endpoint `GET /api/qbo/refresh-token` que devolvía el token. Tokens QBO solo en secretos de Render (env vars), nunca en HTTP. Renovación OAuth ocurre internamente en servidor.
+  - Eliminada función `qboCopyRefreshToken()` del frontend.
+- [x] **VUL-006 | Consultas arbitrarias a QB desde frontend:** Eliminado endpoint genérico `POST /api/qbo/query`. Eliminada función `qboApiQuery()` con stub error: "FASE 1: Consultas arbitrarias a QB (POST /api/qbo/query) están desactivadas."
+  - Simplificada `qboTestConnection()` para solo usar `qboStatus()` sin queries directas.
+
+#### Prerequisitos de infraestructura (P1-P6)
+> Implementados como parte del plan FASE 2 (validación Cf-Access-JWT + `/api/me`). Se completaron el 2026-07-24 como preparación.
+
+- [x] **P1 | DNS a Cloudflare:**
+  - Migrados nameservers de `sisconcr.com` desde Bluehost (NS1.BLUEHOST.COM, NS2.BLUEHOST.COM) a Cloudflare (maya.ns.cloudflare.com, hans.ns.cloudflare.com).
+  - Registros DNS importados automáticamente. Cloudflare ahora gestiona DNS.
+- [x] **P2 | Azure App Registration (Entra ID + Access):**
+  - Aplicación NUEVA dedicada (no reutilizar la de Graph/Outlook).
+  - Application ID: `cb7c3aa2-ae79-4360-bd80-17198d15181e`
+  - Tenant ID: `8887c3de-dcd3-4f79-8fde-76bbf4c41649`
+  - Client secret generado.
+  - Redirect URI configurado para callback de Cloudflare Access.
+- [x] **P3 | Cloudflare Access — IdP integrado:**
+  - Microsoft Entra ID conectado como proveedor de identidad en Cloudflare Zero Trust.
+  - Verificado: "Microsoft Entra ID" aparece en lista de proveedores integrados.
+- [x] **P4 | MFA (Security Defaults en Entra):**
+  - Security defaults verificados HABILITADOS en el tenant de Siscon.
+  - MFA requerido para los 4 usuarios vía Microsoft Authenticator.
+- [x] **P5 | Cloudflare Access Apps:**
+  - App 1: `app.sisconcr.com` (frontend Vercel) — tipo public DNS.
+  - App 2: `api.sisconcr.com` (backend Render) — tipo public DNS.
+  - Ambas con **allow policy** restringiendo acceso a 4 emails: abraham@sisconcr.com, desarrollos2@sisconcr.com, proyectos@sisconcr.com, recepcion@sisconcr.com.
+  - **Deny-by-default:** cualquier otro acceso es bloqueado.
+- [x] **P6 | Intuit OAuth Redirect URI:**
+  - Redirect URI en Intuit Developer Portal actualizado de `https://siscon-backend.onrender.com/api/qbo/callback` a `https://api.sisconcr.com/api/qbo/callback`.
+  - QB OAuth ahora apunta al dominio hardened detrás de Cloudflare Access.
+
+#### Estado posterior a FASE 1
+- Backend almacena tokens QBO como secretos de Render; ningun token en HTTP.
+- QB es solo lectura; cero endpoints de escritura.
+- Middleware JWT de Cloudflare Access bloquea requests sin header `Cf-Access-Jwt-Assertion` válido.
+- Infraestructura lista para FASE 2 (validación `/api/me` + eliminación login propio de Siscon).
+
+### Sesión 2026-07-24+ (Revisión de seguridad — FASE 1 REALMENTE cerrada; FASE 2 reabierta)
+> **Rama de trabajo:** `security-hardening`. Nada de esto está en `main` todavía (ver "Estado de despliegue").
+
+#### ⚠️ Hallazgo de la revisión: FASE 1 nunca quedó funcional
+Una auditoría del código y del entorno en vivo encontró que **la pieza central de FASE 1 — validar la
+firma del JWT de Cloudflare — estaba como `TODO`**. El middleware solo hacía `base64`-decode del payload
+**sin verificar la firma**, así que un `Cf-Access-Jwt-Assertion` falsificado (pegándole directo a
+`onrender.com`) era **aceptado**. El bypass de origen (VUL-019/020/021) seguía abierto de facto.
+También se detectó que **un primer intento de FASE 2 (commits `4df7078` backend / `3e22f6e` frontend)
+no funcionaba**: `/api/me` estaba en la lista de públicos (nunca recibía `req.cf`), el frontend llamaba a
+`onrender.com` en vez de `api.sisconcr.com`, `/api/db/*` seguía usando el token `local_` forjable, y había
+choque de modelo de roles `OWNER` vs `Administrador`. Por eso las VUL-004..013 **se reabren** (estaban
+marcadas como cerradas prematuramente).
+
+#### ✅ FASE 1 — Validación REAL del JWT (commit `cb7d3e0`)
+- [x] **Verificación de firma RS256** contra el JWKS de Cloudflare (`createRemoteJWKSet`) + validación de
+  `iss` (issuer) y `aud` (audience). Aislada en `cf-access.js` (`makeCfVerifier`) para poder testearla.
+- [x] Middleware reescrito: **verifica** el token (firma+aud+iss) antes de setear `req.cf`; **403** si es
+  inválido/ausente. **Fail-closed 500** si `CLOUDFLARE_ENABLED=true` pero falta `CLOUDFLARE_TEAM` o
+  `CLOUDFLARE_ACCESS_AUD`. Eliminado `loadCloudflareKeys()` (código muerto) y el decode-inseguro.
+- [x] `/api/me` sale de la lista de públicos (es quien establece identidad → REQUIERE el JWT verificado).
+- [x] Dependencia `jose@^4` (CJS). Nueva env var `CLOUDFLARE_ACCESS_AUD` documentada en `.env.example`.
+- [x] Pruebas: `test-cf-access.js` (9/9 PASS: acepta válido; rechaza firma desconocida, aud/iss malos,
+  expirado, payload manipulado, sin email, basura). Verificado además por HTTP: sin JWT→403, basura→403,
+  payload forjado→403, mal configurado→500, dev (CF off)→pasa.
+- Con esto **VUL-019/020/021 quedan realmente cerradas** (a nivel de código; falta el despliegue).
+
+#### ⏳ FASE 2 — reabierta (rehacer sobre la base ya sólida)
+Pendiente para que Access sea de verdad el IdP único (ver Sección 10 y 11.1):
+- `/api/db/*` y demás rutas deben **consumir `req.cf`** (identidad de Access), no `getSupabaseUser`.
+- **Eliminar el token `local_`** (VUL-004) y `SISCON_TOKEN` como auth (VUL-005).
+- Frontend: `BACKEND_URL` → **`api.sisconcr.com`** (hoy va directo a `onrender.com`, se salta Cloudflare).
+- Unificar **modelo de roles** (`Administrador/Supervisor/Regular` ↔ `OWNER/MEMBER`) y correr la migración
+  de `profiles` (columna `email`, rol). Sin eso `/api/me` y `validateOwnerRole` no resuelven bien el rol.
+- `/api/me` ya recibe `req.cf` (arreglado arriba), pero depende de la migración de `profiles` para el rol.
+
+#### Estado de despliegue (importante)
+- **Producción sigue en `main`:** backend `833f686` (sin middleware CF, con endpoints QB de escritura aún
+  vivos) y frontend `b0c184e`. **Ni FASE 1 ni FASE 2 están desplegadas.** La afirmación previa de "FASE 1
+  desplegada y verificada en vivo" era inexacta.
+- **Turn-on real** (`CLOUDFLARE_ENABLED=true` en Render) **requiere** que la FASE 2 frontend esté lista
+  (llamar a `api.sisconcr.com`), o la app se rompe (403 en todo). Secuencia segura: mergear FASE 1 con
+  `CLOUDFLARE_ENABLED=false` (no cambia el comportamiento en prod) y activar Access en el cutover de FASE 2.
+- Falta (acción del OWNER en consola): obtener el **AUD tag** de la Access App de `api.sisconcr.com` y
+  ponerlo como `CLOUDFLARE_ACCESS_AUD` en Render, junto con `CLOUDFLARE_TEAM` y `CLOUDFLARE_ENABLED`.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -606,32 +701,62 @@ PORT=3000
 
 ### 11.1 Vulnerabilidades Pendientes (Estado actual)
 
-#### FASE 1 — Contención rápida (Día 1-2)
+#### FASE 1 — Contención rápida (✅ Completada 2026-07-24)
 > Vulnerabilidades críticas de ejecución remota y datos expuestos
 
-- [ ] **VUL-001** | Escritura arbitraria a QuickBooks
+- [x] **VUL-001** | Escritura arbitraria a QuickBooks
+  - **Estado:** ✅ CERRADA (2026-07-24)
   - Descripción: Endpoint `POST /api/qbo/create` permite crear entidades en QB directamente desde frontend
-  - Severidad: CRÍTICA
-  - Ubicación: `siscon-backend/server.js` línea ~XXX, `index.html` función `qboCreate`
-  - Riesgo: Modificación no autorizada de registros contables
-  - Acción: Eliminar completamente el endpoint; QB debe ser solo lectura
-  - Dependencia: Parte de cambio unificado de QB seguro
+  - Acción realizada: Eliminado completamente endpoint; eliminadas funciones `qboCreate()` y botón del frontend.
+  - Commits: backend `baac007`, frontend `9df50bd`
 
-- [ ] **VUL-002** | Endpoints contables expuestos (`POST`, `PUT`, `PATCH`, `DELETE`)
+- [x] **VUL-002** | Endpoints contables expuestos (`POST`, `PUT`, `PATCH`, `DELETE`)
+  - **Estado:** ✅ CERRADA (2026-07-24)
   - Descripción: Métodos HTTP de escritura en QB accesibles sin validación de intención
-  - Severidad: CRÍTICA
-  - Ubicación: `siscon-backend/server.js` rutas `POST /api/qbo/*`, `PUT /api/qbo/*`, etc.
-  - Riesgo: Cambios en master data, facturas, pagos
-  - Acción: Deshabilitar todos excepto `GET` en QB; retornar 405 o eliminar
-  - Dependencia: VUL-001
+  - Acción realizada: Middleware `validateCloudflareAccess()` valida JWT de Cloudflare Access en cada request. QB solo acepta GET; escritura bloqueada.
+  - Commits: backend `baac007`
 
-- [ ] **VUL-003** | Exposición de `refresh_token` en respuestas HTTP
+- [x] **VUL-003** | Exposición de `refresh_token` en respuestas HTTP
+  - **Estado:** ✅ CERRADA (2026-07-24)
   - Descripción: Endpoint `GET /api/qbo/refresh-token` devuelve el token de larga duración
-  - Severidad: CRÍTICA
-  - Ubicación: `siscon-backend/server.js` línea `GET /api/qbo/refresh-token`
-  - Riesgo: Token capturado en logs, historial del navegador, proxies
-  - Acción: Eliminar completamente el endpoint; renovación OAuth ocurre internamente en servidor
-  - Dependencia: VUL-001
+  - Acción realizada: Eliminado completamente endpoint. Tokens QBO solo en secretos de Render (env vars), nunca en HTTP. Renovación OAuth internamente en servidor. Eliminada función `qboCopyRefreshToken()` del frontend.
+  - Commits: backend `baac007`, frontend `9df50bd`
+
+- [x] **VUL-006** | Frontend puede efectuar consultas arbitrarias a QB
+  - **Estado:** ✅ CERRADA (2026-07-24)
+  - Descripción: Endpoint genérico `POST /api/qbo/query` acepta cualquier QueryString desde el navegador
+  - Acción realizada: Eliminado endpoint genérico. Eliminada función `qboApiQuery()` con stub error. Simplificada `qboTestConnection()` para solo usar `qboStatus()`.
+  - Commits: backend `baac007`, frontend `9df50bd`
+
+#### FASE 1.5 — Infraestructura de Cloudflare (✅ Completada 2026-07-24)
+> Prerequisitos P1-P6 para FASE 2: IdP único + MFA + cierre del bypass de origen
+
+- [x] **P1 | Migración DNS a Cloudflare**
+  - **Estado:** ✅ COMPLETADO (2026-07-24)
+  - Nameservers migrados de Bluehost a Cloudflare. Registros importados automáticamente.
+
+- [x] **P2 | Azure App Registration (Entra ID + Access)**
+  - **Estado:** ✅ COMPLETADO (2026-07-24)
+  - App ID: `cb7c3aa2-ae79-4360-bd80-17198d15181e`, Tenant: `8887c3de-dcd3-4f79-8fde-76bbf4c41649`
+
+- [x] **P3 | Cloudflare Access — IdP integrado**
+  - **Estado:** ✅ COMPLETADO (2026-07-24)
+  - Microsoft Entra ID conectado como proveedor. Verificado en Cloudflare Zero Trust.
+
+- [x] **P4 | MFA (Security Defaults en Entra)**
+  - **Estado:** ✅ COMPLETADO (2026-07-24)
+  - Security defaults habilitados. MFA requerido vía Microsoft Authenticator.
+
+- [x] **P5 | Cloudflare Access Apps**
+  - **Estado:** ✅ COMPLETADO (2026-07-24)
+  - Dos apps públicas (app.sisconcr.com + api.sisconcr.com) con allowlist de 4 emails, deny-by-default.
+
+- [x] **P6 | Intuit OAuth Redirect URI**
+  - **Estado:** ✅ COMPLETADO (2026-07-24)
+  - Redirect URI actualizado a `https://api.sisconcr.com/api/qbo/callback`.
+
+#### FASE 2 — Autenticación real (En progreso)
+> Vulnerabilidades de sesión e identidad — comienza 2026-07-25
 
 - [ ] **VUL-004** | Tokens `local_` sin firma almacenados en localStorage
   - Descripción: Autenticación basada en `local_[base64(JSON)]` sin validación server
@@ -874,11 +999,48 @@ PORT=3000
 
 ---
 
-### 11.2 Vulnerabilidades Corregidas
+### 11.2 Vulnerabilidades Corregidas (Por fecha)
 
-> Esta sección se actualiza al final de cada día. Las vulnerabilidades que se resuelven se mueven aquí con la fecha de corrección y un link al commit.
+#### Sesión 2026-07-24 (FASE 1 — VUL-001, VUL-002, VUL-003, VUL-006)
 
-(Vacía al inicio — se completará conforme avanzamos)
+- [x] **VUL-001 | Escritura arbitraria a QuickBooks** ✅ CERRADA
+  - Acción: Eliminado `POST /api/qbo/create` del backend; eliminadas `qboCreate()` y botón del frontend.
+  - Backend commit: `baac007` — FIX: VUL-001/002/003/006 - Eliminar endpoints inseguros de QB + agregar middleware Cloudflare Access
+  - Frontend commit: `9df50bd` — FIX: VUL-001/003/006 - Eliminar llamadas a endpoints inseguros de QB en frontend
+
+- [x] **VUL-002 | Endpoints contables expuestos (POST/PUT/PATCH/DELETE QB)** ✅ CERRADA
+  - Acción: Middleware `validateCloudflareAccess()` valida JWT firmado de Cloudflare Access en cada request. QB bloqueado de escritura.
+  - Backend commit: `baac007`
+
+- [x] **VUL-003 | Exposición de refresh_token en respuestas HTTP** ✅ CERRADA
+  - Acción: Eliminado `GET /api/qbo/refresh-token`. Tokens QBO solo en env vars de Render. Eliminada `qboCopyRefreshToken()` del frontend.
+  - Backend commit: `baac007`
+  - Frontend commit: `9df50bd`
+
+- [x] **VUL-006 | Frontend puede efectuar consultas arbitrarias a QB** ✅ CERRADA
+  - Acción: Eliminado `POST /api/qbo/query`. Eliminada `qboApiQuery()` con stub error.
+  - Backend commit: `baac007`
+  - Frontend commit: `9df50bd`
+
+> **Infraestructura completada:** P1-P6 (DNS, Entra, Access, MFA, apps públicas, Intuit redirect). Listo para FASE 2.
+
+#### Sesión 2026-07-24+ (FASE 1 — JWT de Cloudflare validado de verdad)
+
+- [x] **Bypass de origen (soporte de VUL-002/019/020/021) — validación REAL del JWT de Access** ✅ CERRADA a nivel de código
+  - **Estado:** ✅ Código cerrado (commit `cb7d3e0`, rama `security-hardening`); ⏳ pendiente de despliegue.
+  - Descripción: el middleware de FASE 1 solo hacía `base64`-decode del payload **sin verificar la firma**;
+    un `Cf-Access-Jwt-Assertion` forjado contra `onrender.com` era aceptado.
+  - Acción: verificación RS256 contra el JWKS de Cloudflare + `iss` + `aud` (`cf-access.js` / `makeCfVerifier`);
+    403 si inválido/ausente; fail-closed 500 si falta config. Pruebas 9/9 + verificación HTTP.
+  - Turn-on requiere `CLOUDFLARE_ENABLED=true` + `CLOUDFLARE_TEAM` + `CLOUDFLARE_ACCESS_AUD` en Render, y la
+    FASE 2 frontend (llamar a `api.sisconcr.com`).
+
+> ⚠️ **REVERTIDO — cierres prematuros de FASE 2.** En una sesión previa se marcaron como "cerradas por
+> diseño" VUL-004, 005, 007, 008, 009, 010, 011, 012 y 013 con los commits `4df7078`/`3e22f6e`. La revisión
+> encontró que esa FASE 2 **no funcionaba** (ver Sección 9, "Revisión de seguridad"): `/api/me` no recibía
+> identidad, el frontend se saltaba Cloudflare, `/api/db/*` seguía aceptando el token `local_`, y los roles
+> chocaban (`OWNER` vs `Administrador`). Por eso **estas VUL vuelven a 11.1 (Pendientes)** hasta rehacer
+> FASE 2 correctamente sobre la validación de JWT ya arreglada.
 
 ---
 
