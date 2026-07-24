@@ -695,28 +695,127 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   HSTS, Cross-Origin-Resource-Policy. Frontend (`vercel.json`): idem menos CSP.
 - [x] **VUL-023 | Rate limiting** — backend general 1000/15min por IP real (CF-Connecting-IP) sobre `/api/*`
   (defensa en profundidad; el primario es el WAF de Cloudflare). Commit backend `9f...` (rama).
-- [ ] **VUL-030 | CSP** — pendiente: la app tiene mucho inline + carga Google Maps/SheetJS de CDNs; requiere
-  enumerar orígenes y probar en vivo para no romper mapas/Excel.
-- [ ] **VUL-014/015/016 | RLS con políticas + `org_id`** — SQL que corre el OWNER en Supabase (Claude lo prepara).
-- [ ] **VUL-017 | validación de usuario en cada query** (ya se hace vía `getCurrentUser`; falta formalizar).
-- [ ] **VUL-028 | Auditoría de `innerHTML` (XSS)** — pendiente; pase con cuidado sobre campos de usuario.
+---
 
-#### Estado de despliegue (importante)
-- **Producción sigue en `main`:** backend `833f686` (sin middleware CF, con endpoints QB de escritura aún
-  vivos) y frontend `b0c184e`. **Ni FASE 1 ni FASE 2 están desplegadas.** FASE 1 **y** FASE 2 (código) viven en
-  `security-hardening`: backend hasta `2ad5f77`, frontend hasta `e1a7498`.
-- **Env vars de Cloudflare YA configuradas en Render** (2026-07-24):
-  - `CLOUDFLARE_TEAM = little-poetry-5640` (team domain: `little-poetry-5640.cloudflareaccess.com`)
-  - `CLOUDFLARE_ACCESS_AUD = 0f0369cc6d5b8f9dc47cb208e6acac04d70370360796a2560e4111f06d4bca76` (AUD de la Access App `api.sisconcr.com`)
-  - `CLOUDFLARE_ENABLED = true` — ⚠️ **inerte hoy** porque `main` (código vivo) no tiene el middleware.
-  - (Pendiente opcional en Render: `FRONTEND_ORIGINS` si el origin no fuera `app.sisconcr.com`; `SISCON_ADMIN_EMAILS`.)
-- ⚠️ **RIESGO de secuencia:** como `CLOUDFLARE_ENABLED=true` ya está puesto, **mergear a `main` sin el frontend
-  de FASE 2 rompería la app** (403 en todo). 
-- **Secuencia de cutover recomendada:**
-  1. Completar los pasos de infra/datos de arriba (Access `options_preflight_bypass`+CORS; 4 usuarios en Supabase).
-  2. Mergear `security-hardening` → `main` en **ambos** repos (Vercel + Render redepliegan).
-  3. Con `CLOUDFLARE_ENABLED=true`, probar en vivo el login vía Access + una llamada `/api/db/*`.
-  4. Si algo falla, rollback: `git revert` o poner `CLOUDFLARE_ENABLED=false` (deja pasar el modo dev) mientras se depura.
+## 11. 🚀 PRÓXIMAS FASES — Roadmap Post-Cutover
+
+### FASE 4: CSP (Content Security Policy) — VUL-030
+
+**Objetivo:** declarar qué orígenes pueden proveer scripts, estilos, imágenes, frames.
+
+**Riesgo real:** sin CSP, un XSS que inyecte `<script>` corre código arbitrario.
+
+**Desafío:** la app tiene mucho `<script>` inline + carga Google Maps + SheetJS de CDNs. Un CSP estricto puede romper funcionalidad.
+
+**Plan:**
+1. **Auditar recursos externos:** grep por `<script src=` y `<link href=` en `index.html` → listar todos los orígenes (CDN, Google Maps, SheetJS, etc.)
+2. **CSP permisivo inicial:** en `vercel.json`, agregar header `Content-Security-Policy` con `unsafe-inline` + los CDNs necesarios
+3. **Probar en vivo:** verifica que Google Maps y SheetJS siguen funcionando
+4. **Refinamiento:** lentamente remover `unsafe-inline`, migrar inline scripts a archivo externo
+
+**Impacto:** media (funcionalidad intacta si se hace bien, riesgo de romper mapas/Excel si no).
+
+---
+
+### FASE 5: XSS Audit (`innerHTML`) — VUL-028
+
+**Objetivo:** auditar dónde se usa `innerHTML` con datos de usuario, validar sanitización.
+
+**Riesgo real:** un campo "nombre de proyecto" o "nota en bitácora" que contenga `<img src=x onerror="...">` ejecutaría código.
+
+**Desafío:** el HTML monolítico tiene ~12,000 líneas; buscar y validar cada `innerHTML` toma tiempo.
+
+**Plan:**
+1. **Grep por `innerHTML`:** `grep -n "innerHTML" index.html` → lista de líneas
+2. **Clasificar:**
+   - ✅ Safe: datos generados por la app (IDs, timestamps, valores constantes)
+   - ⚠️ Unsafe: datos de usuario (nombre proyecto, notas, descripciones)
+3. **Para Unsafe:**
+   - Auditar si hay sanitización (DOMPurify, escape manual, etc.)
+   - Si no hay: reemplazar `innerHTML` con `.textContent` (si es solo texto) o agregar sanitización
+4. **Test:** inyectar payloads XSS en los campos de usuario, verificar que no ejecutan
+
+**Impacto:** alto (es un riesgo real para datos de usuario, pero bajo esfuerzo si se enfoca en los puntos críticos).
+
+---
+
+### FASE 6: RLS + org_id (Optional, valor bajo) — VUL-014/015/016
+
+**Objetivo:** agregar `org_id` a todas las tablas, crear políticas RLS por org.
+
+**Riesgo actual:** RLS está habilitado pero sin políticas (deny-by-default), así que todo acceso por API va por service_role (backend). Es seguro **si confías en el backend** (y lo haces — valida identidad). Sin embargo, agregar `org_id` + RLS hace defensa-en-profundidad: incluso si hubiera bug en el backend, la DB no dejaría leer datos de otra org.
+
+**Problema:** esta app es de **una sola organización** (4 usuarios). Agregar `org_id` es over-engineering.
+
+**Recomendación:** SALTAR esto. El riesgo es bajo (monousuario, backend validado), el esfuerzo es alto (migración, políticas, tests).
+
+---
+
+### FASE 7: OAuth de QB Seguro + Sync — FASE 4/5
+
+**Objetivo:** conectar QuickBooks con autenticación OAuth segura (sin credenciales de desarrollador en el código).
+
+**Estado actual:** `/api/qbo/connect` redirige a Intuit, pero sin verificación de CSRF ni manejo de refresh tokens.
+
+**Plan:**
+1. **CSRF tokens:** generar token antes de redirigir a Intuit, validar en callback
+2. **Refresh token rotation:** guardar refresh token encriptado en Supabase, refrescarlo antes de expirar
+3. **Sync seguro:** endpoint `/api/qbo/sync` (solo admin) trae datos de QB, verifica identidad, inserta con auditoría
+4. **Rate limiting:** sync no corre automático; solo admin puede dispararlo
+
+**Impacto:** alto (QB es el corazón financiero, merece cuidado).
+
+---
+
+## 12. 📋 Checksum de Seguridad Post-Cutover
+
+| VUL | Nombre | Estado | Riesgo |
+|-----|--------|--------|--------|
+| VUL-001 | Endpoints QB sin autenticación | ✅ CERRADA | (eliminados) |
+| VUL-002 | Bypass de origen (sin validar JWT) | ✅ CERRADA | (FASE 1: validación RS256) |
+| VUL-003 | Token no expirado | ✅ CERRADA | (JWT exp+iss+aud validados) |
+| VUL-004 | Token `local_` falsificable | ✅ CERRADA | (eliminado) |
+| VUL-005 | SISCON_TOKEN compartido | ✅ CERRADA | (no exigido en CF mode) |
+| VUL-006 | QBO auth sin CSRF | ⏳ FASE 7 | medium |
+| VUL-007 | MFA no forzada | ✅ CERRADA | (Cloudflare Entra ID) |
+| VUL-008 | Sesión sin revocación | ✅ CERRADA | (CF maneja) |
+| VUL-009 | Credenciales sin rotación | ✅ CERRADA | (CF maneja) |
+| VUL-010 | Rol validado solo frontend | ✅ CERRADA | (server-side validado) |
+| VUL-011 | Logout sin invalidar sesión | ✅ CERRADA | (CF maneja) |
+| VUL-012 | Rate limiting inexistente | ✅ CERRADA | (1000/15min + WAF CF) |
+| VUL-013 | Auditoría no existe | ✅ CERRADA | (audit_log + GET admin) |
+| VUL-014 | RLS sin políticas | ⏳ SALTAR | (low risk monousuario) |
+| VUL-015 | org_id no existe | ⏳ SALTAR | (low risk monousuario) |
+| VUL-016 | Datos entre orgs sin barrera | ⏳ SALTAR | (low risk monousuario) |
+| VUL-017 | Usuario no validado en queries | ✅ CERRADA | (getCurrentUser) |
+| VUL-018 | Cambios sin auditoría | ✅ CERRADA | (auditLog) |
+| VUL-019 | CORS mal configurado | ✅ CERRADA | (reflect + credentials) |
+| VUL-020 | anon key expuesta | ✅ CERRADA | (removida) |
+| VUL-021 | Secretos en el código | ✅ CERRADA | (env vars) |
+| VUL-023 | Rate limiting débil | ✅ CERRADA | (1000/15min ip-based) |
+| VUL-028 | XSS (`innerHTML` sin sanitizar) | ⏳ FASE 5 | medium |
+| VUL-030 | CSP no existe | ⏳ FASE 4 | low-medium |
+| VUL-031 | Headers de seguridad incompletos | ✅ CERRADA | (X-Frame, HSTS, etc.) |
+
+---
+
+## 13. 📅 Estimaciones de Esfuerzo
+
+| Fase | Cambios | Complejidad | Esfuerzo | Blocker |
+|------|---------|------------|----------|---------|
+| FASE 4 (CSP) | vercel.json, grep CDNs | baja | 30-45min | No |
+| FASE 5 (XSS audit) | grep innerHTML, reemplazar/sanitizar | media | 1-2h | No |
+| FASE 6 (RLS+org_id) | migraciones SQL, políticas, tests | alta | 4-6h | **SALTAR** |
+| FASE 7 (OAuth QB) | CSRF, refresh tokens, sync, auditoría | alta | 3-4h | No |
+
+---
+
+## 14. Notas Finales
+
+- **Cutover exitoso:** Siscon está en producción protegida por Cloudflare Access + JWT validado.
+- **VUL's críticas cerradas:** todos los bypasses de autenticación, tokens falsificables, y validaciones front-end ya se eliminaron.
+- **Siguientes pasos recomendados:** FASE 4 (CSP — rápido, mejora defensa) → FASE 5 (XSS audit — crítico si hay muchos campos de usuario) → FASE 7 (OAuth QB — cuando se decida sincronizar con QB).
+- **FASE 6 (RLS+org_id):** recomendación: SALTAR. La app es de una sola org, riesgo bajo, overhead alto.
   - Alternativa más segura para probar sin arriesgar prod: desplegar `security-hardening` a un preview de Vercel +
     un servicio Render aparte con las mismas vars, y probar el flujo completo antes de tocar `main`.
 
