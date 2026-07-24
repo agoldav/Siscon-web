@@ -863,7 +863,7 @@ let _sbToken = localStorage.getItem('sb_token') || null;
 // poner USE_SAME_ORIGIN_API=true → el frontend llama a /api/* en el MISMO dominio (rewrite de Vercel
 // en vercel.json → Render), eliminando CORS y el problema cross-subdominio. (Requiere que el backend
 // acepte el AUD de app.sisconcr.com: agregarlo a CLOUDFLARE_ACCESS_AUD en Render, separado por coma.)
-const USE_SAME_ORIGIN_API = false;
+const USE_SAME_ORIGIN_API = true;
 const BACKEND_URL = USE_SAME_ORIGIN_API ? ''
   : (SYS.backendUrl && /localhost|127\.0\.0\.1/.test(SYS.backendUrl)) ? SYS.backendUrl
   : 'https://api.sisconcr.com';
