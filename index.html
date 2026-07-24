@@ -633,11 +633,8 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
 .btn-sec{background:transparent;border:1px solid var(--border2);color:var(--t2);padding:8px 16px;border-radius:8px;cursor:pointer;font-family:var(--font);font-size:13px;transition:all 0.2s}
 .btn-sec:hover{border-color:var(--t1);color:var(--t1)}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-const SUPABASE_URL = 'https://qsmvyfyxynnzozzdavxj.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzbXZ5Znl4eW5uem96emRhdnhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5ODU2NTAsImV4cCI6MjA5OTU2MTY1MH0.FBuq8cWGZpwYiOq71jpib8CQC-wZT_3Hyx0uKYP7onU';
-</script>
+<!-- FASE 3 (VUL-029): se removió el CDN de supabase-js y la anon key del frontend
+     (nunca se usaban; todo el acceso a datos va por el backend con service_role). -->
 </head>
 <body>
 <div id="save-toast">✓ Guardado</div>
