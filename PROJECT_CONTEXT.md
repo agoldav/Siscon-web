@@ -657,9 +657,29 @@ y se mapea `email → auth.users → profile` **sin cambio de esquema** (no se n
 2. **Datos en Supabase:** cada uno de los 4 emails `@sisconcr.com` de Access debe tener **cuenta en Supabase Auth
    con su `profile`** (rol correcto). El rol vive en `profiles.role`. (Opcional: `SISCON_ADMIN_EMAILS` como red.)
 3. **Prueba en vivo (riesgo real):** el establecimiento de la cookie `CF_Authorization` de `api.sisconcr.com` para
-   llamadas `fetch` cross-subdominio necesita verificarse en vivo. Plan B si falla: enrutar el API bajo el mismo
-   host (`app.sisconcr.com/api/*` vía rewrite de Vercel) para evitar CORS/cross-subdominio.
+   llamadas `fetch` cross-subdominio necesita verificarse en vivo.
 4. **Cutover:** ver "Estado de despliegue".
+
+#### ✅ Plan B preparado (insurance para el cutover) — commits `d8a640e`/`f8a6ce1`
+Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
+- `vercel.json`: rewrite `/api/*` → Render (DORMIDO; el frontend usa `api.sisconcr.com` absoluto).
+- Frontend: flag `USE_SAME_ORIGIN_API` (default `false`) para flipear en una línea a `/api/*` mismo origen.
+- Backend: `CLOUDFLARE_ACCESS_AUD` acepta **lista** de AUDs (para aceptar el JWT de app.sisconcr.com además del de api).
+- Para activar Plan B: `USE_SAME_ORIGIN_API=true` + agregar el AUD de `app.sisconcr.com` a `CLOUDFLARE_ACCESS_AUD`.
+
+#### 🔄 FASE 3 — en progreso (código; commits backend `2833d3b`, frontend `4329303`/`0822067`)
+- [x] **VUL-018 | Auditoría** — `auditLog()` inserta en `audit_log` (ya existía) en cada INSERT/UPDATE/DELETE
+  de la factory CRUD (best-effort, sin el blob de `settings`); `GET /api/audit-log` (solo Admin).
+- [x] **VUL-029 | anon key en el navegador** — eliminada del frontend (CDN de supabase-js + constantes; nunca se usaban).
+- [x] **VUL-030/031 | Security headers** — backend: X-Content-Type-Options, X-Frame-Options:DENY, Referrer-Policy,
+  HSTS, Cross-Origin-Resource-Policy. Frontend (`vercel.json`): idem menos CSP.
+- [x] **VUL-023 | Rate limiting** — backend general 1000/15min por IP real (CF-Connecting-IP) sobre `/api/*`
+  (defensa en profundidad; el primario es el WAF de Cloudflare). Commit backend `9f...` (rama).
+- [ ] **VUL-030 | CSP** — pendiente: la app tiene mucho inline + carga Google Maps/SheetJS de CDNs; requiere
+  enumerar orígenes y probar en vivo para no romper mapas/Excel.
+- [ ] **VUL-014/015/016 | RLS con políticas + `org_id`** — SQL que corre el OWNER en Supabase (Claude lo prepara).
+- [ ] **VUL-017 | validación de usuario en cada query** (ya se hace vía `getCurrentUser`; falta formalizar).
+- [ ] **VUL-028 | Auditoría de `innerHTML` (XSS)** — pendiente; pase con cuidado sobre campos de usuario.
 
 #### Estado de despliegue (importante)
 - **Producción sigue en `main`:** backend `833f686` (sin middleware CF, con endpoints QB de escritura aún
