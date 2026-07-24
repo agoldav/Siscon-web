@@ -1369,6 +1369,47 @@ async function logout(){
   document.getElementById('tabbar').classList.add('hidden');
 }
 
+// ========== FASE 2: BOOTSTRAP DESDE CLOUDFLARE ACCESS ==========
+async function bootstrapCloudflareAuth(){
+  console.log('[FASE2] Verificando autenticación con Cloudflare Access...');
+  try{
+    const resp=await fetch(BACKEND_URL+'/api/me',{method:'GET',credentials:'include'});
+    if(!resp.ok){
+      if(resp.status===403){
+        console.log('[FASE2] No autorizado (fuera de allowlist de Cloudflare Access)');
+        document.getElementById('login-screen').innerHTML='<div style="text-align:center;padding:40px;max-width:600px"><h1>❌ No Autorizado</h1><p>Tu cuenta de Outlook no está autorizada para acceder a Siscon.</p><p>Contacta al administrador para ser agregado a la allowlist de Cloudflare Access.</p><pre style="background:var(--bg1);padding:20px;border-radius:8px;overflow-x:auto;font-size:12px;white-space:pre-wrap;text-align:left"></pre></div>';
+        return;
+      }
+      console.log('[FASE2] Error:', resp.status, resp.statusText);
+      showError('lerr','Error verificando autenticación: '+resp.status);
+      return;
+    }
+    const data=await resp.json();
+    console.log('[FASE2] Usuario autenticado:', data.email, 'Rol:', data.role);
+    currentUser={id:data.id,email:data.email,name:data.email.split('@')[0],role:data.role==='OWNER'?'Administrador':'Regular'};
+    _sbToken='cf_'+data.id; // token ficticio (no se usa para auth, CF lo maneja)
+    document.getElementById('login-screen').style.display='none';
+    document.getElementById('app').style.display='flex';
+    document.getElementById('topbar-user-label').textContent=currentUser.email;
+    document.getElementById('btn-settings').style.display=currentUser.role==='Administrador'?'':'none';
+    logAction('Inicio de sesión (Cloudflare Access)','log-create','Sistema',null,{user:currentUser.email});
+    const _apiOk=await loadDataFromAPI();
+    if(!_apiOk || !(Array.isArray(projects)&&projects.length)) loadData();
+    renderDash();
+    handleOpenHash();
+    checkNewWinOverride();
+    msAutoSync();
+    setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);
+    setTimeout(()=>checkPendingAuthOnLogin(), 1200);
+    if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);
+  }catch(e){
+    console.error('[FASE2] Error bootstrap:', e.message);
+    // Fallback: mostrar login tradicional (desarrollo sin Cloudflare Access)
+    console.log('[FASE2] Fallback a login tradicional (desarrollo)');
+    showLogin();
+  }
+}
+
 // ========== SETTINGS ==========
 function openSettings(){
   if(currentUser&&currentUser.role!=='Administrador'){alert('Solo el administrador tiene acceso a los ajustes del sistema.');return;}
@@ -11959,7 +12000,16 @@ function validatePassword(password){return password.length>=8&&/[A-Z]/.test(pass
 async function forgotPassword(){const email=document.getElementById('fe').value.trim();if(!validateEmail(email)){showError('ferr','Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/forgot-password',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){showError('ferr',await authErrMsg(resp));return;}showToast('✓ Instrucciones enviadas al email');showLogin();}catch(e){showError('ferr','Error: '+e.message);}}
 async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}authLoading(true,'accept-btn','Creando cuenta…');try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){authLoading(false,'accept-btn');showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();if(data.needsManualLogin||!data.access_token){authLoading(false,'accept-btn');try{showLogin();}catch(e){}const lu=document.getElementById('lu');if(lu)lu.value=email;alert(data.message||'Tu cuenta fue creada. Inicia sesión con tu email y contraseña.');return;}currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);startTokenRefresh();authLoading(false,'accept-btn');document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});const _apiOk2=await loadDataFromAPI();if(!_apiOk2||!(Array.isArray(projects)&&projects.length))loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){authLoading(false,'accept-btn');showError('ierr','Error: '+e.message);}}
 function checkInvitationCode(){const params=new URLSearchParams(window.location.search);const code=params.get('invite');const email=params.get('email');if(code&&email){document.getElementById('login-form').classList.add('hidden');document.getElementById('invite-form').classList.remove('hidden');document.getElementById('invite-email-display').textContent='Email: '+email;window._inviteCode=code;window._inviteEmail=email;}}
-setTimeout(checkInvitationCode,100);
+// FASE 2: Bootstrap desde Cloudflare Access al cargar
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',()=>{
+    console.log('[FASE2] DOM ready, iniciando bootstrap...');
+    bootstrapCloudflareAuth();
+  });
+}else{
+  console.log('[FASE2] DOM ya cargado, iniciando bootstrap...');
+  bootstrapCloudflareAuth();
+}
 
 // Fase 4: Gestión de Usuarios Supabase
 let _sbUsersCache=[];
