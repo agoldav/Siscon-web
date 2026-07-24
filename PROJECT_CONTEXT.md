@@ -660,7 +660,27 @@ y se mapea `email → auth.users → profile` **sin cambio de esquema** (no se n
    llamadas `fetch` cross-subdominio necesita verificarse en vivo.
 4. **Cutover:** ver "Estado de despliegue".
 
-#### ✅ Plan B preparado (insurance para el cutover) — commits `d8a640e`/`f8a6ce1`
+#### ✅ CUTOVER COMPLETADO — 2026-07-24 (Vercel + Render en vivo con Cloudflare Access)
+
+**Estado:** security-hardening (FASE 1 + 2 + 3) mergeado a `main` en ambos repos. **Producción protegida.**
+
+**Flujo verificado en vivo:**
+1. Usuario: `https://app.sisconcr.com` (Vercel, detrás de Cloudflare Access)
+2. Redirecta a login → MFA Microsoft Entra ID
+3. JWT establecido en cookie de Cloudflare
+4. **Plan B (rewrite same-origin):** frontend llama a `/api/*` en `app.sisconcr.com` → Vercel rewrite → Render
+5. Backend valida JWT (RS256 vs JWKS), extrae email, mapea a Supabase Auth → profile (rol)
+6. Dashboard carga, datos cargan, CRUD funciona ✅
+
+**Obstáculos encontrados y resueltos:**
+- DNS cross-subdominio no resolvía en navegador → **Plan B activado** (rewrite same-origin)
+- AUD de `app.sisconcr.com` ≠ AUD en Render → **agregamos ambos AUDs** a `CLOUDFLARE_ACCESS_AUD`
+
+**Commits finales:**
+- Frontend: `81d0bcc` (Plan B activado: `USE_SAME_ORIGIN_API=true`)
+- Backend: `bec4120` (limpieza: quitado debug endpoint)
+
+#### ✅ Plan B preparado (insurance para el cutover) — commits `d8a640e`/`f8a6ce1` — **ACTIVADO en cutover**
 Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - `vercel.json`: rewrite `/api/*` → Render (DORMIDO; el frontend usa `api.sisconcr.com` absoluto).
 - Frontend: flag `USE_SAME_ORIGIN_API` (default `false`) para flipear en una línea a `/api/*` mismo origen.
