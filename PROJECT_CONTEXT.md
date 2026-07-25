@@ -948,14 +948,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     `test-concurrency.js` actualizado (21/21) con el cableado de la cola.
   - Commits: frontend `8e93d7a`; ajuste de una verificación cruzada en backend `24f2edc` (sin cambios de lógica).
 
-## 10. ⏳ Pendiente
-
-> Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
-
-### 🔴 Seguridad — hallazgos ABIERTOS de la revisión externa #2 (2026-07-24)
-> Verificados contra el código real. Ordenados por severidad.
-> Con VUL-036 y 037/038/040/041/042 cerradas, solo quedan abiertas VUL-043, 044, 045 — y VUL-043
-> requiere al OWNER (rotar secretos), VUL-044/045 son arquitectónicas (requieren decisión de diseño).
+### Sesión 2026-07-25 (cierre de hallazgos de seguridad pendientes: VUL-037/038/040/041/042 + VUL-045)
+> Continuación de la revisión externa #2. Estos quedaban marcados `[x]` en Pendiente desde que se corrigieron;
+> esta entrada los traslada formalmente a Completado con su fecha real de cierre.
 
 - [x] **VUL-037 | `/api/ms/refresh-token` entrega el refresh token de Outlook a cualquier usuario** (ALTA)
   - No validaba rol Admin (`checkToken` devuelve `true` con Access encendido — valida identidad, no rol). Era
@@ -993,8 +988,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     está fijado, no se puede validar contra nada — se deja pasar como antes (compatibilidad hacia atrás; hoy
     Render no tiene ese valor fijado, así que el comportamiento no cambia hasta que se configure a propósito).
     Documentado en `.env.example` como recomendado.
-- Pruebas del lote completo: `siscon-backend/test-oauth-hardening.js` (33/33) — servidor real en proceso hijo
-  (403 sin JWT en las 4 rutas nuevas/tocadas), extracción y ejecución de `generateMsState`/
+- Pruebas del lote VUL-037/038/041/042: `siscon-backend/test-oauth-hardening.js` (33/33) — servidor real en
+  proceso hijo (403 sin JWT en las 4 rutas nuevas/tocadas), extracción y ejecución de `generateMsState`/
   `saveMsAuthState`/`validateAndClearMsAuthState` (aleatoriedad, un solo uso, TTL, state ausente) y de la
   comparación de `realmId` (con/sin `QBO_REALM_ID`, coincide/no coincide), y — para VUL-041 — las 4 combinaciones
   reales de `checkToken()`: sin nada configurado → 503; con el opt-in → 200 (dev local sigue igual); con el
@@ -1031,38 +1026,13 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     el texto exacto), IV no reutilizado entre llamadas, **manipular un solo byte del ciphertext hace fallar la
     desencriptación** (prueba que el `authTag` de GCM funciona de verdad, no solo AES sin integridad), y que una
     clave distinta a la usada para cifrar no desencripta.
-- [ ] **VUL-043 | Secretos en el historial de Git — requiere ROTACIÓN MANUAL del OWNER** (ALTA)
-  - **Re-verificado línea por línea contra el historial real de ambos repos (2026-07-24+)** — no solo repetido de
-    memoria. Confirmado con evidencia (valores reales, no plantillas):
-    - `siscon-backend`, archivos `.env` y `.env.save`, commit `abadc64`: `ANTHROPIC_API_KEY` (real, 108 chars),
-      `SISCON_TOKEN` (real), y **`MS_CLIENT_SECRET`/`MS_CLIENT_ID`/`MS_TENANT_ID`** (reales, formato Azure —
-      **este trío NO estaba en el plan de rotación anterior**, es un hallazgo nuevo de esta re-verificación).
-    - `siscon-web/index.html`, commits `5e8a9fb` (se agregó) / `4329303` (se quitó): anon key de Supabase, JWT
-      completo visible en el diff.
-    - `siscon-backend`: `client_secret` de Intuit — **NO se encontró evidencia** en el historial (solo la línea
-      vacía de plantilla en `.env.example`). Se mantiene en la lista por precaución barata, pero sin confirmar.
-    - **Buena noticia verificada:** `SUPABASE_SERVICE_ROLE_KEY` (la llave que ignora RLS) **nunca apareció** en
-      el historial de ninguno de los dos repos.
-  - Borrar los archivos no invalida las copias que ya están en el historial. Ver el plan de rotación detallado,
-    con el orden seguro y el impacto operativo de cada paso, en **12.12**. **Claude no puede ejecutar esto.**
-- [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
-  - Los 4 usuarios comparten un solo registro `settings/1` con proyectos, ajustes, actividad **y todas las
-    conversaciones**: el filtro de mensajes privados existe **solo en la interfaz**, así que cada navegador
-    descarga los DMs de los demás. Una cuenta comprometida obtiene todo.
-  - **Decisión del OWNER (2026-07-25):** alcance dividido en dos.
-    1. **AHORA (en curso):** separar solo `conversations`/`messages` a sus propias tablas, con autorización por
-       participante en el backend — cierra la fuga real de privacidad sin tocar `projects`/`settings`.
-    2. **PENDIENTE (después, sin fecha):** normalizar el resto del blob (`projects`, `houses`, `transactions`,
-       etc.) en tablas reales con autorización por registro — reescritura grande que toca casi todo lo
-       Completado. **No empezar sin retomarlo explícitamente con el OWNER.**
-
 - [x] **VUL-045 | Tres registros de identidad separados; agregar a alguien en Azure NO alcanza** (usabilidad + riesgo operativo)
   - Convivían **tres** fuentes de identidad: Cloudflare Access/Entra (quién entra), Supabase `auth.users`+`profiles`
     (qué rol tiene) y `SYS.users` (directorio de Mensajes/avatares). Si se agregaba a alguien SOLO en Azure, pasaba
     el login de Microsoft pero la app le daba 403 en todo (`resolveUserByEmail` sin cuenta de Supabase). El flujo
     de invitación (link + código + contraseña que el invitado nunca usaba para entrar) era el único camino que
     creaba la cuenta + el rol, y era el paso extra e innecesario.
-  - **Decisión del OWNER (2026-07-25):** alta directa por Admin (la opción recomendada).
+  - **Decisión del OWNER:** alta directa por Admin (la opción recomendada).
   - **Implementado:** `POST /api/auth/create-user` (Admin-only, `validateAdminRole`) — email + nombre + rol de un
     solo paso. Genera una contraseña aleatoria de 32 bytes (`crypto.randomBytes`, base64url) que **nadie ve ni
     necesita** (existe solo porque Supabase Auth exige una al crear el usuario; el acceso real sigue siendo
@@ -1084,6 +1054,42 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     respuesta nunca incluye la contraseña generada** ni siquiera como substring); las 4 validaciones de entrada;
     email duplicado rechazado; error de Supabase propagado como 400 (no 500 ni un 201 falso); y verificación
     cruzada de que el frontend ya llama al endpoint nuevo y no al viejo.
+- **Suite de pruebas al cierre: 273 en verde** (195 backend + 78 frontend). Ver detalle completo en la sesión de
+  "incidente en vivo" arriba y en Sección 11.
+
+## 10. ⏳ Pendiente
+
+> Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
+
+### 🔴 Seguridad — hallazgos ABIERTOS de la revisión externa #2 (2026-07-24)
+> Verificados contra el código real. Lo cerrado esta sesión (VUL-032..042, 045) se movió a Completado
+> con fecha 2026-07-25. Solo quedan abiertas VUL-043 (requiere al OWNER, rotar secretos) y el resto de
+> VUL-044 (arquitectónica, requiere decisión de diseño — la mitad de Mensajes ya se decidió y está en curso).
+
+- [ ] **VUL-043 | Secretos en el historial de Git — requiere ROTACIÓN MANUAL del OWNER** (ALTA)
+  - **Re-verificado línea por línea contra el historial real de ambos repos (2026-07-24+)** — no solo repetido de
+    memoria. Confirmado con evidencia (valores reales, no plantillas):
+    - `siscon-backend`, archivos `.env` y `.env.save`, commit `abadc64`: `ANTHROPIC_API_KEY` (real, 108 chars),
+      `SISCON_TOKEN` (real), y **`MS_CLIENT_SECRET`/`MS_CLIENT_ID`/`MS_TENANT_ID`** (reales, formato Azure —
+      **este trío NO estaba en el plan de rotación anterior**, es un hallazgo nuevo de esta re-verificación).
+    - `siscon-web/index.html`, commits `5e8a9fb` (se agregó) / `4329303` (se quitó): anon key de Supabase, JWT
+      completo visible en el diff.
+    - `siscon-backend`: `client_secret` de Intuit — **NO se encontró evidencia** en el historial (solo la línea
+      vacía de plantilla en `.env.example`). Se mantiene en la lista por precaución barata, pero sin confirmar.
+    - **Buena noticia verificada:** `SUPABASE_SERVICE_ROLE_KEY` (la llave que ignora RLS) **nunca apareció** en
+      el historial de ninguno de los dos repos.
+  - Borrar los archivos no invalida las copias que ya están en el historial. Ver el plan de rotación detallado,
+    con el orden seguro y el impacto operativo de cada paso, en **12.12**. **Claude no puede ejecutar esto.**
+- [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
+  - Los 4 usuarios comparten un solo registro `settings/1` con proyectos, ajustes, actividad **y todas las
+    conversaciones**: el filtro de mensajes privados existe **solo en la interfaz**, así que cada navegador
+    descarga los DMs de los demás. Una cuenta comprometida obtiene todo.
+  - **Decisión del OWNER (2026-07-25):** alcance dividido en dos.
+    1. **EN CURSO:** separar solo `conversations`/`messages` a sus propias tablas, con autorización por
+       participante en el backend — cierra la fuga real de privacidad sin tocar `projects`/`settings`.
+    2. **PENDIENTE (después, sin fecha):** normalizar el resto del blob (`projects`, `houses`, `transactions`,
+       etc.) en tablas reales con autorización por registro — reescritura grande que toca casi todo lo
+       Completado. **No empezar sin retomarlo explícitamente con el OWNER.**
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
