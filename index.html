@@ -823,9 +823,72 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
 </div>
 
 <script>
+// ========== HASH DE CONTRASEÑAS LOCALES (VUL-034) ==========
+// El blob completo de la app (settings/1) se descarga al navegador de CADA usuario. Antes guardaba
+// la contraseña de supervisor y las de los usuarios en TEXTO PLANO, así que cualquiera de los 4
+// usuarios podía leerlas desde su propia consola. Ahora solo se guarda el hash.
+//
+// Esto NO convierte estas verificaciones en un control de seguridad real: siguen ocurriendo en el
+// navegador, así que un usuario decidido puede saltárselas igual. Sirven como confirmación de
+// intención ("¿seguro que querés borrar esto?"), y el control de verdad son los roles validados
+// en el servidor. Lo que se cierra aquí es la fuga de la credencial en claro.
+//
+// SHA-256 síncrono: crypto.subtle es async y estas comprobaciones se llaman desde 6 puntos
+// síncronos; hacerlas async obligaría a tocar todos esos flujos.
+const _PWD_SALT='siscon-pwd-v1:';
+function sha256Hex(str){
+  const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+           0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+           0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+           0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+           0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+           0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+           0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+           0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  let H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  // UTF-8
+  const bytes=[]; const s=unescape(encodeURIComponent(String(str==null?'':str)));
+  for(let i=0;i<s.length;i++) bytes.push(s.charCodeAt(i)&0xff);
+  const bitLen=bytes.length*8;
+  bytes.push(0x80);
+  while(bytes.length%64!==56) bytes.push(0);
+  // Longitud en bits, big-endian de 64: los 4 primeros bytes son la palabra alta.
+  for(let i=7;i>=0;i--) bytes.push((i>=4?Math.floor(bitLen/4294967296):bitLen)>>>(8*(i%4))&0xff);
+  const rotr=(x,n)=>(x>>>n)|(x<<(32-n));
+  for(let off=0;off<bytes.length;off+=64){
+    const w=new Array(64);
+    for(let i=0;i<16;i++) w[i]=(bytes[off+i*4]<<24)|(bytes[off+i*4+1]<<16)|(bytes[off+i*4+2]<<8)|bytes[off+i*4+3];
+    for(let i=16;i<64;i++){
+      const s0=rotr(w[i-15],7)^rotr(w[i-15],18)^(w[i-15]>>>3);
+      const s1=rotr(w[i-2],17)^rotr(w[i-2],19)^(w[i-2]>>>10);
+      w[i]=(w[i-16]+s0+w[i-7]+s1)|0;
+    }
+    let [a,b,c,d,e,f,g,h]=H;
+    for(let i=0;i<64;i++){
+      const S1=rotr(e,6)^rotr(e,11)^rotr(e,25), ch=(e&f)^(~e&g);
+      const t1=(h+S1+ch+K[i]+w[i])|0;
+      const S0=rotr(a,2)^rotr(a,13)^rotr(a,22), maj=(a&b)^(a&c)^(b&c);
+      const t2=(S0+maj)|0;
+      h=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
+    }
+    H=[(H[0]+a)|0,(H[1]+b)|0,(H[2]+c)|0,(H[3]+d)|0,(H[4]+e)|0,(H[5]+f)|0,(H[6]+g)|0,(H[7]+h)|0];
+  }
+  return H.map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
+}
+function hashPwd(pwd){ return sha256Hex(_PWD_SALT+String(pwd==null?'':pwd)); }
+// Comparación en tiempo constante: evita filtrar el prefijo correcto por diferencia de tiempos.
+function pwdMatches(pwd, hash){
+  if(!hash) return false;
+  const a=hashPwd(pwd), b=String(hash);
+  if(a.length!==b.length) return false;
+  let diff=0; for(let i=0;i<a.length;i++) diff|=a.charCodeAt(i)^b.charCodeAt(i);
+  return diff===0;
+}
+
 // ========== SETTINGS ==========
 let SYS = {
-  supervisorPassword: '13/11/81',
+  // Hash de '13/11/81' (default histórico). Cambiable en Ajustes; nunca se guarda en claro.
+  supervisorPasswordHash: '333ee722d5aa2f4b4e323c34358242f2a17ac7bf42742307758df2d9ae1a7fdd',
   exchangeRate: 530, // CRC per USD
   theme: 'dark', // 'dark' | 'light'
   qbo: {
@@ -843,10 +906,11 @@ let SYS = {
   backendUrl: '',   // URL del backend (proxy) p.ej. https://siscon-backend.onrender.com
   backendToken: '', // token compartido opcional
   stats: {open:true,scope:'todos',time:'todo',from:'',to:'',showGastado:false,showPendiente:false,cashWindow:'1m',cashProjects:null,unbilledProjects:null,_menuInfo:false,_menuCash:false,_menuUnbilled:false},
+  // VUL-034: solo hashes, nunca la contraseña en claro (este objeto viaja al navegador de todos).
   users: [
-    {id:1,username:'admin',name:'Administrador',role:'Administrador',password:'siscon2026',color:'#2d8cf0'},
-    {id:2,username:'abraham',name:'Abraham Goldgewicht',role:'Supervisor',password:'13/11/81',color:'#1db87a'},
-    {id:3,username:'inutil',name:'Usuario Inútil',role:'Regular',password:'1234',color:'#e8783a'},
+    {id:1,username:'admin',name:'Administrador',role:'Administrador',passwordHash:'42c516c412b323cad560eb7a48ea9062b30c0ae02ef97473fb7f06c8e898ec22',color:'#2d8cf0'},
+    {id:2,username:'abraham',name:'Abraham Goldgewicht',role:'Supervisor',passwordHash:'333ee722d5aa2f4b4e323c34358242f2a17ac7bf42742307758df2d9ae1a7fdd',color:'#1db87a'},
+    {id:3,username:'inutil',name:'Usuario Inútil',role:'Regular',passwordHash:'fc14056d5cf2cd16c9231d5e5b7591c00d3297c18cbed1e495100f0e0879fdff',color:'#e8783a'},
   ],
   conversations: [], // Mensajes internos: {id,type:'dm'|'group',name,memberIds:[],createdBy,createdAt,messages:[{id,senderId,text,ts,attachments:[{id,kind,name,mime,dataUrl,size}],readBy:[]}]}
 };
@@ -904,6 +968,44 @@ function _mergeAuthReqs(remote,local){
   });
   return Array.from(map.values());
 }
+// VUL-033: control de concurrencia optimista sobre el blob settings/1.
+// `_settingsVersion` es el `updated_at` que traía el registro la última vez que cargamos o
+// guardamos. Se manda en cada PUT; si el servidor ve otro valor, alguien más escribió en el
+// medio y responde 409 en vez de dejar que sobrescribamos su trabajo en silencio.
+let _settingsVersion=null;
+let _conflictDialogOpen=false;
+let _versionWarned=false;
+
+// No tenemos versión base: la carga desde el servidor falló y estamos trabajando sobre los datos
+// del navegador. El servidor rechaza el guardado (428) para que no pisemos el estado remoto a
+// ciegas. Se avisa una sola vez para no molestar en cada autoguardado.
+function _handleMissingVersion(){
+  console.error('saveDataToAPI: sin versión base del servidor; no se guardó en la nube.');
+  if(!_versionWarned){
+    _versionWarned=true;
+    alert('No se pudieron cargar los datos del servidor, así que NO se guardó en la nube '+
+          '(para no sobrescribir el trabajo de otros).\n\n'+
+          'Tus cambios sí quedaron guardados en este navegador. Recarga la página para sincronizar.');
+  }
+  return false;
+}
+
+// Otro usuario guardó después de que cargamos. No decidimos por el usuario: le explicamos y elige.
+async function _handleSaveConflict(){
+  if(_conflictDialogOpen) return false;   // no apilar diálogos si hay varios saves en vuelo
+  _conflictDialogOpen=true;
+  try{
+    const recargar=confirm(
+      'Otro usuario guardó cambios mientras trabajabas.\n\n'+
+      'Aceptar = recargar con los datos del servidor (lo tuyo sin guardar queda en este navegador).\n'+
+      'Cancelar = guardar de todos modos y sobrescribir los cambios del otro usuario.'
+    );
+    if(recargar){ location.reload(); return false; }
+    _settingsVersion=null;                // el usuario eligió sobrescribir a propósito
+    return await saveDataToAPI();
+  } finally { _conflictDialogOpen=false; }
+}
+
 async function saveDataToAPI(){
   if(!_sbToken || !currentUser) return false;
   try{
@@ -915,10 +1017,11 @@ async function saveDataToAPI(){
         let d0=rec0.data; if(typeof d0==='string') d0=JSON.parse(d0);
         const remoteReqs=(d0&&d0.SYS&&d0.SYS.pendingAuthRequests)||[];
         SYS.pendingAuthRequests=_mergeAuthReqs(remoteReqs,SYS.pendingAuthRequests);
+        // OJO: la versión NO se refresca aquí a propósito. Si tomáramos el updated_at de esta
+        // lectura, siempre coincidiría y la detección de conflictos nunca dispararía.
       }
     }catch(e){/* sin red: se guarda lo local igual */}
     const projectsClean=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
-    console.log('📤 saveDataToAPI - Token:', _sbToken.substring(0, 50)+'...');
     const resp=await fetch(`${BACKEND_URL}/api/db/settings/1`, {
       method: 'PUT',
       headers: {
@@ -926,17 +1029,19 @@ async function saveDataToAPI(){
         'x-siscon-token': 'siscon-2026-pmapp',
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({data:{projects:projectsClean,SYS,activityLog}})
+      body: JSON.stringify({data:{projects:projectsClean,SYS,activityLog},expected_updated_at:_settingsVersion})
     });
-    console.log('📥 Respuesta:', resp.status, resp.statusText);
+    if(resp.status===409){ return await _handleSaveConflict(); }
+    if(resp.status===428){ return _handleMissingVersion(); }
     if(!resp.ok){
-      const errJson = await resp.json();
-      console.error('❌ Error guardando en API:', errJson);
+      const errJson = await resp.json().catch(()=>({}));
+      console.error('Error guardando en API:', errJson);
       return false;
     }
-    console.log('✅ Datos guardados en API');
+    const saved=await resp.json().catch(()=>null);
+    if(saved&&saved.updated_at) _settingsVersion=saved.updated_at;
     return true;
-  }catch(e){ console.error('❌ Error de sincronización API:', e); return false; }
+  }catch(e){ console.error('Error de sincronización API:', e); return false; }
 }
 
 function saveData(){
@@ -963,6 +1068,8 @@ async function loadDataFromAPI(){
     });
     if(!resp.ok){ console.error('Error cargando desde API:', await resp.json()); return false; }
     const record=await resp.json();
+    _settingsVersion=record.updated_at||null;   // VUL-033: versión base para detectar conflictos
+    if(_settingsVersion) _versionWarned=false;  // se recuperó la sincronía: volver a avisar si se pierde
     if(record.data && typeof record.data==='string') record.data=JSON.parse(record.data);
     const d=record.data||{};
     if(d.projects) projects=d.projects;
@@ -972,8 +1079,28 @@ async function loadDataFromAPI(){
   }catch(e){ console.error('Error cargando desde API:', e); return false; }
 }
 
+// VUL-034: migración de contraseñas en claro → hash.
+// Los datos que ya están en producción traen `supervisorPassword` y `users[].password` en texto
+// plano. Se convierten a hash al cargar y se borra el campo viejo; el siguiente saveData() sube
+// el blob ya limpio. Idempotente: si ya está migrado, no hace nada.
+function migratePasswordsToHash(sys){
+  if(!sys) return;
+  if(sys.supervisorPassword){
+    if(!sys.supervisorPasswordHash) sys.supervisorPasswordHash=hashPwd(sys.supervisorPassword);
+    delete sys.supervisorPassword;
+  }
+  (sys.users||[]).forEach(u=>{
+    if(u&&u.password){
+      if(!u.passwordHash) u.passwordHash=hashPwd(u.password);
+      delete u.password;
+    }
+  });
+}
+
 function applyDefaults(sys){
   SYS=sys||{};
+  migratePasswordsToHash(SYS);
+  if(!SYS.supervisorPasswordHash) SYS.supervisorPasswordHash=hashPwd('13/11/81');
   if(!SYS.qbo)SYS.qbo={realmId:'',accessToken:'',environment:'sandbox',vendorCache:[],lastSync:null};
   if(!SYS.qbo.customerCache)SYS.qbo.customerCache=[];
   if(!SYS.qbo.itemCache)SYS.qbo.itemCache=[];
@@ -1456,7 +1583,8 @@ function openSettings(){
       <div class="settings-section-title">General</div>
       <div style="font-size:11px;color:var(--t3);margin-bottom:8px">El tipo de cambio ya no es global: se asigna por transacción (desde QuickBooks o BCCR) y es editable en cada documento.</div>
       <div class="ff"><label>Contraseña de Supervisor (para desbloquear proyectos y autorizaciones)</label>
-        <input id="s-spwd" type="password" value="${SYS.supervisorPassword}" style="width:200px"/>
+        <input id="s-spwd" type="password" value="" placeholder="Dejar vacío para no cambiarla" style="width:200px"/>
+        <div style="font-size:10px;color:var(--t3);margin-top:4px">VUL-034: solo se guarda el hash, así que la contraseña actual no puede mostrarse. Escribe una nueva únicamente si quieres cambiarla.</div>
       </div>
     </div>
     <div class="settings-section">
@@ -1565,7 +1693,9 @@ function saveSettings(){
   const bt=document.getElementById('s-backend-token'); if(bt)SYS.backendToken=bt.value.trim();
   const mu=document.getElementById('s-mail-user');
   if(mu){ if(!SYS.mailbox)SYS.mailbox={}; SYS.mailbox.user=mu.value.trim(); }
-  SYS.supervisorPassword=document.getElementById('s-spwd').value||'13/11/81';
+  // VUL-034: campo vacío = conservar la actual (no se puede rellenar con el hash).
+  const _spwd=document.getElementById('s-spwd')?.value||'';
+  if(_spwd) SYS.supervisorPasswordHash=hashPwd(_spwd);
   if(!SYS.qbo) SYS.qbo={vendorCache:[],lastSync:null};
   SYS.qbo.environment=document.getElementById('s-qbo-env')?.value||'sandbox';
   SYS.qbo.realmId=document.getElementById('s-qbo-realm')?.value?.trim()||'';
@@ -2008,7 +2138,7 @@ function deleteProj(id){
   if(currentUser?.role!=='Administrador'){alert('Solo el administrador puede eliminar proyectos.');return;}
   const pwd=prompt('Ingresa la contraseña de supervisor para eliminar el proyecto:');
   if(pwd===null)return;
-  if(pwd!==SYS.supervisorPassword){alert('Contraseña incorrecta.');return;}
+  if(!pwdMatches(pwd,SYS.supervisorPasswordHash)){alert('Contraseña incorrecta.');return;}
   const p=projects.find(x=>x.id===id);
   if(!p)return;
   if(!confirm(`¿Eliminar el proyecto "${p.name}" permanentemente? Esta acción no se puede deshacer.`))return;
@@ -2282,9 +2412,11 @@ function tryAutoLoginFromNewWin(){
 function tabClick(e, t){
   if(e.metaKey || e.ctrlKey){
     if(curProj){
+      // VUL-034: ya no se escribe la contraseña en localStorage para el auto-login.
+      // Con Cloudflare Access la ventana nueva se autentica sola con la cookie CF_Authorization
+      // (bootstrapCloudflareAuth), así que el auto-login por credencial ya no hacía falta.
       localStorage.setItem('siscon_new_win',JSON.stringify({
-        projectId:curProj.id, tab:t, ts:Date.now(),
-        autoLogin: currentUser ? {username:currentUser.username, password:currentUser.password} : null
+        projectId:curProj.id, tab:t, ts:Date.now()
       }));
       window.open(window.location.href,'_blank');
     }
@@ -8052,7 +8184,7 @@ function confirmUnsavedYes(){ closeModal(); const cb=_unsavedCb; _unsavedCb=null
 // ════════════════════════════════════════════════════════════
 const ID_TYPES=['Cédula Nacional','DIMEX','Pasaporte','Carnet de Refugiado'];
 let _authPending=null;
-function isAdminPwd(pwd){ if(pwd===SYS.supervisorPassword)return true; return SYS.users.some(u=>(u.role==='Administrador'||u.role==='Supervisor')&&u.password===pwd); }
+function isAdminPwd(pwd){ if(pwdMatches(pwd,SYS.supervisorPasswordHash))return true; return (SYS.users||[]).some(u=>(u.role==='Administrador'||u.role==='Supervisor')&&pwdMatches(pwd,u.passwordHash)); }
 function houseLogAdd(houseId,action,reason){
   const h=curProj&&curProj.houses.find(x=>x.id===houseId); if(!h)return;
   if(!h.log)h.log=[];
@@ -11835,7 +11967,7 @@ async function sendChat(){
   const systemContent=`Eres el asistente de la app de proyectos Siscon. Tienes acceso completo a todos los datos de la app. Fecha actual: ${new Date().toLocaleDateString('es-CR')}.
 
 DATOS COMPLETOS DE LA APP:
-${JSON.stringify({projects, SYS:{exchangeRate:SYS.exchangeRate,supervisorPassword:undefined}, activityLog:activityLog.slice(-100)},null,0)}
+${JSON.stringify({projects, SYS:{exchangeRate:SYS.exchangeRate}, activityLog:activityLog.slice(-100)},null,0)}
 
 Responde siempre en español. Puedes calcular totales, analizar tendencias, buscar facturas por fecha, comparar proyectos, etc. Montos con símbolo $ y comas de miles; porcentajes con %.`;
   try{

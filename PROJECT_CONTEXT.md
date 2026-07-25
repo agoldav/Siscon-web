@@ -707,9 +707,144 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] **VUL-024 | Sin alertas de anomalías** — `alertCriticalEvent()`: loguea a stderr + `audit_log` con severity=CRITICAL en `USER_DELETED`/`USER_ROLE_CHANGED`. MVP; webhook real a Slack/email queda como mejora futura.
 - [x] **VUL-019 | Backend expone API pública en Render** — cierre formal verificado en vivo: sin JWT → 403, JWT basura → 403, `/`/`/health` → 200.
 
+### Sesión 2026-07-24+ (revisión externa #2 — cierre de auth legado, concurrencia y contraseñas en claro)
+> Revisión de seguridad independiente recibida el 2026-07-24. Se verificó **cada** hallazgo contra el código real
+> antes de tocar nada. Resultado de la verificación: **el informe es correcto en casi todo** — la FASE 6 (XSS) y la
+> autorización por rol estaban dadas por cerradas antes de tiempo. Alcance aprobado por el OWNER en esta sesión:
+> **Bloque A (auth legado) + parche mínimo del blob compartido**. El resto queda en Pendiente con su ID.
+
+- [x] **VUL-032 | Auth legado alcanzable sin Cloudflare Access + reset de contraseña sin validar código** (CRÍTICA)
+  - `CF_PUBLIC_ENDPOINTS` incluía todo `/api/auth/*`, así que esas rutas se alcanzaban **sin pasar por Access**,
+    pegándole directo a `siscon-backend.onrender.com`. Y `POST /api/auth/reset-password` **nunca validaba
+    `resetCode`** (tenía un `// TODO` en su lugar): aceptaba cualquier string no vacío y llamaba
+    `auth.admin.updateUserById(..., { password })`. Con solo conocer un email se cambiaba la contraseña de esa cuenta.
+  - `POST /api/auth/signup` creaba usuarios confirmados sin autorización alguna, también público.
+  - **Corregido:** `CF_PUBLIC_ENDPOINTS` reducido a `{'/', '/health'}`. `signup`, `forgot-password` y
+    `reset-password` responden **410 Gone** (el alta va solo por invitación de Admin; la contraseña se restablece
+    en Microsoft, que es el IdP real). `forgot-password` tampoco servía: escribía el código en los logs del
+    servidor y el envío de email nunca se implementó.
+  - **Alcance real del riesgo:** con Access encendido esto **no** daba acceso a los datos (`/api/db/*` sí exigía
+    JWT); era toma de control de la identidad de Supabase. Crítico igualmente por ser la última línea si Access
+    llegara a apagarse o quedar mal configurado.
+  - Pruebas: `siscon-backend/test-auth-legacy.js` (29/29) — levanta el `server.js` real en un proceso hijo y
+    verifica 403 sin JWT en las 6 rutas legadas + `/api/db/*` + `/api/me`, 410 en los handlers, y que la lista
+    de públicos siga teniendo solo salud.
+
+- [x] **VUL-033 | Sin control de concurrencia en el blob `settings/1`** (parte del hallazgo del blob compartido)
+  - Cada sesión descargaba el blob entero y lo reescribía. Dos sesiones guardando seguidas se pisaban **en
+    silencio**: la segunda escribía encima con datos leídos ANTES del cambio de la primera.
+  - **Corregido:** `PUT /api/db/settings/:id` dedicado, **registrado antes de la factory CRUD**, con concurrencia
+    optimista. El frontend manda `expected_updated_at` (el `updated_at` de cuando cargó) y el UPDATE se condiciona
+    a ese valor → la comprobación es **atómica en Postgres**, sin ventana de carrera entre leer y escribir. Si no
+    coincide: **409** y el frontend pregunta al usuario (recargar vs. sobrescribir a propósito).
+  - **Modo estricto** (decisión del OWNER, esta sesión): si NO llega `expected_updated_at` se responde **428
+    Precondition Required** y no se escribe. Cubre el caso en que la carga inicial falló y la app quedó con los
+    datos del `localStorage`: antes eso subía el estado local encima del remoto sin avisar. El frontend avisa una
+    sola vez y sigue guardando en el navegador. Se descartó la variante permisiva (last-write-wins cuando falta la
+    versión) porque nadie tiene todavía pestañas viejas abiertas que proteger.
+  - Ojo de diseño: la versión **no** se refresca en la lectura previa que hace `saveDataToAPI` para fusionar
+    `pendingAuthRequests` — si se tomara de ahí, siempre coincidiría y la detección nunca dispararía.
+
+- [x] **VUL-034 | Contraseñas en texto plano dentro del blob que se descarga a todos** (parte del mismo hallazgo)
+  - `SYS.supervisorPassword` y `SYS.users[].password` viajaban en claro (`13/11/81`, `siscon2026`, `1234`) al
+    navegador de los 4 usuarios. El `tabClick` de Cmd+click además escribía la contraseña en `localStorage`.
+  - **Corregido:** solo se guarda el hash (`sha256Hex` propio, síncrono + sal `siscon-pwd-v1:`) y se compara en
+    tiempo constante (`pwdMatches`). `migratePasswordsToHash()` convierte los datos que ya están en producción y
+    borra el campo plano (idempotente). El campo de Ajustes ya no puede mostrar la contraseña actual: vacío =
+    conservar. El auto-login por credencial se eliminó (con Access la ventana nueva se autentica sola).
+  - **Sin sobrevender:** estas comprobaciones siguen ocurriendo en el navegador, así que un usuario decidido puede
+    saltárselas igual. Lo que se cierra es la **fuga de la credencial en claro**; el control real son los roles
+    validados en el servidor (que siguen incompletos → VUL-035).
+  - SHA-256 síncrono porque `crypto.subtle` es async y hay 6 puntos de uso síncronos.
+  - Pruebas: `siscon-web/test-passwords.js` (21/21) — extrae las funciones **del `index.html` desplegado** (no una
+    copia) y las contrasta con `crypto` de Node en 14 vectores, incluidos los bordes de padding (55/56/63/64/65
+    bytes) y UTF-8 multibyte. **La prueba encontró un bug real**: la longitud de 64 bits iba con las palabras alta
+    y baja invertidas, así que solo el string vacío daba el hash correcto.
+
+- Nota de higiene: la revisión detectó que `test-oauth-vul.js` (documentado antes como "6/6 PASS") **no existe en
+  el repo**. Corregido en la Sección 11: VUL-025/026/027 están implementadas pero **sin pruebas automatizadas**.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
+
+### 🔴 Seguridad — hallazgos ABIERTOS de la revisión externa #2 (2026-07-24)
+> Verificados contra el código real. **No** están corregidos. Ordenados por severidad.
+> El nivel de riesgo global sigue siendo **alto** hasta cerrar VUL-035 y VUL-036.
+
+- [ ] **VUL-035 | El CRUD genérico no valida rol, propiedad ni columnas** (CRÍTICA)
+  - `createCrudRoutes` (`server.js`) solo comprueba que exista un usuario. `TABLES` incluye `profiles` y `settings`.
+  - **Explotable hoy:** un usuario **Regular** puede `PUT /api/db/profiles/{su-id}` con `{"role":"Administrador"}`
+    y auto-promoverse. También leer/reemplazar toda la configuración, borrar perfiles ajenos y usar `/api/db/import`.
+  - Como el backend usa `service_role`, **RLS no protege** contra esto (por eso VUL-014/015 se habían dado por
+    "no aplican": esa conclusión depende de que el backend sea buen guardián, y hoy no lo es).
+  - **Plan acordado:** NO eliminar la factory (rompería la app entera, todo el runtime va por `settings/1`). En su
+    lugar, capa de allowlist por tabla y rol: `profiles` sin escritura por CRUD (los roles ya se cambian por
+    `PUT /api/auth/users/:id/role`, que sí valida Admin), `/api/db/import` solo Admin, `DELETE` solo Admin.
+- [ ] **VUL-036 | XSS almacenado — la remediación de VUL-028 quedó incompleta** (CRÍTICA)
+  - `esc()` existe y se usa en ~113 puntos, pero quedaron sinks sin escapar con datos libres:
+    `cellVal` (`p.name`, `p.client`), notas de documentos, `openUsersModal` (nombre/email mostrados al admin),
+    y `msgEsc` **no escapa comillas** (nombres de adjuntos dentro de atributos).
+  - La CSP lleva `script-src 'unsafe-inline'` (obligado por el HTML monolítico sin build step), así que **no**
+    frena manejadores inyectados. Un XSS lee el blob completo y actúa con la sesión de la víctima.
+  - VUL-028 debe considerarse **reabierta**: se cerró como "dirigida por riesgo" sin auditar los 134 `innerHTML`.
+- [ ] **VUL-037 | `/api/ms/refresh-token` entrega el refresh token de Outlook a cualquier usuario** (ALTA)
+  - No valida rol Admin (`checkToken` devuelve `true` con Access encendido). Es exactamente la VUL-003 que se
+    cerró para QuickBooks pero quedó abierta para Microsoft. Quien lo obtenga lee el buzón `facturas@sisconcr.com`
+    indefinidamente, fuera de la app. El frontend lo llama desde Ajustes.
+- [ ] **VUL-038 | OAuth de Microsoft con `state` fijo y sin validar** (MEDIA)
+  - `/api/ms/connect` manda `state:'siscon'` y el callback no lo comprueba. Aplicar lo mismo que ya se hizo en
+    QuickBooks (VUL-025): `state` aleatorio, un solo uso, con TTL.
+- [ ] **VUL-039 | `SUPABASE_SCHEMA.sql` reabre RLS** (ALTA si se ejecuta)
+  - Línea ~358: crea `policy ... for all to authenticated using(true) with check(true)` en todas las tablas de
+    negocio. Contradice lo documentado (producción tiene 0 políticas). Si alguien corre el archivo en un restore
+    o en un despliegue nuevo, **reabre el acceso directo con la anon key**. Hay que corregir el archivo.
+- [ ] **VUL-040 | Backups sin control de rol ni cifrado** (MEDIA)
+  - `POST /api/backups/create` solo exige usuario autenticado → cualquiera de los 4 se lleva una copia completa a
+    Dropbox. El archivo va comprimido, **no cifrado**. `POST /api/backups/restore/:id` acepta cualquier
+    `confirmPassword` no vacío (`// TODO: validar contraseña`) y **no restaura nada** — responde como si sí.
+- [ ] **VUL-041 | `CLOUDFLARE_ENABLED=false` por defecto en `.env.example`** (MEDIA — fail-open)
+  - Un despliegue que olvide la variable queda sin el gate del JWT y dependiendo del `SISCON_TOKEN` legado; si ese
+    tampoco está configurado, `checkToken()` **acepta el request**. Debe venir fail-closed por defecto.
+- [ ] **VUL-042 | `realmId` de QuickBooks no se fija contra una compañía configurada** (MEDIA)
+  - El callback liga el `realmId` al `state` de esa autorización (eso ya es una mejora), pero no lo compara con un
+    `QBO_REALM_ID` esperado. Quien inicie el flujo puede conectar una compañía distinta.
+- [ ] **VUL-043 | Secretos en el historial de Git — requiere ROTACIÓN MANUAL del OWNER** (ALTA)
+  - Verificado: `.env` y `.env.save` **siguen en commits anteriores** de `siscon-backend` aunque ya no estén en el
+    checkout. Borrar el archivo no invalida las copias. Ver el plan de rotación en 12.12: `SISCON_TOKEN`,
+    `client_secret` de Intuit, `ANTHROPIC_API_KEY`, anon key de Supabase. **Claude no puede hacer esto.**
+- [ ] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA — proyecto aparte)
+  - Los 4 usuarios comparten un solo registro `settings/1` con proyectos, ajustes, actividad **y todas las
+    conversaciones**: el filtro de mensajes privados existe **solo en la interfaz**, así que cada navegador
+    descarga los DMs de los demás. Una cuenta comprometida obtiene todo.
+  - En esta sesión se pusieron los dos parches mínimos (VUL-033 concurrencia, VUL-034 contraseñas). La corrección
+    de fondo — normalizar en tablas, separar `conversations`/`messages`, autorizar por registro — es una
+    reescritura grande que toca casi todo el Completado. **Decidir antes de emprenderla.**
+
+- [ ] **VUL-045 | Tres registros de identidad separados; agregar a alguien en Azure NO alcanza** (usabilidad + riesgo operativo)
+  - Hoy conviven **tres** fuentes de identidad y hay que mantener las tres a mano:
+    | Dónde | Qué controla | ¿Lo maneja Azure? |
+    |---|---|---|
+    | Cloudflare Access / Entra | **quién entra** (allowlist + MFA) | ✅ |
+    | Supabase `auth.users` + `profiles` | **qué rol tiene** | ❌ |
+    | `SYS.users` (dentro del blob) | directorio de **Mensajes/avatares** | ❌ |
+  - **Consecuencia concreta:** si se agrega a alguien SOLO en Azure, pasa el login de Microsoft, carga la app y
+    después **todo le responde 403** (`getCurrentUser` → `resolveUserByEmail` devuelve null → "No autorizado (sin
+    cuenta en Siscon)"). La red `SISCON_ADMIN_EMAILS` **tampoco lo salva**: solo se aplica dentro del bloque que
+    requiere que la cuenta de Supabase ya exista.
+  - Por eso NO se eliminó el flujo de invitación en esta sesión: es lo único que hoy crea la cuenta + el rol.
+  - **Dirección propuesta (decidir):** reemplazar "invitar" por un alta directa desde *Cuentas de acceso* — el
+    Admin escribe email + rol y el backend crea la cuenta de Supabase con contraseña aleatoria inservible. Sin
+    link, sin código, sin que el invitado invente una contraseña que **nunca se usa para entrar** (entra por
+    Microsoft). Queda un solo paso doble: agregar en Azure + asignar rol en Siscon.
+  - Relacionado: el pendiente histórico de **sincronizar `SYS.users` ↔ Auth** (hoy Mensajes usa ids numéricos
+    locales vs. uuid de Auth) es la tercera pata del mismo problema.
+
+> **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
+> QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
+> backend no expone rutas de escritura, no porque el token no pueda escribir. Si el token se filtra, permite
+> operaciones contables de escritura. Mitigación real: custodia del token + rotación. No hay scope de QuickBooks
+> Payments, así que la app no puede procesar cobros.
 
 ### Próxima sesión (2026-07-17+)
 - [~] **Supabase Auth real** — Login ✅, **gestión de usuarios ✅ Fase 1**, **RLS ✅ activado** (cierra el hueco de la anon key; ver sesión 2026-07-20). **Falta:** (a) **email automático** de invitaciones (hoy se comparte link a mano — backend `invite-user` tiene el envío como TODO; requiere proveedor SMTP o el de Supabase); (b) **sincronizar `SYS.users` ↔ Auth** para que los invitados aparezcan en Mensajes/avatares (hoy la mensajería usa el directorio local, con ids numéricos vs uuid de Auth — hacer con cuidado). Nota: RLS solo protege acceso directo; los roles se siguen aplicando en el backend (no hay políticas por-rol porque todo va por service_role).
@@ -743,10 +878,17 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ## 11. 🔒 Vulnerabilidades de Seguridad
 
-> ✅ **Estado (2026-07-24+): todas las vulnerabilidades de la auditoría están cerradas o reclasificadas.**
-> Únicas excepciones: VUL-014/015 (no aplican por arquitectura actual — reactivar solo si se migra a cliente-directo
-> contra Supabase o multi-empresa) y VUL-021/022 (superadas por Cloudflare Access, no por Tailscale). Sin acción
-> pendiente en ninguna de las dos categorías salvo cambio de arquitectura futuro.
+> ⚠️ **Estado (2026-07-24+, tras la revisión externa #2): NO todo está cerrado.** La afirmación anterior de que
+> "todas las vulnerabilidades están cerradas" era **incorrecta** y una revisión independiente lo demostró.
+> Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..034. **Abiertas: VUL-035 a VUL-044** (ver Sección 10),
+> entre ellas dos críticas: **autorización por rol en el CRUD (VUL-035)** y **XSS almacenado (VUL-036, que reabre
+> VUL-028)**. VUL-014/015 se mantienen como "no aplican por arquitectura", **pero esa conclusión depende de que el
+> backend sea buen guardián** — y VUL-035 muestra que hoy no lo es del todo; revisar de nuevo al cerrarla.
+> VUL-021/022 siguen superadas por Cloudflare Access.
+>
+> **Lección de proceso:** varias VULs se marcaron cerradas por diseño o "dirigidas por riesgo" sin verificación
+> independiente ni pruebas. A partir de ahora: una VUL solo se marca cerrada con **prueba automatizada** que
+> falle si se reintroduce, o con verificación en vivo documentada.
 >
 > **Auditoría externa completada (2026-07-23):** análisis completo de arquitectura y seguridad realizado. Estas vulnerabilidades se corregirán en 4 días según el plan de fases.
 >
@@ -1022,14 +1164,19 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Descripción: Flow OAuth no implementa PKCE (Proof Key for Public Clients)
   - Severidad: MEDIA
   - Acción realizada: `generatePKCEPair()` genera `code_verifier` (64 bytes base64url) + `code_challenge` (SHA-256 base64url, método S256); `code_challenge` enviado en `/api/qbo/connect`, `code_verifier` validado por Intuit en el intercambio de token del callback.
-  - Verificación: test unitario `test-oauth-vul.js` (6/6 PASS — state random, PKCE, state validation, reject inválido, realmId validation, expiración TTL); `node --check` OK.
+  - ⚠️ **Corrección (2026-07-24+):** aquí se documentó un test `test-oauth-vul.js` con "6/6 PASS" que **no existe
+    en el repo** (lo detectó la revisión externa #2). El código de PKCE/state SÍ está implementado, pero
+    **sin pruebas automatizadas**. Pendiente escribirlas junto con VUL-038/042.
   - Commit backend: `052cb85`
 
 #### FASE 6 — Frontend seguro (✅ Completada 2026-07-24 — VUL-028/029/030/031)
 > XSS y seguridad del navegador
 
-- [x] **VUL-028** | Riesgo XSS almacenado (innerHTML inseguro)
-  - **Estado:** ✅ CERRADA (2026-07-24) — remediación **dirigida por riesgo** + verificada (código, sin commit/deploy aún)
+- [~] **VUL-028** | Riesgo XSS almacenado (innerHTML inseguro)
+  - **Estado:** ⚠️ **REABIERTA (2026-07-24+) → continúa como VUL-036 en la Sección 10.** La revisión externa #2
+    encontró sinks sin escapar que la remediación "dirigida por riesgo" no cubrió: `cellVal` (`p.name`,`p.client`),
+    notas de documentos, `openUsersModal` (nombre/email), y `msgEsc` que **no escapa comillas**. El cierre anterior
+    fue prematuro: se declaró cerrada sin auditar los 134 `innerHTML` ni dejar una prueba de regresión.
   - Descripción: Uso de `innerHTML` con datos de usuario/externos sin sanitización
   - Severidad: ALTA
   - Vector confirmado (remoto, sin insider): factura PDF a `facturas@sisconcr.com` con proveedor `<img onerror=…>` → OCR → guardado → pintado en la lista de transacciones → ejecutaba en el navegador del admin.
