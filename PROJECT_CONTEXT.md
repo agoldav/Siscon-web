@@ -852,6 +852,52 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   `test-backups-hardening` 27 (VUL-040 — incluye round-trip real de `encryptBackup()` contra `crypto` de Node).
   `siscon-web`: `test-passwords` 21 · `test-concurrency` 13 · `test-xss` 29.
 
+### Sesión 2026-07-24+ (incidente en vivo — login caído tras el hardening; causa real: DNS, no el código)
+> **Producción:** `app.sisconcr.com` quedó devolviendo 502 en el login para todos los usuarios. Investigado y
+> resuelto en la misma sesión. Deja una arquitectura ligeramente distinta a la documentada en Sección 12 — leer
+> antes de asumir que `api.sisconcr.com` sigue siendo la ruta real del tráfico.
+
+- **Síntoma:** tras el trabajo de seguridad de esta sesión, el login mostraba `Error del servidor (HTTP 502)` /
+  `Error verificando autenticación: 502`, de forma persistente (no solo una vez), en cualquier navegador.
+- **Diagnóstico descartado en el camino (por orden, cada uno con evidencia que lo tumbó):**
+  1. *Arranque en frío de Render (free tier)* — parecía encajar con un primer log de arranque limpio, pero el
+     backend seguía fallando incluso con `/health` respondiendo 200 de forma estable.
+  2. *Redeploys encadenados por los commits del `keep-alive.yml`* — real (cada push a `main` sí redeploya
+     Render), pero no explicaba que el error **persistiera** ya sin commits pendientes.
+  3. *Crash en el código autenticado de esta sesión* — hipótesis seria (nunca se pudo probar el camino con JWT
+     real contra producción), pero se descartó al ver que **Render no registraba ninguna petición nueva** en el
+     momento del fallo — la petición no estaba llegando siquiera al backend.
+- **Causa real, confirmada con `dig`/`nslookup`/`host` desde tres ángulos:** `api.sisconcr.com` (el destino del
+  rewrite en `vercel.json`) daba **NXDOMAIN** — el registro DNS no existe. `app.sisconcr.com` y la zona raíz
+  resolvían bien; solo faltaba el subdominio `api`. Con eso, Vercel fallaba instantáneo al intentar resolver el
+  destino del rewrite y devolvía 502 al navegador **sin que la petición tocara Render nunca** — coincide
+  exactamente con que los logs de Render no mostraran nada.
+- **Ruido aparte, no la causa:** a mitad de la investigación, Cloudflare mostró "San José, Costa Rica (SJO) —
+  Partially Re-routed / Under Maintenance" y el dashboard de Cloudflare quedó inalcanzable para el usuario
+  (incluso con VPN). Verificado en el status público de Cloudflare: es mantenimiento **programado** de ese punto
+  de presencia ("slight increase in latency"), y Dashboard/Access/DNS aparecían "Operational" a nivel global. No
+  se pudo confirmar relación causal con el NXDOMAIN; probablemente coincidencia de que el dashboard, servido
+  también desde/cerca de SJO, quedó inalcanzable justo cuando hacía falta para revisar el registro DNS.
+- **Mitigación de emergencia aplicada (con aprobación explícita, dado que tocaba producción):**
+  `vercel.json` → el rewrite de `/api/*` se cambió de `https://api.sisconcr.com/api/:path*` a
+  `https://siscon-backend.onrender.com/api/:path*`, saltándose el hop roto por completo. Es el mismo mecanismo de
+  "Plan B / seguro" ya documentado en la Sección 12.6/12.11 de este archivo (rewrite directo a Render), solo que
+  activado apuntando a Render en vez de a `api.sisconcr.com`. Funciona porque el header
+  `Cf-Access-Jwt-Assertion` ya llega adjunto a la petición desde el borde de Cloudflare al pasar por
+  `app.sisconcr.com`, y Vercel lo reenvía sin importar el destino del rewrite; el backend valida la firma del JWT,
+  no la ruta de red, y `CLOUDFLARE_ACCESS_AUD` ya acepta ambos AUDs desde el cutover anterior. Commit `76dc568`.
+- **Falsa alarma final:** tras el fix, una recarga mostró `428 missing_version` ("no se pudieron cargar los datos,
+  no se guardó en la nube") — exactamente el comportamiento fail-closed de VUL-033 funcionando como se diseñó.
+  Se agregó un log temporal (`[DIAG-settings-GET]`, commit `22134c3`) que confirmó que `settings/1.updated_at`
+  **sí** tenía un valor real y válido en la base de datos — descartando un bug de datos. En la siguiente recarga
+  cargó bien sin ningún error: fue transitorio, coincidiendo con el instante exacto del deploy de emergencia (muy
+  probablemente una ventana de propagación de borde en Vercel). El log de diagnóstico se quitó (commit `40e60d2`).
+- **⚠️ Decisión tomada con el OWNER — actualiza la Sección 12:** se deja el rewrite apuntando **directo a Render**
+  como configuración estándar, no como parche temporal. `api.sisconcr.com` como hop intermedio queda sin usarse
+  por ahora (una dependencia de DNS menos). **Pendiente:** cuando el OWNER recupere acceso al dashboard de
+  Cloudflare, investigar por qué desapareció (o si alguna vez existió de verdad) el registro DNS de `api`, y
+  confirmar que nada más en la arquitectura documentada en Sección 12 dependa de que ese hostname exista.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1449,6 +1495,13 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 ---
 
 ## 12. 🏗️ NUEVA ARQUITECTURA — Objetivo 4 días (2026-07-24 a 2026-07-27)
+
+> ⚠️ **Actualización 2026-07-24+ (incidente en vivo, ver Sección 9 al final de esta fecha):** el diagrama y las
+> referencias más abajo a `api.sisconcr.com` como destino del rewrite de Vercel **ya no reflejan lo desplegado**.
+> `api.sisconcr.com` dejó de resolver (DNS roto, causa aún sin diagnosticar) y tumbó el login para todos.
+> `vercel.json` ahora apunta el rewrite de `/api/*` **directo a `siscon-backend.onrender.com`**, decisión tomada
+> con el OWNER como configuración estándar (no como parche temporal) — una dependencia de DNS menos. Todo lo que
+> menciona `api.sisconcr.com` en esta sección describe la intención original de diseño, no el estado real actual.
 
 > **Decisión de arquitectura (corregida 2026-07-23 tras revisión crítica):** Opción A —
 > **Cloudflare Access como IdP único** (Microsoft Entra ID / Outlook 365), **backend valida el JWT de Access**
