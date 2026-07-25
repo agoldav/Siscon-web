@@ -1102,9 +1102,77 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - **Verificado:** sintaxis del `<script>` completo (`new Function`) sin errores; los ~60 nombres de función
   referenciados en `onclick=`/etc. resuelven a exactamente una definición; 0 referencias sueltas a
   `SYS.conversations`/`memberIds`/`senderId`/`readBy`/`msgConvs()` fuera de comentarios históricos.
-- **No verificado (requiere al OWNER):** prueba en vivo en el navegador con dos cuentas reales — confirmar que
-  A no ve ni puede leer/escribir conversaciones de B, que enviar/recibir/marcar-leído funciona de punta a
-  punta, y que el badge de no-leídos se actualiza. Sin esto, no pushear a producción.
+- **Verificado en vivo por el OWNER (2026-07-25/26):** probado en producción con dos cuentas reales
+  (Administrador + Regular, una invitada como guest de Azure AD para la prueba). Mensajería funcionando
+  correctamente extremo a extremo.
+- **Efecto secundario descubierto en esta misma prueba en vivo:** al aprobar una solicitud de material fuera
+  de presupuesto en una OC (flujo no relacionado a Mensajes), el usuario Regular recibió el diálogo de
+  conflicto de versión ("Otro usuario guardó cambios mientras trabajabas") al intentar guardar su OC. Causa:
+  `SYS.pendingAuthRequests` y `SYS.notifications` **seguían** en el blob compartido `settings/1` — igual que
+  `conversations` antes de esta sesión — así que aprobar la solicitud (que muta `projects` Y hasta ahora
+  también reescribía el arreglo de solicitudes) bastaba para chocar en versión con el guardado de la OC del
+  otro usuario, sin relación real entre ambas acciones. Esto llevó a retomar la segunda mitad de VUL-044,
+  acotada esta vez a `pendingAuthRequests`/`notifications` — ver sesión siguiente.
+
+### Sesión 2026-07-25/26 (VUL-044 parte 1.5 — pendingAuthRequests/notifications fuera del blob)
+> Motivada por el hallazgo en vivo de arriba. Alcance acotado a propósito (decisión del OWNER): NO se tocó
+> `projects`/`houses`/`transactions` (eso sigue siendo la normalización grande, sin fecha). Solo se sacó del
+> blob lo que causaba colisiones por acciones NO relacionadas entre sí: solicitudes de autorización y el
+> centro de notificaciones (este último, además, el disparador más frecuente — la app manda notificaciones
+> automáticas constantes de QB/Outlook/sistema).
+- [x] **Backend — tabla nueva `pending_auth_requests`:** columnas comunes (`type`, `status`, `requested_by`/
+  `requested_by_name`, `resolved_by`/`resolved_by_name`, `proj_id`/`proj_name`) + `data jsonb` catch-all para
+  los campos específicos de cada uno de los 5 tipos (ocId/matName/qty/price/houseId/comment, typeId/typeName,
+  houseId/houseNum, garId/garNum/materials[], vbNum/productId/houseName). Agregada a `SUPABASE_SCHEMA.sql`
+  (tabla + trigger de auditoría + `touch_updated_at` + RLS enable/force, mismo patrón que el resto) y a
+  `siscon-backend/migration-pending-auth-requests.sql` (incremental, idempotente, para correr ahora en el SQL
+  Editor de Supabase sin tocar el archivo maestro). **⚠️ Requiere que el OWNER corra esa migración en Supabase
+  antes de que las rutas nuevas funcionen** — si no, dan error de "relation does not exist".
+- [x] **Backend — rutas dedicadas** (no el CRUD genérico: la regla "Admin O Supervisor" para resolver no es
+  uno de los dos niveles que soporta `table-policy.js`): `GET`/`POST /api/db/pending_auth_requests` (cualquier
+  autenticado — mismo alcance que ya tenía en el blob), `PUT .../:id` (solo Administrador o Supervisor;
+  `resolved_by`/`resolved_by_name`/`resolved_at` los fija el servidor, nunca el body — antes esto SOLO se
+  validaba en el frontend, cualquier cuenta con JWT válido podía mandar un PUT crudo a `settings/1` y
+  auto-aprobarse), `DELETE .../:id` (solo Admin, sin uso hoy desde la UI). `requested_by`/`requested_by_name`
+  también los fija el servidor con la identidad del JWT.
+- [x] **Backend — `notifications`:** ya tenía tabla y CRUD genérico wireado, pero con la política DEFAULT
+  (admin-only) — no servía para el centro de notificaciones (100% compartido, cualquiera de los 4 crea/lee/
+  marca-leído/borra, igual que en el blob). Se agregó `TABLE_POLICY.notifications = {read:'any',create:'any',
+  update:'any',delete:'any'}` en `table-policy.js` — mismo alcance 1:1 que ya tenía, no una privilegio nuevo.
+- [x] **Pruebas:** `siscon-backend/test-pending-auth-requests.js` (20/20) — 403 sin JWT en las 4 rutas nuevas;
+  política de `notifications` verificada para los 3 roles × 4 acciones; `POST` no exige rol y fuerza
+  `status:'pendiente'` + `requested_by`/`requested_by_name` del JWT (no del body); `PUT` exige
+  `PENDING_AUTH_RESOLVABLE_ROLES` (exactamente `[Administrador, Supervisor]`, ni Regular ni vacío) y fija
+  `resolved_by`/`resolved_by_name` del JWT; `DELETE` exige Admin. `test-table-policy.js` actualizado: sacadas
+  `conversations`/`messages`/`pending_auth_requests`/`notifications` del grupo "tablas dormidas" (ya no
+  aplica — cada una tiene su propia política/ruta y su propio test dedicado). Suite completa del repo
+  re-corrida tras el cambio: **10 archivos, 258 pruebas, 0 fallas.**
+- [x] **Frontend:** `pendingAuthList()` pasó de leer `SYS.pendingAuthRequests` a una caché local
+  (`pendingAuthCache`) recargada del servidor; adaptador `pendingAuthFromRow`/`pendingAuthCreate`/
+  `pendingAuthResolve` traduce fila↔objeto plano en el borde para no tocar las ~10 funciones que ya leían
+  `req.matName`/`req.houseNum`/etc. directamente. Los 5 sitios de creación (`typeUnlockReq`,
+  `garSolicitarAprobacion`, `ocRequestExtraAuth`, `houseUnlockReq`, `vbSubmitMatAuth`) ahora son `async` y
+  crean la fila vía `POST` antes de continuar (el id ya no lo genera el cliente). `resolveExtraAuth` separa
+  las dos escrituras que antes iban juntas en un solo guardado de blob: `pendingAuthResolve` (fila propia,
+  falla sin tocar nada más si el rol no califica o alguien más ya la resolvió) y el `saveData()` que sigue
+  existiendo SOLO para el efecto real sobre `projects` (línea de OC, desbloqueo, garantía — eso sigue en el
+  blob, es la parte grande aún pendiente). El centro de notificaciones (`addNotif`/`notifRead`/
+  `notifMarkAllRead`/`notifDelete`/`notifBulkRead`/`notifBulkDelete`) pasó a una caché `notifCache` con las
+  mismas llamadas; nuevo `notifClearByLink()` reemplaza el filtro directo sobre `SYS.notifications`. Ambas
+  cachés se cargan al login (`checkPendingAuthOnLogin`) y se refrescan cada 15s dentro del polling ya
+  existente (`pollPendingAuth`) — de paso, ahora los eventos automáticos de OTRA sesión (QB/Outlook) también
+  se ven sin recargar la página, algo que antes no pasaba. Se eliminó `_mergeAuthReqs()` y el pre-fetch de
+  `settings/1` que hacía cada guardado antes de escribir (ya no hace falta fusionar nada: la solicitud no
+  vive más en lo que ese guardado escribe). Se renombró `msgApi`→`apiFetch` (ya no es solo de Mensajes, lo
+  usan las tres cachés).
+- **Verificado:** sintaxis del `<script>` completo; 0 referencias sueltas a `SYS.notifications`/
+  `SYS.pendingAuthRequests`/`_mergeAuthReqs` fuera de comentarios; las ~30 funciones tocadas resuelven a
+  exactamente una definición.
+- **No verificado (requiere al OWNER):** (a) correr `migration-pending-auth-requests.sql` en Supabase antes
+  de desplegar el backend; (b) repetir la prueba en vivo que encontró el bug — aprobar un material fuera de
+  presupuesto desde el Admin mientras el Regular tiene una OC distinta abierta — y confirmar que YA NO
+  aparece el diálogo de conflicto por esa causa (sigue pudiendo aparecer si de verdad hay dos personas
+  editando la misma OC/proyecto a la vez — eso es la mitad grande de VUL-044, todavía pendiente).
 
 ## 10. ⏳ Pendiente
 
@@ -1133,12 +1201,18 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Los 4 usuarios comparten un solo registro `settings/1` con proyectos, ajustes, actividad **y todas las
     conversaciones**: el filtro de mensajes privados existe **solo en la interfaz**, así que cada navegador
     descarga los DMs de los demás. Una cuenta comprometida obtiene todo.
-  - **Decisión del OWNER (2026-07-25):** alcance dividido en dos.
-    1. **✅ CERRADA — parte 1/2 (2026-07-25, código sin desplegar aún):** `conversations`/`messages` separadas
-       a sus propias tablas con autorización por participante en el backend. Ver detalle completo en Sección 9
-       (sesión 2026-07-25 — VUL-044 parte 1) y Sección 11.2. **Pendiente antes de pushear/deployar:**
-       verificación en vivo con dos cuentas reales (Claude no tiene credenciales de los 4 usuarios para
-       probarlo end-to-end) — ver nota abajo.
+  - **Decisión del OWNER (2026-07-25):** alcance dividido en dos, y la parte 1 terminó dividiéndose otra vez
+    tras un hallazgo en producción (ver abajo).
+    1. **✅ CERRADA y desplegada (2026-07-25/26):** `conversations`/`messages` separadas a sus propias tablas
+       con autorización por participante en el backend. Verificado en vivo por el OWNER con dos cuentas
+       reales — funcionando correctamente. Ver Sección 9 (sesión 2026-07-25 — VUL-044 parte 1) y Sección 11.2.
+    1.5. **✅ Código y pruebas listos (2026-07-25/26), pendiente correr migración SQL + verificar en vivo:**
+       la prueba en vivo de la parte 1 destapó que `pendingAuthRequests`/`notifications` seguían en el blob y
+       podían chocar en versión con CUALQUIER guardado no relacionado (ej. aprobar un material de una OC
+       colisionando con el guardado de otra OC distinta). Se sacaron a sus propias tablas — ver Sección 9
+       (sesión VUL-044 parte 1.5) y Sección 11.2. **Pendiente antes de pushear/deployar:** (a) correr
+       `siscon-backend/migration-pending-auth-requests.sql` en Supabase, (b) repetir la prueba en vivo que
+       encontró el bug y confirmar que ya no ocurre por esta causa.
     2. **PENDIENTE (después, sin fecha):** normalizar el resto del blob (`projects`, `houses`, `transactions`,
        etc.) en tablas reales con autorización por registro — reescritura grande que toca casi todo lo
        Completado. **No empezar sin retomarlo explícitamente con el OWNER.**
@@ -1186,8 +1260,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..036 y 039. **Ya no queda ninguna CRÍTICA abierta.**
 > Abiertas: VUL-043 (ALTA, requiere al OWNER) y la mitad pendiente de VUL-044 (normalizar el resto del blob,
 > ver Sección 10). VUL-045 cerrada 2026-07-25 (alta directa de usuarios).
-> VUL-044 parte 1/2 (conversations/messages fuera del blob) — código y pruebas listos 2026-07-25, **NO
-> desplegado**: falta verificación en vivo con dos cuentas reales (Sección 9, sesión 2026-07-25).
+> VUL-044 parte 1 (conversations/messages fuera del blob) — ✅ cerrada y desplegada, verificada en vivo por
+> el OWNER 2026-07-25/26 (Sección 9). VUL-044 parte 1.5 (pendingAuthRequests/notifications fuera del blob) —
+> código y pruebas listos, **NO desplegado**: falta correr la migración SQL en Supabase y repetir la prueba
+> en vivo que encontró el bug (Sección 9, sesión VUL-044 parte 1.5).
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.

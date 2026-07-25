@@ -954,22 +954,6 @@ if(!window._fetchWrappedCF){
   };
 }
 
-// Merge de solicitudes de autorización local↔remoto: una resolución (aprobado/rechazado)
-// siempre gana sobre 'pendiente', sin importar qué sesión guarda de último.
-function _mergeAuthReqs(remote,local){
-  const map=new Map();
-  (remote||[]).forEach(r=>{ if(r&&r.id) map.set(r.id,r); });
-  (local||[]).forEach(r=>{
-    if(!r||!r.id) return;
-    const ex=map.get(r.id);
-    if(!ex){ map.set(r.id,r); return; }
-    const exRes=ex.status&&ex.status!=='pendiente', myRes=r.status&&r.status!=='pendiente';
-    if(myRes&&!exRes) map.set(r.id,r);
-    else if(myRes&&exRes) map.set(r.id,(r.resolvedAt||0)>=(ex.resolvedAt||0)?r:ex);
-    // si el local está pendiente y el remoto resuelto → se queda el remoto
-  });
-  return Array.from(map.values());
-}
 // VUL-033: control de concurrencia optimista sobre el blob settings/1.
 // `_settingsVersion` es el `updated_at` que traía el registro la última vez que cargamos o
 // guardamos. Se manda en cada PUT; si el servidor ve otro valor, alguien más escribió en el
@@ -1043,18 +1027,9 @@ function saveDataToAPI(forzar){
 async function _saveDataToAPICore(forzar){
   if(!_sbToken || !currentUser) return false;
   try{
-    // Antes de subir, traer las solicitudes remotas y fusionarlas para no pisar resoluciones de otras sesiones
-    try{
-      const r0=await fetch(`${BACKEND_URL}/api/db/settings/1`,{headers:{'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'}});
-      if(r0.ok){
-        const rec0=await r0.json();
-        let d0=rec0.data; if(typeof d0==='string') d0=JSON.parse(d0);
-        const remoteReqs=(d0&&d0.SYS&&d0.SYS.pendingAuthRequests)||[];
-        SYS.pendingAuthRequests=_mergeAuthReqs(remoteReqs,SYS.pendingAuthRequests);
-        // OJO: la versión NO se refresca aquí a propósito. Si tomáramos el updated_at de esta
-        // lectura, siempre coincidiría y la detección de conflictos nunca dispararía.
-      }
-    }catch(e){/* sin red: se guarda lo local igual */}
+    // VUL-044 (parte 1.5): antes había que traer y fusionar SYS.pendingAuthRequests remoto antes
+    // de cada guardado, para no pisar una resolución hecha en otra sesión — ya no hace falta:
+    // esas solicitudes viven en su propia tabla, resueltas por su propio endpoint, no por este save.
     const projectsClean=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
     const body={data:{projects:projectsClean,SYS,activityLog}};
     if(forzar) body.force=true; else body.expected_updated_at=_settingsVersion;
@@ -1146,8 +1121,7 @@ function applyDefaults(sys){
   if(SYS.googleMapsKey===undefined)SYS.googleMapsKey='AIzaSyCFKPbq02rnkIAe3cnzSeS7ztSoVP8TuTA';
   if(!SYS.stats)SYS.stats={open:true,scope:'todos',time:'todo',from:'',to:'',showGastado:false,showPendiente:false,cashWindow:'1m',cashProjects:null,unbilledProjects:null};
   if(!SYS.cotizaciones)SYS.cotizaciones=[];
-  if(!SYS.notifications)SYS.notifications=[];
-  if(!SYS.pendingAuthRequests)SYS.pendingAuthRequests=[];
+  // notifications/pendingAuthRequests (VUL-044 parte 1.5): ya no viven en SYS, ver notifCache/pendingAuthCache.
 }
 
 function loadData(){
@@ -2559,21 +2533,16 @@ function openCreateType(typeId){
   renderBreadcrumb(); renderCreateType();
 }
 // Solicita desbloqueo de tipo (igual que houseUnlockReq pero para tipos)
-function typeUnlockReq(typeId){
+async function typeUnlockReq(typeId){
   const t=curProj.types.find(x=>x.id===typeId); if(!t)return;
   const req={
-    id:'unlock-type-'+Date.now(),
     type:'type-unlock',
-    status:'pendiente',
-    requestedBy:currentUser?currentUser.name:'Usuario',
-    requestedAt:Date.now(),
     projId:curProj?curProj.id:null,
     projName:curProj?curProj.name:'',
     typeId:typeId,
     typeName:t.name||''
   };
-  pendingAuthList().push(req);
-  saveData();
+  try{ await pendingAuthCreate(req); }catch(e){ showToast('No se pudo enviar la solicitud: '+e.message); return; }
   showToast('✅ Solicitud de desbloqueo enviada al administrador');
   logAction(`Solicitud de desbloqueo de tipo "${t.name}" enviada`,'log-create','Tipos',null,{typeName:t.name});
 }
@@ -4747,25 +4716,22 @@ function garBudgetMaterials(g){
   }));
   return out;
 }
-function garSolicitarAprobacion(gid){
+async function garSolicitarAprobacion(gid){
   const g=garFind(gid); if(!g||!g.budget){ alert('Genera el presupuesto primero.'); return; }
   if(g.approval&&g.approval.status==='pendiente'){ alert('Ya hay una solicitud de aprobación pendiente para esta garantía.'); return; }
   if(g.approval&&g.approval.status==='aprobado'){ alert('Esta garantía ya fue aprobada.'); return; }
   const b=g.budget;
   const mats=garBudgetMaterials(g);
-  const req={
-    id:'auth-'+Date.now(),
+  const reqLocal={
     type:'garantia-budget',
-    status:'pendiente',
-    requestedBy:currentUser?currentUser.name:'Usuario',
-    requestedAt:Date.now(),
     projId:curProj?curProj.id:null,
     projName:curProj?curProj.name:'',
     garId:g.id, garNum:g.num, house:g.house||'', desc:g.desc||'',
     billable:!!b.billable, ivaOn:!!b.ivaOn, iva:b.iva||0, total:b.salePrice||0,
     materials:mats.map(m=>({name:m.name, qty:m.qty, unit:m.unit, price:m.price, subtotal:m.subtotal}))
   };
-  pendingAuthList().push(req);
+  let req;
+  try{ req=await pendingAuthCreate(reqLocal); }catch(e){ showToast('No se pudo enviar la solicitud: '+e.message); return; }
   g.approval={ status:'pendiente', reqId:req.id, requestedAt:req.requestedAt };
   saveData();
   logAction(`Solicitud de aprobación de Garantía ${g.num} enviada`,'log-create','Garantías',null,{num:g.num,total:Math.round(b.salePrice||0),billable:b.billable});
@@ -5631,9 +5597,50 @@ function ocRefreshTotals(){
 }
 
 // ========== EXTRA / OUT-OF-BUDGET ==========
-// ── Solicitudes de autorización pendientes (persisten en SYS) ─────────────────
+// ── Solicitudes de autorización pendientes ─────────────────────────────────────
+// VUL-044 (parte 1.5): YA NO viven en SYS.pendingAuthRequests. Crear o resolver una solicitud
+// forzaba guardar el blob `settings/1` COMPLETO, chocando en versión con cualquier otro usuario
+// guardando cualquier cosa no relacionada (ej. una OC) — el caso real que motivó este cambio.
+// Ahora cada solicitud es su propia fila en `pending_auth_requests`. `pendingAuthCache` es un
+// espejo local plano (mismo shape de siempre: req.matName, req.houseNum, etc.) para no tocar
+// las ~10 funciones que ya leen `req.*` así — los adaptadores de abajo traducen fila↔objeto
+// plano en el borde (creación/lectura), no en cada sitio de uso.
 let _extraReminderIv=null;
-function pendingAuthList(){ return SYS.pendingAuthRequests||(SYS.pendingAuthRequests=[]); }
+let pendingAuthCache=[];
+function pendingAuthList(){ return pendingAuthCache; }
+function pendingAuthFromRow(row){
+  return { ...(row.data||{}), id:row.id, type:row.type, status:row.status,
+    requestedBy:row.requested_by_name, requestedById:row.requested_by,
+    requestedAt:row.created_at?new Date(row.created_at).getTime():Date.now(),
+    resolvedBy:row.resolved_by_name, resolvedById:row.resolved_by,
+    resolvedAt:row.resolved_at?new Date(row.resolved_at).getTime():null,
+    projId:row.proj_id, projName:row.proj_name };
+}
+async function pendingAuthLoad(){
+  if(!currentUser) return;
+  try{
+    const d=await apiFetch('GET','/api/db/pending_auth_requests');
+    pendingAuthCache=(d.requests||[]).map(pendingAuthFromRow);
+  }catch(e){ console.warn('pendingAuthLoad',e); }
+}
+// Crea la solicitud en el servidor (id/requestedBy/requestedAt los fija el servidor) y la agrega
+// a la caché local. `local` trae el shape plano de siempre (type + campos específicos del tipo).
+async function pendingAuthCreate(local){
+  const {type,projId,projName}=local;
+  const row=await apiFetch('POST','/api/db/pending_auth_requests',{type,proj_id:projId,proj_name:projName,data:local});
+  const obj=pendingAuthFromRow(row);
+  pendingAuthCache.push(obj);
+  return obj;
+}
+// Resuelve (aprobado/rechazado) en el servidor — servidor valida rol Admin/Supervisor y fija
+// resolvedBy/resolvedAt. "ver_luego" no llama esto (el status sigue 'pendiente').
+async function pendingAuthResolve(reqId,status){
+  const row=await apiFetch('PUT',`/api/db/pending_auth_requests/${encodeURIComponent(reqId)}`,{status});
+  const obj=pendingAuthFromRow(row);
+  const idx=pendingAuthCache.findIndex(r=>r.id===reqId);
+  if(idx>-1) pendingAuthCache[idx]=obj; else pendingAuthCache.push(obj);
+  return obj;
+}
 
 // ===== Comprar producto DENTRO de presupuesto (sin autorización) =====
 // Materiales del presupuesto de una casa que aún tienen cantidad disponible para pedir.
@@ -5759,7 +5766,7 @@ function ocOpenExtraModal(){
     </div>`;
   document.getElementById('modal').classList.remove('hidden');
 }
-function ocRequestExtraAuth(){
+async function ocRequestExtraAuth(){
   // La OC debe existir guardada: si no, la solicitud viajaría sin id real y el admin no podría agregar el material
   const _ocIdReal=(ocState&&ocState.id)||((curOCId&&curOCId!=='new')?curOCId:null);
   if(!_ocIdReal){ alert('Guarda la OC primero (botón Guardar) y luego solicita el material extra.\n\nAsí la solicitud queda ligada a la orden correcta y el administrador podrá agregarlo.'); return; }
@@ -5773,13 +5780,8 @@ function ocRequestExtraAuth(){
   if(!name) return alert('Ingrese el nombre del material');
   if(!qty) return alert('Ingrese una cantidad');
   if(!comment) return alert('Agregue un comentario o motivo');
-  // Crear solicitud pendiente
-  const req={
-    id:'auth-'+Date.now(),
+  const reqLocal={
     type:'extra-material',
-    status:'pendiente', // pendiente | aprobado | rechazado | ver_luego
-    requestedBy:currentUser?currentUser.name:'Usuario',
-    requestedAt:Date.now(),
     projId:curProj?curProj.id:null,
     projName:curProj?curProj.name:'',
     ocId:_ocIdReal,
@@ -5788,8 +5790,8 @@ function ocRequestExtraAuth(){
     houseId: houseId==='all'?'all':(parseInt(houseId)||houseId),
     comment
   };
-  pendingAuthList().push(req);
-  saveData();
+  let req;
+  try{ req=await pendingAuthCreate(reqLocal); }catch(e){ showToast('No se pudo enviar la solicitud: '+e.message); return; }
   closeModal();
   showToast('✅ Solicitud enviada al administrador');
   logAction(`Solicitud de material extra "${name}" enviada`,'log-create','OC',null,{name,qty,price,comment});
@@ -5959,12 +5961,17 @@ function applyApprovedExtra(req){
 }
 async function resolveExtraAuth(reqId, decision){
   // Aprobar/rechazar: refrescar primero desde el backend para actuar sobre el estado más reciente
+  // de `projects` (donde vive el efecto real — OC/tipo/casa/garantía). La solicitud en sí ya no
+  // viaja en ese blob: se resuelve aparte, con su propia fila (pendingAuthResolve más abajo).
   if(decision==='aprobado'||decision==='rechazado'){ try{ await loadDataFromAPI(); }catch(e){} }
-  const req=pendingAuthList().find(r=>r.id===reqId);
+  let req=pendingAuthList().find(r=>r.id===reqId);
   if(!req){ closeModal(); return; }
-  req.status=decision;
-  req.resolvedBy=currentUser?currentUser.name:'Admin';
-  req.resolvedAt=Date.now();
+  if(decision==='aprobado'||decision==='rechazado'){
+    // El servidor valida el rol (Admin/Supervisor) y fija resolvedBy/resolvedAt — si esto falla
+    // (otra sesión ya la resolvió, o el rol no califica), no se toca `projects` a continuación.
+    try{ req=await pendingAuthResolve(reqId,decision); }
+    catch(err){ closeModal(); showToast('No se pudo resolver la solicitud: '+err.message); return; }
+  }
   if(decision==='aprobado'){
     let ok=false;
     if(req.type==='type-unlock'){
@@ -6004,9 +6011,9 @@ async function resolveExtraAuth(reqId, decision){
         alert('Se aprobó la solicitud, pero no se encontró la OC "'+(req.ocNum||req.ocId)+'". Es posible que la orden aún no se haya guardado; pídele a quien la solicitó que guarde la OC y vuelve a intentar.');
       }
     }
-    // Eliminar notificaciones pending-auth relacionadas
-    SYS.notifications=(SYS.notifications||[]).filter(n=>n.link!=='pending-auth');
-    saveData();
+    // Eliminar notificaciones pending-auth relacionadas (ahora son filas propias, no el blob)
+    notifClearByLink('pending-auth').catch(()=>{});
+    saveData(); // persiste el efecto en `projects` (línea de OC, desbloqueo, garantía) — sigue en el blob
     closeModal();
     showToast(ok?(req.type==='house-unlock'||req.type==='type-unlock'?'🔓 Desbloqueado':req.type==='garantia-budget'?'✅ Garantía aprobada':'✅ Material aprobado y agregado a la OC'):'Solicitud aprobada');
     updateNotifBadge();
@@ -6014,15 +6021,15 @@ async function resolveExtraAuth(reqId, decision){
     // Detener recordatorio solo si no quedan más solicitudes pendientes
     if(!pendingAuthList().some(r=>r.status==='pendiente')) stopExtraAuthReminder();
   } else if(decision==='rechazado'){
-    if(req.type==='garantia-budget'){ applyGarApproval(req,'rechazado'); if(curTab==='garantias')renderGarantias(); }
-    saveData();
+    // Solo garantia-budget muta `projects` en un rechazo; el resto no tiene nada más que guardar
+    // (la resolución de la solicitud ya quedó persistida arriba, en su propia fila).
+    if(req.type==='garantia-budget'){ applyGarApproval(req,'rechazado'); if(curTab==='garantias')renderGarantias(); saveData(); }
     closeModal();
     showToast('Solicitud rechazada');
     addNotif(`⛔ Solicitud de "${req.matName||('Garantía '+req.garNum)}" rechazada por ${req.resolvedBy}`);
     if(!pendingAuthList().some(r=>r.status==='pendiente')) stopExtraAuthReminder();
   } else if(decision==='ver_luego'){
-    req.status='pendiente'; // mantener pendiente
-    saveData();
+    // Se mantiene 'pendiente' — no hay nada que resolver en el servidor, solo el recordatorio local
     closeModal();
     addNotif(`⏱ Solicitud pendiente: "${req.matName}" (${req.projName}) — recordatorio en 10 min`,'pending-auth');
     startExtraAuthReminder();
@@ -6054,11 +6061,12 @@ function startExtraAuthReminder(){
 }
 function stopExtraAuthReminder(){ if(_extraReminderIv){clearInterval(_extraReminderIv);_extraReminderIv=null;} }
 // Al hacer login, revisar si hay solicitudes pendientes y mostrar el popup
-function checkPendingAuthOnLogin(){
+async function checkPendingAuthOnLogin(){
   if(!currentUser) return;
+  await Promise.all([pendingAuthLoad(), notifLoad()]);
+  updateNotifBadge();
   // Al entrar, marcar como "ya vistas" las resoluciones viejas para no re-avisar
-  // (los datos frescos ya vienen de loadDataFromAPI, incluida cualquier línea aprobada)
-  (SYS.pendingAuthRequests||[]).forEach(r=>{ if(r.status&&r.status!=='pendiente') _authResolvedSeen.add(r.id); });
+  pendingAuthList().forEach(r=>{ if(r.status&&r.status!=='pendiente') _authResolvedSeen.add(r.id); });
   startAuthPolling();
   if(currentUser.role!=='Administrador'&&currentUser.role!=='Supervisor') return;
   const pending=pendingAuthList().filter(r=>r.status==='pendiente');
@@ -6085,18 +6093,21 @@ const _authResolvedSeen=new Set();
 async function pollPendingAuth(){
   if(!_sbToken||!currentUser) return;
   try{
-    const resp=await fetch(`${BACKEND_URL}/api/db/settings/1`,{headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp'}});
-    if(!resp.ok) return;
-    const rec=await resp.json();
-    let d=rec.data; if(typeof d==='string') d=JSON.parse(d);
-    const remoteReqs=(d&&d.SYS&&d.SYS.pendingAuthRequests)||[];
-    // Traer todo lo remoto (incluye resoluciones hechas en otras sesiones)
-    SYS.pendingAuthRequests=_mergeAuthReqs(remoteReqs,SYS.pendingAuthRequests);
+    // Trae el estado autoritativo desde su propia tabla (ya no hay nada que fusionar: no vive
+    // más en el blob, así que no hay riesgo de pisar una resolución hecha en otra sesión).
+    await pendingAuthLoad();
+    // De paso, refrescar notificaciones (ahora son filas reales y baratas de traer): así se ven
+    // en esta sesión los eventos automáticos que disparó OTRA sesión (QB/Outlook/etc.), algo que
+    // antes no pasaba salvo recargando la página.
+    await notifLoad();
+    updateNotifBadge();
+    const panel=document.getElementById('notif-panel');
+    if(panel&&panel.classList.contains('open')) renderNotifList();
     // 1) Resoluciones de solicitudes hechas por ESTE usuario: aplicar en vivo y avisar
     let _applied=false;
-    (SYS.pendingAuthRequests||[]).forEach(r=>{
+    pendingAuthList().forEach(r=>{
       if(!r.status||r.status==='pendiente'||_authResolvedSeen.has(r.id)) return;
-      if(r.requestedBy!==(currentUser&&currentUser.name)) return;
+      if(r.requestedById!==(currentUser&&currentUser.id)) return;
       _authResolvedSeen.add(r.id);
       if(r.status==='aprobado'){
         if(r.type==='type-unlock'){
@@ -6140,7 +6151,7 @@ async function pollPendingAuth(){
     if(currentUser.role==='Administrador'||currentUser.role==='Supervisor'){
       const modal=document.getElementById('modal');
       if(modal&&!modal.classList.contains('hidden')) return;
-      const toShow=(SYS.pendingAuthRequests||[]).filter(r=>r.status==='pendiente'&&!_authShownIds.has(r.id));
+      const toShow=pendingAuthList().filter(r=>r.status==='pendiente'&&!_authShownIds.has(r.id));
       if(toShow.length){
         updateNotifBadge();
         showPendingAuthPopup(toShow[0].id);
@@ -6301,19 +6312,44 @@ function showToast(msg){
 }
 
 // ========== NOTIFICATION CENTER ==========
-function addNotif(msg, link){
-  if(!SYS.notifications) SYS.notifications=[];
+// VUL-044 (parte 1.5): antes en SYS.notifications, dentro del blob — cada notificación (y esta
+// app dispara MUCHAS, automáticas: QB, Outlook, sistema) forzaba re-guardar `settings/1` entero.
+// Ahora cada una es su propia fila en `notifications` (política 'any' — mismo alcance 100%
+// compartido que ya tenía en el blob, ver table-policy.js). `notifCache` es el espejo local;
+// el shape plano de siempre (n.msg/n.date/n.read/n.link) se conserva para no tocar el render.
+let notifCache=[];
+function notifFromRow(row){
+  return { id:row.id, msg:row.msg, date:row.created_at?new Date(row.created_at).getTime():Date.now(),
+    read:!!row.read, link:row.link??null };
+}
+async function notifLoad(){
+  if(!currentUser) return;
+  try{
+    const d=await apiFetch('GET','/api/db/notifications?order=created_at&asc=false');
+    notifCache=(d.notifications||[]).map(notifFromRow);
+  }catch(e){ console.warn('notifLoad',e); }
+}
+// Borra (en el servidor y en la caché) todas las notificaciones con un `link` dado — usado al
+// resolver una solicitud para limpiar su recordatorio "ver_luego".
+async function notifClearByLink(link){
+  const ids=notifCache.filter(n=>n.link===link).map(n=>n.id);
+  if(!ids.length) return;
+  notifCache=notifCache.filter(n=>n.link!==link);
+  await Promise.all(ids.map(id=>apiFetch('DELETE',`/api/db/notifications/${encodeURIComponent(id)}`).catch(()=>{})));
+}
+async function addNotif(msg, link){
   // deduplicate: skip if exact same msg already exists (ever)
-  if(SYS.notifications.some(n=>n.msg===msg)) return;
-  SYS.notifications.unshift({id:Date.now()+'_'+Math.random().toString(36).slice(2), msg, date:Date.now(), read:false, link:link||null});
-  // keep max 200
-  if(SYS.notifications.length>200) SYS.notifications.length=200;
-  saveData();
+  if(notifCache.some(n=>n.msg===msg)) return;
+  let row;
+  try{ row=await apiFetch('POST','/api/db/notifications',{user_id:null,msg,link:link||null}); }
+  catch(e){ console.warn('addNotif',e); return; }
+  notifCache.unshift(notifFromRow(row));
   updateNotifBadge();
-  if(document.getElementById('notif-panel').classList.contains('open')) renderNotifList();
+  const panel=document.getElementById('notif-panel');
+  if(panel&&panel.classList.contains('open')) renderNotifList();
 }
 function updateNotifBadge(){
-  const unread=(SYS.notifications||[]).filter(n=>!n.read).length;
+  const unread=notifCache.filter(n=>!n.read).length;
   const badge=document.getElementById('notif-badge');
   if(!badge) return;
   badge.textContent=unread>99?'99+':unread;
@@ -6348,7 +6384,7 @@ let notifSelected=new Set();
 function renderNotifList(){
   const list=document.getElementById('notif-panel-list');
   if(!list) return;
-  const notifs=SYS.notifications||[];
+  const notifs=notifCache;
   if(!notifs.length){
     list.innerHTML='<div style="text-align:center;padding:32px 16px;color:var(--t3);font-size:12px">Sin notificaciones</div>';
     notifUpdateBulkBar();
@@ -6378,7 +6414,7 @@ function notifToggleSel(id, checked){
   notifUpdateBulkBar();
 }
 function notifSelectAll(checked){
-  const notifs=SYS.notifications||[];
+  const notifs=notifCache;
   notifs.forEach(n=>{ if(checked) notifSelected.add(n.id); else notifSelected.delete(n.id); });
   // update all checkboxes in list
   document.querySelectorAll('#notif-panel-list .notif-item').forEach(el=>{
@@ -6394,7 +6430,7 @@ function notifUpdateBulkBar(){
   const cnt=document.getElementById('notif-sel-count');
   const selAll=document.getElementById('notif-sel-all');
   if(!bar) return;
-  const total=(SYS.notifications||[]).length;
+  const total=notifCache.length;
   if(notifSelected.size>0){
     bar.classList.add('visible');
     if(cnt) cnt.textContent=notifSelected.size+' seleccionado(s)';
@@ -6404,17 +6440,19 @@ function notifUpdateBulkBar(){
     if(selAll) selAll.checked=false;
   }
 }
-function notifBulkRead(){
-  const ids=new Set(notifSelected);
-  (SYS.notifications||[]).forEach(n=>{ if(ids.has(n.id)) n.read=true; });
+async function notifBulkRead(){
+  const ids=Array.from(notifSelected);
+  notifCache.forEach(n=>{ if(notifSelected.has(n.id)) n.read=true; });
   notifSelected.clear();
-  saveData(); updateNotifBadge(); renderNotifList();
+  updateNotifBadge(); renderNotifList();
+  await Promise.all(ids.map(id=>apiFetch('PUT',`/api/db/notifications/${encodeURIComponent(id)}`,{read:true}).catch(()=>{})));
 }
-function notifBulkDelete(){
-  const ids=new Set(notifSelected);
-  SYS.notifications=(SYS.notifications||[]).filter(n=>!ids.has(n.id));
+async function notifBulkDelete(){
+  const ids=Array.from(notifSelected);
+  notifCache=notifCache.filter(n=>!notifSelected.has(n.id));
   notifSelected.clear();
-  saveData(); updateNotifBadge(); renderNotifList();
+  updateNotifBadge(); renderNotifList();
+  await Promise.all(ids.map(id=>apiFetch('DELETE',`/api/db/notifications/${encodeURIComponent(id)}`).catch(()=>{})));
 }
 function notifAgo(ts){
   const diff=Date.now()-ts;
@@ -6427,20 +6465,26 @@ function escHtml(s){ const d=document.createElement('div'); d.textContent=s; ret
 // esc(): escape HTML seguro para TEXTO y para valores de atributo entre comillas.
 // Escapa & < > " ' — usar SIEMPRE al interpolar datos de usuario/externos (OCR/Outlook/QB) en innerHTML. (VUL-028)
 function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-function notifRead(id){
-  const n=(SYS.notifications||[]).find(x=>x.id===id);
-  if(n&&!n.read){ n.read=true; saveData(); updateNotifBadge(); }
+async function notifRead(id){
+  const n=notifCache.find(x=>x.id===id);
+  if(n&&!n.read){
+    n.read=true; updateNotifBadge();
+    try{ await apiFetch('PUT',`/api/db/notifications/${encodeURIComponent(id)}`,{read:true}); }catch(e){ console.warn('notifRead',e); }
+  }
   const el=document.getElementById('ni-'+id);
   if(el){ el.classList.remove('unread'); el.querySelector('.ni-dot').classList.add('read'); const nb=el.querySelector('.ni-new'); if(nb)nb.remove(); }
 }
-function notifMarkAllRead(){
-  (SYS.notifications||[]).forEach(n=>n.read=true);
-  saveData(); updateNotifBadge(); renderNotifList();
+async function notifMarkAllRead(){
+  const ids=notifCache.filter(n=>!n.read).map(n=>n.id);
+  notifCache.forEach(n=>n.read=true);
+  updateNotifBadge(); renderNotifList();
+  await Promise.all(ids.map(id=>apiFetch('PUT',`/api/db/notifications/${encodeURIComponent(id)}`,{read:true}).catch(()=>{})));
 }
-function notifDelete(id){
-  SYS.notifications=(SYS.notifications||[]).filter(n=>n.id!==id);
-  saveData(); updateNotifBadge(); renderNotifList();
+async function notifDelete(id){
+  notifCache=notifCache.filter(n=>n.id!==id);
+  updateNotifBadge(); renderNotifList();
   const om=document.getElementById('notif-item-menu-overlay'); if(om) om.style.display='none';
+  try{ await apiFetch('DELETE',`/api/db/notifications/${encodeURIComponent(id)}`); }catch(e){ console.warn('notifDelete',e); }
 }
 function notifMenuToggle(id,e){
   e.stopPropagation();
@@ -6460,7 +6504,7 @@ function notifMenuToggle(id,e){
   om.style.display='block';
 }
 function notifNavigate(id){
-  const n=(SYS.notifications||[]).find(x=>x.id===id);
+  const n=notifCache.find(x=>x.id===id);
   if(!n||!n.link) return;
   notifRead(id); closeNotifPanel();
   const lk=n.link;
@@ -8326,7 +8370,7 @@ function applyApprovedTypeUnlock(req){
   if(typeof renderHPBody==='function'&&curHouseId===req.houseId) renderHPBody();
   return true;
 }
-function houseUnlockReq(e,id){
+async function houseUnlockReq(e,id){
   if(e)e.stopPropagation();
   const h=curProj.houses.find(x=>x.id===id); if(!h)return;
   if(currentUser&&(currentUser.role==='Administrador'||currentUser.role==='Supervisor')){
@@ -8339,20 +8383,15 @@ function houseUnlockReq(e,id){
     });
   } else {
     // Usuario regular: enviar solicitud al backend
-    const req={
-      id:'unlock-'+Date.now(),
+    const reqLocal={
       type:'house-unlock',
-      status:'pendiente',
-      requestedBy:currentUser?currentUser.name:'Usuario',
-      requestedAt:Date.now(),
       projId:curProj?curProj.id:null,
       projName:curProj?curProj.name:'',
       houseId:id,
       houseNum:h.num||'',
       reason:''
     };
-    pendingAuthList().push(req);
-    saveData();
+    try{ await pendingAuthCreate(reqLocal); }catch(err){ showToast('No se pudo enviar la solicitud: '+err.message); return; }
     closeModal();
     showToast('✅ Solicitud de desbloqueo enviada al administrador');
     logAction(`Solicitud de desbloqueo de tipo para ${h.num} enviada`,'log-create','Casas',null,{houseNum:h.num});
@@ -10097,18 +10136,14 @@ function vbRequestMatAuth(lineIdx, houseId){
       <button class="btn-save" onclick="vbSubmitMatAuth(${lineIdx},${JSON.stringify(houseId)})">Enviar</button>
     </div>`;
 }
-function vbSubmitMatAuth(lineIdx, houseId){
+async function vbSubmitMatAuth(lineIdx, houseId){
   const reason=(document.getElementById('mat-auth-reason')||{}).value||'';
   if(!reason.trim()){alert('Indique el motivo.');return;}
   const l=vbState.lines[lineIdx];
   const houseName=vbAssignLabel(houseId);
   // Crear solicitud pendiente (async): la aprueba el administrador desde su sesión, igual que en la OC
-  const req={
-    id:'auth-'+Date.now(),
+  const reqLocal={
     type:'vb-extra-material',
-    status:'pendiente',
-    requestedBy:currentUser?currentUser.name:'Usuario',
-    requestedAt:Date.now(),
     projId:curProj?curProj.id:null,
     projName:curProj?curProj.name:'',
     vbNum:vbState?vbState.num:'',
@@ -10117,8 +10152,8 @@ function vbSubmitMatAuth(lineIdx, houseId){
     houseId:houseId, houseName:houseName,
     comment:reason
   };
-  pendingAuthList().push(req);
-  saveData();
+  let req;
+  try{ req=await pendingAuthCreate(reqLocal); }catch(err){ showToast('No se pudo enviar la solicitud: '+err.message); return; }
   closeModal();
   showToast('✅ Solicitud enviada al administrador');
   logAction(`Solicitud de material fuera de lista "${l.desc}" enviada`,'log-create','Factura de Proveedor',null,{name:l.desc,qty:l.qty,price:l.price,comment:reason});
@@ -11125,7 +11160,7 @@ let msgRecorder=null, msgRecChunks=[], msgRecTimer=null, msgRecStream=null;
 let msgPollIv=null;
 const MSG_MAX_ATTACH=3*1024*1024;        // 3 MB por adjunto
 
-async function msgApi(method,path,body){
+async function apiFetch(method,path,body){
   const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
   if(body!==undefined) headers['Content-Type']='application/json';
   const resp=await fetch(`${BACKEND_URL}${path}`,{method,headers,body:body!==undefined?JSON.stringify(body):undefined});
@@ -11150,12 +11185,12 @@ function msgStartPolling(){
 function msgStopPolling(){ if(msgPollIv){ clearInterval(msgPollIv); msgPollIv=null; } }
 
 async function msgLoadDirectory(){
-  try{ const d=await msgApi('GET','/api/auth/directory'); msgDirectory=d.users||[]; }
+  try{ const d=await apiFetch('GET','/api/auth/directory'); msgDirectory=d.users||[]; }
   catch(e){ console.warn('msgLoadDirectory',e); }
 }
 async function msgLoadConvs(){
   if(!currentUser) return;
-  try{ const d=await msgApi('GET','/api/db/conversations/summary'); msgConvsCache=d.conversations||[]; }
+  try{ const d=await apiFetch('GET','/api/db/conversations/summary'); msgConvsCache=d.conversations||[]; }
   catch(e){ console.warn('msgLoadConvs',e); }
   updateBadges();
 }
@@ -11201,7 +11236,7 @@ async function msgMarkRead(convId){
   if(!currentUser) return;
   const conv=msgConvsCache.find(c=>c.id===convId);
   if(!conv||!conv.unread_count) return;
-  try{ await msgApi('POST',`/api/db/conversations/${encodeURIComponent(convId)}/read`); }
+  try{ await apiFetch('POST',`/api/db/conversations/${encodeURIComponent(convId)}/read`); }
   catch(e){ console.warn('msgMarkRead',e); return; }
   conv.unread_count=0;
   const thread=msgThreadCache[convId];
@@ -11353,7 +11388,7 @@ function msgOpenConv(id){
 // Trae el historial completo de una conversación (con adjuntos) y la marca como leída.
 async function msgOpenConvLoad(id){
   try{
-    const d=await msgApi('GET',`/api/db/messages?conversation_id=${encodeURIComponent(id)}`);
+    const d=await apiFetch('GET',`/api/db/messages?conversation_id=${encodeURIComponent(id)}`);
     msgThreadCache[id]=d.messages||[];
   }catch(e){ console.warn('msgOpenConvLoad',e); showToast('No se pudo cargar la conversación.'); }
   if(msgCurConvId===id) renderMsgWin();
@@ -11426,7 +11461,7 @@ async function msgSend(){
   (msgThreadCache[convId]=msgThreadCache[convId]||[]).push(optimistic);
   renderMsgWin();
   try{
-    const saved=await msgApi('POST','/api/db/messages',{conversation_id:convId,text,attachments:atts});
+    const saved=await apiFetch('POST','/api/db/messages',{conversation_id:convId,text,attachments:atts});
     const arr=msgThreadCache[convId]||[];
     const idx=arr.findIndex(m=>m.id===tempId);
     if(idx>-1) arr[idx]=saved;
@@ -11494,7 +11529,7 @@ async function msgCreateConv(){
     closeModal();
     if(existing){ msgOpenConv(existing.id); return; }
     try{
-      const conv=await msgApi('POST','/api/db/conversations',{type:'dm',member_ids:[currentUser.id,otherId]});
+      const conv=await apiFetch('POST','/api/db/conversations',{type:'dm',member_ids:[currentUser.id,otherId]});
       msgConvsCache.unshift({...conv,last_message:null,unread_count:0});
       msgCurConvId=conv.id; msgThreadCache[conv.id]=[]; renderMsgWin(); updateBadges();
     }catch(e){ showToast('No se pudo crear la conversación: '+e.message); }
@@ -11504,7 +11539,7 @@ async function msgCreateConv(){
     const members=Array.from(new Set([currentUser.id,...checks]));
     closeModal();
     try{
-      const conv=await msgApi('POST','/api/db/conversations',{type:'group',name,member_ids:members});
+      const conv=await apiFetch('POST','/api/db/conversations',{type:'group',name,member_ids:members});
       msgConvsCache.unshift({...conv,last_message:null,unread_count:0});
       msgCurConvId=conv.id; msgThreadCache[conv.id]=[]; renderMsgWin(); updateBadges();
     }catch(e){ showToast('No se pudo crear el grupo: '+e.message); }
@@ -11533,7 +11568,7 @@ async function msgRenameGroup(id){
   const c=msgConvsCache.find(x=>x.id===id); if(!c) return;
   const name=prompt('Nuevo nombre del grupo:',c.name||''); if(name===null||!name.trim()) return;
   try{
-    const updated=await msgApi('PUT',`/api/db/conversations/${encodeURIComponent(id)}`,{name:name.trim()});
+    const updated=await apiFetch('PUT',`/api/db/conversations/${encodeURIComponent(id)}`,{name:name.trim()});
     Object.assign(c,updated);
     closeModal(); renderMsgWin();
   }catch(e){ showToast('No se pudo renombrar: '+e.message); }
@@ -11559,7 +11594,7 @@ async function msgSaveMembers(id){
   const ids=Array.from(document.querySelectorAll('.msg-mm-check')).filter(x=>x.checked).map(x=>x.value);
   ids.push(c.created_by);
   try{
-    const updated=await msgApi('PUT',`/api/db/conversations/${encodeURIComponent(id)}`,{member_ids:Array.from(new Set(ids))});
+    const updated=await apiFetch('PUT',`/api/db/conversations/${encodeURIComponent(id)}`,{member_ids:Array.from(new Set(ids))});
     Object.assign(c,updated);
     closeModal(); updateBadges(); renderMsgWin();
   }catch(e){ showToast('No se pudo guardar: '+e.message); }
@@ -11568,7 +11603,7 @@ async function msgLeaveGroup(id){
   const c=msgConvsCache.find(x=>x.id===id); if(!c) return;
   if(!confirm('¿Salir de este grupo?')) return;
   try{
-    await msgApi('POST',`/api/db/conversations/${encodeURIComponent(id)}/leave`);
+    await apiFetch('POST',`/api/db/conversations/${encodeURIComponent(id)}/leave`);
     msgConvsCache=msgConvsCache.filter(x=>x.id!==id);
     delete msgThreadCache[id];
     if(msgCurConvId===id) msgCurConvId=null;
@@ -11578,7 +11613,7 @@ async function msgLeaveGroup(id){
 async function msgDeleteConv(id){
   if(!confirm('¿Eliminar esta conversación y todos sus mensajes? Esta acción no se puede deshacer.')) return;
   try{
-    await msgApi('DELETE',`/api/db/conversations/${encodeURIComponent(id)}`);
+    await apiFetch('DELETE',`/api/db/conversations/${encodeURIComponent(id)}`);
     msgConvsCache=msgConvsCache.filter(c=>c.id!==id);
     delete msgThreadCache[id];
     if(msgCurConvId===id) msgCurConvId=null;
