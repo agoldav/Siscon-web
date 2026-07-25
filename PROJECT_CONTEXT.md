@@ -1057,6 +1057,55 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - **Suite de pruebas al cierre: 273 en verde** (195 backend + 78 frontend). Ver detalle completo en la sesión de
   "incidente en vivo" arriba y en Sección 11.
 
+### Sesión 2026-07-25 (VUL-044 parte 1/2 — conversations/messages fuera del blob compartido)
+> ⚠️ **Código completo y probado, pero NO desplegado.** Falta verificación en vivo con dos cuentas reales antes
+> de pushear (Claude no tiene credenciales de ninguno de los 4 usuarios para probar aislamiento end-to-end en
+> el navegador) — pendiente de que el OWNER lo pruebe o autorice el push sin esa verificación manual.
+- [x] **Backend** (`siscon-backend/server.js`): `conversations`/`messages` salieron del CRUD genérico
+  admin-only (VUL-035) — no encajaban ahí, la autorización correcta depende del contenido de cada fila
+  (`member_ids`), no solo del rol. Rutas nuevas, todas gateadas por `getCurrentUser` + el choke point
+  `loadConversationForMember` (isMember + 403/404):
+  - `GET /api/db/conversations` y `/summary` (con último mensaje + no-leídos, sin traer el historial completo)
+  - `POST /api/db/conversations` (el creador debe estar en `member_ids`; `created_by` lo fija el servidor)
+  - `PUT /api/db/conversations/:id` (renombrar/miembros — solo creador o Administrador; el creador no se puede
+    quitar por esta vía)
+  - `POST /api/db/conversations/:id/leave` (cualquier miembro sale de un grupo; un DM no se puede "abandonar")
+  - `DELETE /api/db/conversations/:id` (soft delete — cualquier miembro, mismo comportamiento que ya tenía la UI)
+  - `GET /api/db/messages?conversation_id=` y `POST /api/db/messages` (`sender_id`/`read_by` los fija el
+    servidor con el uuid del JWT — nunca vienen del body)
+  - `POST /api/db/conversations/:id/read` (marca leídos los mensajes pendientes del usuario actual)
+  - `POST /api/db/import` y el `TABLES` del CRUD genérico ya no incluyen `conversations`/`messages`.
+- [x] **Backend:** `GET /api/auth/directory` — cualquier usuario autenticado (no admin-only como
+  `/api/auth/users`) lee `id/name/role/color` de `profiles` reales. Necesario porque el selector de "Nueva
+  conversación" usaba `SYS.users` (directorio local de RRHH, ids numéricos) — que no corresponde a las cuentas
+  reales de Supabase Auth (uuid), la "tercera pata" ya anotada en VUL-045. Sin esto, cualquier cuenta dada de
+  alta con `create-user` y no agregada a mano en `SYS.users` habría quedado invisible en Mensajes.
+- [x] **Pruebas:** `siscon-backend/test-conversations-auth.js` (44/44) — 403 sin JWT en las 10 rutas nuevas;
+  `conversations`/`messages` confirmadas fuera de `TABLES` y del loop de `/api/db/import`; `isMember` extraída
+  y probada (miembro/no-miembro/vacío/null/no-array); `loadConversationForMember` extraída y ejecutada con
+  supabase/res fabricados (miembro real → pasa; no-miembro → 403 real; fila inexistente → 404, no 403 —
+  para no confirmarle a un no-miembro que la conversación existe); cableado por regex de que las 6 rutas
+  sensibles pasan por ese único choke point; que `POST /api/db/messages` nunca toma `sender_id`/`read_by` del
+  body; que `PUT .../:id` exige creador-o-Admin y protege al creador de auto-expulsarse; que `POST .../leave`
+  rechaza DMs; que `POST /api/db/conversations` exige que el creador esté en `member_ids`; que
+  `/api/auth/directory` NO exige `validateAdminRole` pero sí `getCurrentUser`. Suite completa del repo
+  re-corrida: 9 archivos, 0 fallas (sin regresiones).
+- [x] **Frontend** (`siscon-web/index.html`, módulo `msg*`, ~11100-11650): reescrito de mutación síncrona sobre
+  `SYS.conversations` a llamadas async contra los endpoints nuevos, con cachés locales que NUNCA se persisten
+  con `saveData()` (se recargan del servidor): `msgConvsCache` (resumen + no-leídos), `msgThreadCache[convId]`
+  (historial de la conversación abierta), `msgDirectory` (cuentas reales). `msgSend` es optimista: pinta el
+  mensaje al toque con un id temporal y lo confirma/revierte según la respuesta del servidor. `msgAutoSync()`
+  (mismo patrón que `msAutoSync`) carga directorio + conversaciones y arranca un polling de 12s de la barra
+  lateral (nunca del hilo abierto, para no pisarle el borrador a quien está escribiendo) — arranca al login,
+  se detiene al logout. Los ids de mensajería son uuid reales de Auth: se quitó el `parseInt` que asumía ids
+  numéricos de `SYS.users`. `SYS.conversations` se eliminó del objeto por defecto y de `applyDefaults`.
+- **Verificado:** sintaxis del `<script>` completo (`new Function`) sin errores; los ~60 nombres de función
+  referenciados en `onclick=`/etc. resuelven a exactamente una definición; 0 referencias sueltas a
+  `SYS.conversations`/`memberIds`/`senderId`/`readBy`/`msgConvs()` fuera de comentarios históricos.
+- **No verificado (requiere al OWNER):** prueba en vivo en el navegador con dos cuentas reales — confirmar que
+  A no ve ni puede leer/escribir conversaciones de B, que enviar/recibir/marcar-leído funciona de punta a
+  punta, y que el badge de no-leídos se actualiza. Sin esto, no pushear a producción.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1085,8 +1134,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     conversaciones**: el filtro de mensajes privados existe **solo en la interfaz**, así que cada navegador
     descarga los DMs de los demás. Una cuenta comprometida obtiene todo.
   - **Decisión del OWNER (2026-07-25):** alcance dividido en dos.
-    1. **EN CURSO:** separar solo `conversations`/`messages` a sus propias tablas, con autorización por
-       participante en el backend — cierra la fuga real de privacidad sin tocar `projects`/`settings`.
+    1. **✅ CERRADA — parte 1/2 (2026-07-25, código sin desplegar aún):** `conversations`/`messages` separadas
+       a sus propias tablas con autorización por participante en el backend. Ver detalle completo en Sección 9
+       (sesión 2026-07-25 — VUL-044 parte 1) y Sección 11.2. **Pendiente antes de pushear/deployar:**
+       verificación en vivo con dos cuentas reales (Claude no tiene credenciales de los 4 usuarios para
+       probarlo end-to-end) — ver nota abajo.
     2. **PENDIENTE (después, sin fecha):** normalizar el resto del blob (`projects`, `houses`, `transactions`,
        etc.) en tablas reales con autorización por registro — reescritura grande que toca casi todo lo
        Completado. **No empezar sin retomarlo explícitamente con el OWNER.**
@@ -1134,6 +1186,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..036 y 039. **Ya no queda ninguna CRÍTICA abierta.**
 > Abiertas: VUL-043 (ALTA, requiere al OWNER) y la mitad pendiente de VUL-044 (normalizar el resto del blob,
 > ver Sección 10). VUL-045 cerrada 2026-07-25 (alta directa de usuarios).
+> VUL-044 parte 1/2 (conversations/messages fuera del blob) — código y pruebas listos 2026-07-25, **NO
+> desplegado**: falta verificación en vivo con dos cuentas reales (Sección 9, sesión 2026-07-25).
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.

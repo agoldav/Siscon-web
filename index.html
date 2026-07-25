@@ -912,7 +912,9 @@ let SYS = {
     {id:2,username:'abraham',name:'Abraham Goldgewicht',role:'Supervisor',passwordHash:'333ee722d5aa2f4b4e323c34358242f2a17ac7bf42742307758df2d9ae1a7fdd',color:'#1db87a'},
     {id:3,username:'inutil',name:'Usuario Inútil',role:'Regular',passwordHash:'fc14056d5cf2cd16c9231d5e5b7591c00d3297c18cbed1e495100f0e0879fdff',color:'#e8783a'},
   ],
-  conversations: [], // Mensajes internos: {id,type:'dm'|'group',name,memberIds:[],createdBy,createdAt,messages:[{id,senderId,text,ts,attachments:[{id,kind,name,mime,dataUrl,size}],readBy:[]}]}
+  // Mensajes internos (VUL-044): ya NO viven aquí. Conversaciones/mensajes están en sus propias
+  // tablas (`conversations`/`messages`) con autorización por participante en el backend — antes,
+  // vivir en este blob significaba que los 4 usuarios descargaban los DMs de todos al cargar la app.
 };
 let currentUser = null;
 
@@ -1146,7 +1148,6 @@ function applyDefaults(sys){
   if(!SYS.cotizaciones)SYS.cotizaciones=[];
   if(!SYS.notifications)SYS.notifications=[];
   if(!SYS.pendingAuthRequests)SYS.pendingAuthRequests=[];
-  if(!SYS.conversations)SYS.conversations=[];
 }
 
 function loadData(){
@@ -1536,6 +1537,7 @@ async function login(){
     handleOpenHash();
     checkNewWinOverride();
     msAutoSync();
+    msgAutoSync();
     setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);
     setTimeout(()=>checkPendingAuthOnLogin(), 1200);
     if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);
@@ -1545,6 +1547,7 @@ async function logout(){
   try{const token=localStorage.getItem('sb_token');await fetch(BACKEND_URL+'/api/auth/logout',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Authorization':'Bearer '+token,'Content-Type':'application/json'},body:'{}'});}catch(e){console.error('Error logout:',e);}
   stopAuthPolling();
   stopTokenRefresh();
+  msgStopPolling();
   currentUser=null;
   _sbToken=null;
   localStorage.removeItem('sb_token');
@@ -1588,6 +1591,7 @@ async function bootstrapCloudflareAuth(){
     handleOpenHash();
     checkNewWinOverride();
     msAutoSync();
+    msgAutoSync();
     setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);
     setTimeout(()=>checkPendingAuthOnLogin(), 1200);
     if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);
@@ -11096,19 +11100,67 @@ function renderReportBody(){
 
 // ════════════════════════════════════════════════════════════
 //  MENSAJES INTERNOS (mensajería entre usuarios)
-//  Modelo: SYS.conversations = [{id,type:'dm'|'group',name,memberIds:[],
-//    createdBy,createdAt,messages:[{id,senderId,text,ts,attachments:[],readBy:[]}]}]
-//  Adjuntos: base64 en localStorage (límite por cuota). Compatible con futura
-//  migración a backend (tema pendiente "Adjuntos permanentes").
+//  VUL-044 (parte 1/2): conversations/messages viven en sus propias tablas en el backend, con
+//  autorización por participante (member_ids) — YA NO en SYS.conversations. Antes, ese blob
+//  compartido hacía que los 4 usuarios descargaran los DMs de todos al cargar la app; el filtro
+//  de "solo tuyas" era solo de interfaz. Cachés locales (se recargan del servidor, nunca se
+//  persisten con saveData()):
+//    msgConvsCache: resumen de MIS conversaciones (id,type,name,member_ids,created_by,
+//      last_message,unread_count) — de GET /api/db/conversations/summary
+//    msgThreadCache[convId]: historial completo de una conversación abierta — de GET /api/db/messages
+//    msgDirectory: cuentas reales con quién se puede hablar (id,name,role,color) — de
+//      GET /api/auth/directory (reemplaza SYS.users, que es el directorio local de RRHH y no
+//      corresponde 1:1 con las cuentas de Supabase Auth — ver VUL-045)
+//  Adjuntos: base64, ahora dentro de la fila de `messages` (antes en el blob de localStorage).
+//  Tope 3 MB por adjunto (límite operativo, no de almacenamiento). Migrar a R2 sigue pendiente
+//  aparte ("Adjuntos permanentes").
 // ════════════════════════════════════════════════════════════
+let msgConvsCache=[];
+let msgThreadCache={};
+let msgDirectory=[];
 let msgCurConvId=null;
 let msgSearchTerm='', msgNCType='dm';
 let msgPendingAttach=[];                 // adjuntos preparados para el mensaje en edición
 let msgRecorder=null, msgRecChunks=[], msgRecTimer=null, msgRecStream=null;
-const MSG_MAX_ATTACH=3*1024*1024;        // 3 MB por adjunto (límite de localStorage)
+let msgPollIv=null;
+const MSG_MAX_ATTACH=3*1024*1024;        // 3 MB por adjunto
 
-function msgConvs(){ if(!SYS.conversations)SYS.conversations=[]; return SYS.conversations; }
-function msgUser(id){ return (SYS.users||[]).find(u=>u.id===id)||null; }
+async function msgApi(method,path,body){
+  const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
+  if(body!==undefined) headers['Content-Type']='application/json';
+  const resp=await fetch(`${BACKEND_URL}${path}`,{method,headers,body:body!==undefined?JSON.stringify(body):undefined});
+  if(!resp.ok){ const err=await resp.json().catch(()=>({})); throw new Error(err.error||('Error '+resp.status)); }
+  return resp.status===204?null:resp.json();
+}
+
+// Arranca en segundo plano al hacer login (como msAutoSync): así el badge de no-leídos ya está
+// correcto aunque el usuario nunca abra la ventana de Mensajes en la sesión.
+async function msgAutoSync(){
+  if(!currentUser) return;
+  await msgLoadDirectory();
+  await msgLoadConvs();
+  msgStartPolling();
+}
+function msgStartPolling(){
+  msgStopPolling();
+  // Solo refresca la barra lateral (lista + badges), nunca el hilo abierto — así no le pisa el
+  // borrador a medio escribir a quien tiene la ventana abierta.
+  msgPollIv=setInterval(async ()=>{ await msgLoadConvs(); msgRenderList(); }, 12000);
+}
+function msgStopPolling(){ if(msgPollIv){ clearInterval(msgPollIv); msgPollIv=null; } }
+
+async function msgLoadDirectory(){
+  try{ const d=await msgApi('GET','/api/auth/directory'); msgDirectory=d.users||[]; }
+  catch(e){ console.warn('msgLoadDirectory',e); }
+}
+async function msgLoadConvs(){
+  if(!currentUser) return;
+  try{ const d=await msgApi('GET','/api/db/conversations/summary'); msgConvsCache=d.conversations||[]; }
+  catch(e){ console.warn('msgLoadConvs',e); }
+  updateBadges();
+}
+
+function msgUser(id){ return msgDirectory.find(u=>u.id===id)||null; }
 function msgUserName(id){ const u=msgUser(id); return u?u.name:'—'; }
 function msgUserColor(id){ const u=msgUser(id); return u?u.color:'var(--t3)'; }
 function msgInitials(name){ return ((name||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('')||'?').toUpperCase(); }
@@ -11130,32 +11182,32 @@ function msgKindOf(mime,name){
   return 'file';
 }
 
-function msgIsMember(conv){ return currentUser && (conv.memberIds||[]).includes(currentUser.id); }
-function msgMyConvs(){
-  if(!currentUser) return [];
-  return msgConvs().filter(msgIsMember).sort((a,b)=>{
-    const la=msgLast(a), lb=msgLast(b);
-    return (lb?lb.ts:b.createdAt||0)-(la?la.ts:a.createdAt||0);
-  });
-}
-function msgLast(conv){ const m=conv.messages||[]; return m.length?m[m.length-1]:null; }
-function msgOtherId(conv){ return (conv.memberIds||[]).find(id=>!currentUser||id!==currentUser.id); }
+// El backend ya filtra a "solo mis conversaciones" (GET .../summary) — msgIsMember queda como
+// chequeo defensivo en el render, no como la autorización real (esa vive en el servidor).
+function msgIsMember(conv){ return currentUser && (conv.member_ids||[]).includes(currentUser.id); }
+function msgMyConvs(){ return currentUser?msgConvsCache:[]; }
+function msgLast(conv){ return conv.last_message||null; }
+function msgOtherId(conv){ return (conv.member_ids||[]).find(id=>!currentUser||id!==currentUser.id); }
 function msgConvTitle(conv){ return conv.type==='group'?(conv.name||'Grupo'):msgUserName(msgOtherId(conv)); }
 function msgConvSub(conv){
-  if(conv.type==='group') return (conv.memberIds||[]).map(msgUserName).join(', ');
+  if(conv.type==='group') return (conv.member_ids||[]).map(msgUserName).join(', ');
   const u=msgUser(msgOtherId(conv)); return u?u.role:'';
 }
 function msgConvColor(conv){ return conv.type==='group'?'var(--pur)':msgUserColor(msgOtherId(conv)); }
-function msgUnread(conv){
-  if(!currentUser) return 0;
-  return (conv.messages||[]).filter(m=>m.senderId!==currentUser.id && !(m.readBy||[]).includes(currentUser.id)).length;
-}
-function msgTotalUnread(){ if(!currentUser||!SYS.conversations) return 0; return msgMyConvs().reduce((s,c)=>s+msgUnread(c),0); }
-function msgMarkRead(conv){
-  if(!currentUser||!conv) return;
-  let changed=false;
-  (conv.messages||[]).forEach(m=>{ if(m.senderId!==currentUser.id && !(m.readBy||[]).includes(currentUser.id)){ (m.readBy=m.readBy||[]).push(currentUser.id); changed=true; } });
-  if(changed){ saveData(); updateBadges(); }
+function msgUnread(conv){ return conv.unread_count||0; }
+function msgTotalUnread(){ if(!currentUser) return 0; return msgConvsCache.reduce((s,c)=>s+(c.unread_count||0),0); }
+// Marca como leída en el servidor (autoridad real) y refleja el resultado en las cachés locales.
+async function msgMarkRead(convId){
+  if(!currentUser) return;
+  const conv=msgConvsCache.find(c=>c.id===convId);
+  if(!conv||!conv.unread_count) return;
+  try{ await msgApi('POST',`/api/db/conversations/${encodeURIComponent(convId)}/read`); }
+  catch(e){ console.warn('msgMarkRead',e); return; }
+  conv.unread_count=0;
+  const thread=msgThreadCache[convId];
+  if(thread) thread.forEach(m=>{ if(m.sender_id!==currentUser.id && !(m.read_by||[]).includes(currentUser.id)) (m.read_by=m.read_by||[]).push(currentUser.id); });
+  updateBadges();
+  msgRenderList();
 }
 
 function msgTimeShort(ts){
@@ -11173,21 +11225,23 @@ function msgTimeFull(ts){
 }
 
 // ---- Ventana ----
-function openMsgsWin(){
+async function openMsgsWin(){
   if(!currentUser){ showToast('Inicia sesión para usar Mensajes.'); return; }
   if(fwinExists('msgs')){
     fwinRestore('msgs');
   } else {
     fwinOpen('msgs',{title:'Mensajes',width:820,height:600,dirtyFn:()=>false,
-      bodyHTML:`<div class="msg-wrap" id="msg-wrap"></div>`,
+      bodyHTML:`<div class="msg-wrap" id="msg-wrap"><div class="msg-empty" style="padding:30px">Cargando…</div></div>`,
       footerHTML:`<button class="btn-cancel" onclick="msgCloseWin()">Cerrar</button>`,
       onCancel:()=>msgStopRecording(true)});
     const body=document.getElementById('fwin-body-msgs'); if(body){ body.style.padding='0'; body.style.overflow='hidden'; }
   }
+  if(!msgDirectory.length) await msgLoadDirectory();
+  await msgLoadConvs();
   const list=msgMyConvs();
   msgCurConvId = (msgCurConvId && list.some(c=>c.id===msgCurConvId)) ? msgCurConvId : (list.length?list[0].id:null);
-  if(msgCurConvId){ const c=msgConvs().find(x=>x.id===msgCurConvId); if(c)msgMarkRead(c); }
-  renderMsgWin();
+  if(msgCurConvId) await msgOpenConvLoad(msgCurConvId);
+  else renderMsgWin();
 }
 function msgCloseWin(){ msgStopRecording(true); msgPendingAttach=[]; fwinClose('msgs',true); }
 
@@ -11220,8 +11274,8 @@ function msgConvRowHTML(c){
   const avatar=c.type==='group'?'👥':msgInitials(title);
   let lastTxt='Sin mensajes';
   if(last){
-    if(last.text) lastTxt=(last.senderId===currentUser.id?'Tú: ':'')+msgEsc(last.text);
-    else if(last.attachments&&last.attachments.length) lastTxt=(last.senderId===currentUser.id?'Tú: ':'')+'📎 '+msgAttachLabel(last.attachments[0]);
+    if(last.text) lastTxt=(last.sender_id===currentUser.id?'Tú: ':'')+msgEsc(last.text);
+    else if(last.attachments&&last.attachments.length) lastTxt=(last.sender_id===currentUser.id?'Tú: ':'')+'📎 '+msgAttachLabel(last.attachments[0]);
   }
   return `<div class="msg-conv ${c.id===msgCurConvId?'active':''}" onclick="msgOpenConv('${c.id}')">
     <div class="msg-avatar" style="background:${msgConvColor(c)};font-size:${c.type==='group'?'15px':'13px'}">${avatar}</div>
@@ -11230,18 +11284,18 @@ function msgConvRowHTML(c){
       <div class="msg-conv-last">${lastTxt}</div>
     </div>
     <div class="msg-conv-meta">
-      ${last?`<div class="msg-conv-time">${msgTimeShort(last.ts)}</div>`:''}
+      ${last?`<div class="msg-conv-time">${msgTimeShort(last.created_at)}</div>`:''}
       ${unread?`<div class="msg-unread">${unread>99?'99+':unread}</div>`:''}
     </div>
   </div>`;
 }
 
 function msgMainHTML(){
-  const conv=msgConvs().find(c=>c.id===msgCurConvId);
+  const conv=msgConvsCache.find(c=>c.id===msgCurConvId);
   if(!conv||!msgIsMember(conv)){
     return `<div class="msg-main"><div class="msg-empty"><div style="font-size:38px">✉️</div><div>Selecciona una conversación<br>o crea una nueva con “+”.</div></div></div>`;
   }
-  const msgs=conv.messages||[];
+  const msgs=msgThreadCache[conv.id]||[];
   return `<div class="msg-main">
     <div class="msg-thread-head">
       <div class="msg-avatar" style="width:30px;height:30px;background:${msgConvColor(conv)};font-size:${conv.type==='group'?'14px':'12px'}">${conv.type==='group'?'👥':msgInitials(msgConvTitle(conv))}</div>
@@ -11258,14 +11312,14 @@ function msgMainHTML(){
   </div>`;
 }
 function msgBubbleHTML(conv,m){
-  const me=currentUser&&m.senderId===currentUser.id;
+  const me=currentUser&&m.sender_id===currentUser.id;
   const showSender=conv.type==='group'&&!me;
   const atts=(m.attachments||[]).map(a=>msgAttachHTML(conv,m,a)).join('');
   const body=(m.text?`<div>${msgLinkify(msgEsc(m.text))}</div>`:'')+atts;
-  return `<div class="msg-row ${me?'me':'them'}">
-    ${showSender?`<div class="msg-sender" style="color:${msgUserColor(m.senderId)}">${msgEsc(msgUserName(m.senderId))}</div>`:''}
+  return `<div class="msg-row ${me?'me':'them'}${m._pending?' pending':''}">
+    ${showSender?`<div class="msg-sender" style="color:${msgUserColor(m.sender_id)}">${msgEsc(msgUserName(m.sender_id))}</div>`:''}
     <div class="msg-bubble">${body||'&nbsp;'}</div>
-    <div class="msg-time">${msgTimeFull(m.ts)}</div>
+    <div class="msg-time">${m._pending?'Enviando…':msgTimeFull(m.created_at)}</div>
   </div>`;
 }
 function msgAttachHTML(conv,m,a){
@@ -11293,8 +11347,17 @@ function msgRemoveStaged(id){ msgPendingAttach=msgPendingAttach.filter(a=>a.id!=
 function msgOpenConv(id){
   msgStopRecording(true); msgPendingAttach=[];
   msgCurConvId=id;
-  const c=msgConvs().find(x=>x.id===id); if(c)msgMarkRead(c);
-  renderMsgWin();
+  renderMsgWin();               // respuesta visual inmediata (spinner/estado vacío) mientras carga
+  msgOpenConvLoad(id);
+}
+// Trae el historial completo de una conversación (con adjuntos) y la marca como leída.
+async function msgOpenConvLoad(id){
+  try{
+    const d=await msgApi('GET',`/api/db/messages?conversation_id=${encodeURIComponent(id)}`);
+    msgThreadCache[id]=d.messages||[];
+  }catch(e){ console.warn('msgOpenConvLoad',e); showToast('No se pudo cargar la conversación.'); }
+  if(msgCurConvId===id) renderMsgWin();
+  await msgMarkRead(id);
 }
 function msgAutoGrow(ta){ ta.style.height='auto'; ta.style.height=Math.min(120,ta.scrollHeight)+'px'; }
 function msgComposerKey(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); msgSend(); } }
@@ -11345,27 +11408,36 @@ function msgCleanupRec(){
 }
 
 // ---- Enviar ----
-function msgTrySave(){
-  try{
-    const projectsClean=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
-    localStorage.setItem(LS_KEY,JSON.stringify({projects:projectsClean,SYS,activityLog}));
-    const t=document.getElementById('save-toast'); if(t){t.classList.add('show');clearTimeout(_saveToastTimer);_saveToastTimer=setTimeout(()=>t.classList.remove('show'),1800);}
-    return true;
-  }catch(e){ console.warn('msg save error',e); return false; }
-}
-function msgSend(){
-  const conv=msgConvs().find(c=>c.id===msgCurConvId); if(!conv||!currentUser) return;
+// Optimista: pinta el mensaje al toque con un id temporal, lo confirma (o lo revierte) cuando
+// vuelve el servidor. sender_id/read_by los fija SIEMPRE el backend (ver POST /api/db/messages) —
+// lo que se manda acá es solo lo que el usuario puede controlar de verdad: texto y adjuntos.
+async function msgSend(){
+  const convId=msgCurConvId;
+  const conv=msgConvsCache.find(c=>c.id===convId);
+  if(!conv||!currentUser) return;
   const ta=document.getElementById('msg-ta');
   const text=ta?ta.value.trim():'';
   if(!text && !msgPendingAttach.length) return;
-  const staged=msgPendingAttach.slice();
-  const msg={id:'m-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),senderId:currentUser.id,text,ts:Date.now(),attachments:staged,readBy:[currentUser.id]};
-  (conv.messages=conv.messages||[]).push(msg);
+  const atts=msgPendingAttach.slice();
   msgPendingAttach=[];
-  if(!msgTrySave()){
-    conv.messages.pop(); msgPendingAttach=staged;
-    showToast('Almacenamiento lleno: no se pudo enviar. Elimina adjuntos o mensajes antiguos.');
-    renderMsgWin(); return;
+  if(ta){ ta.value=''; msgAutoGrow(ta); }
+  const tempId='temp-'+Date.now()+'-'+Math.random().toString(36).slice(2,6);
+  const optimistic={id:tempId,conversation_id:convId,sender_id:currentUser.id,text,attachments:atts,read_by:[currentUser.id],created_at:new Date().toISOString(),_pending:true};
+  (msgThreadCache[convId]=msgThreadCache[convId]||[]).push(optimistic);
+  renderMsgWin();
+  try{
+    const saved=await msgApi('POST','/api/db/messages',{conversation_id:convId,text,attachments:atts});
+    const arr=msgThreadCache[convId]||[];
+    const idx=arr.findIndex(m=>m.id===tempId);
+    if(idx>-1) arr[idx]=saved;
+    conv.last_message=saved;
+  }catch(e){
+    const arr=msgThreadCache[convId]||[];
+    const idx=arr.findIndex(m=>m.id===tempId);
+    if(idx>-1) arr.splice(idx,1);
+    if(ta) ta.value=text;
+    msgPendingAttach=atts;
+    showToast('No se pudo enviar: '+e.message);
   }
   updateBadges();
   renderMsgWin();
@@ -11375,7 +11447,7 @@ function msgSend(){
 function msgNewConvModal(){
   if(!currentUser){ showToast('Inicia sesión.'); return; }
   msgNCType='dm';
-  const others=(SYS.users||[]).filter(u=>u.id!==currentUser.id);
+  const others=msgDirectory.filter(u=>u.id!==currentUser.id);
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">Nueva conversación<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="display:flex;gap:8px;margin-bottom:12px">
@@ -11394,7 +11466,7 @@ function msgNewConvModal(){
   document.getElementById('modal').classList.remove('hidden');
 }
 function msgNCUsersHTML(type,others){
-  others=others||(SYS.users||[]).filter(u=>u.id!==currentUser.id);
+  others=others||msgDirectory.filter(u=>u.id!==currentUser.id);
   if(!others.length) return '<div style="color:var(--t3);font-size:12px;padding:10px">No hay otros usuarios registrados.</div>';
   const inp=type==='dm'?`type="radio" name="msg-nc-user"`:`type="checkbox"`;
   return others.map(u=>`
@@ -11412,34 +11484,42 @@ function msgNCSetType(t){
   document.getElementById('msg-nc-hint').textContent=t==='group'?'Selecciona los integrantes:':'Selecciona un usuario:';
   document.getElementById('msg-nc-users').innerHTML=msgNCUsersHTML(t);
 }
-function msgCreateConv(){
-  const checks=Array.from(document.querySelectorAll('.msg-nc-check')).filter(c=>c.checked).map(c=>parseInt(c.value,10));
+async function msgCreateConv(){
+  // Los ids de la mensajería son uuid reales de Auth (VUL-044/VUL-045), no numéricos: nada de parseInt.
+  const checks=Array.from(document.querySelectorAll('.msg-nc-check')).filter(c=>c.checked).map(c=>c.value);
   if(!checks.length){ showToast(msgNCType==='group'?'Selecciona al menos un integrante.':'Selecciona un usuario.'); return; }
   if(msgNCType==='dm'){
     const otherId=checks[0];
-    const existing=msgConvs().find(c=>c.type==='dm'&&(c.memberIds||[]).length===2&&c.memberIds.includes(currentUser.id)&&c.memberIds.includes(otherId));
+    const existing=msgConvsCache.find(c=>c.type==='dm'&&(c.member_ids||[]).length===2&&c.member_ids.includes(currentUser.id)&&c.member_ids.includes(otherId));
     closeModal();
     if(existing){ msgOpenConv(existing.id); return; }
-    const conv={id:'c-'+Date.now(),type:'dm',name:'',memberIds:[currentUser.id,otherId],createdBy:currentUser.id,createdAt:Date.now(),messages:[]};
-    msgConvs().unshift(conv); saveData(); msgCurConvId=conv.id; renderMsgWin(); updateBadges();
+    try{
+      const conv=await msgApi('POST','/api/db/conversations',{type:'dm',member_ids:[currentUser.id,otherId]});
+      msgConvsCache.unshift({...conv,last_message:null,unread_count:0});
+      msgCurConvId=conv.id; msgThreadCache[conv.id]=[]; renderMsgWin(); updateBadges();
+    }catch(e){ showToast('No se pudo crear la conversación: '+e.message); }
   }else{
     const name=(document.getElementById('msg-nc-name').value||'').trim();
     if(!name){ showToast('Ponle un nombre al grupo.'); return; }
     const members=Array.from(new Set([currentUser.id,...checks]));
-    const conv={id:'c-'+Date.now(),type:'group',name,memberIds:members,createdBy:currentUser.id,createdAt:Date.now(),messages:[]};
-    closeModal(); msgConvs().unshift(conv); saveData(); msgCurConvId=conv.id; renderMsgWin(); updateBadges();
+    closeModal();
+    try{
+      const conv=await msgApi('POST','/api/db/conversations',{type:'group',name,member_ids:members});
+      msgConvsCache.unshift({...conv,last_message:null,unread_count:0});
+      msgCurConvId=conv.id; msgThreadCache[conv.id]=[]; renderMsgWin(); updateBadges();
+    }catch(e){ showToast('No se pudo crear el grupo: '+e.message); }
   }
 }
 
 // ---- Opciones de conversación ----
 function msgConvMenu(convId,e){
   if(e)e.stopPropagation();
-  const conv=msgConvs().find(c=>c.id===convId); if(!conv) return;
+  const conv=msgConvsCache.find(c=>c.id===convId); if(!conv) return;
   const isGroup=conv.type==='group';
-  const canManage=isGroup&&(conv.createdBy===currentUser.id||currentUser.role==='Administrador');
+  const canManage=isGroup&&(conv.created_by===currentUser.id||currentUser.role==='Administrador');
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">${msgEsc(msgConvTitle(conv))}<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
-    ${isGroup?`<div style="font-size:11px;color:var(--t2);margin-bottom:12px;line-height:1.5">Miembros: ${conv.memberIds.map(msgUserName).map(msgEsc).join(', ')}</div>`:''}
+    ${isGroup?`<div style="font-size:11px;color:var(--t2);margin-bottom:12px;line-height:1.5">Miembros: ${conv.member_ids.map(msgUserName).map(msgEsc).join(', ')}</div>`:''}
     <div style="display:flex;flex-direction:column;gap:8px">
       ${canManage?`<button class="btn-sm" style="text-align:left;padding:9px 12px" onclick="msgRenameGroup('${conv.id}')">✏️ Renombrar grupo</button>`:''}
       ${canManage?`<button class="btn-sm" style="text-align:left;padding:9px 12px" onclick="msgManageMembers('${conv.id}')">👥 Administrar miembros</button>`:''}
@@ -11449,18 +11529,21 @@ function msgConvMenu(convId,e){
     <div class="modal-actions"><button class="btn-cancel" onclick="closeModal()">Cerrar</button></div>`;
   document.getElementById('modal').classList.remove('hidden');
 }
-function msgRenameGroup(id){
-  const c=msgConvs().find(x=>x.id===id); if(!c) return;
-  const name=prompt('Nuevo nombre del grupo:',c.name||''); if(name===null) return;
-  if(name.trim())c.name=name.trim();
-  saveData(); closeModal(); renderMsgWin();
+async function msgRenameGroup(id){
+  const c=msgConvsCache.find(x=>x.id===id); if(!c) return;
+  const name=prompt('Nuevo nombre del grupo:',c.name||''); if(name===null||!name.trim()) return;
+  try{
+    const updated=await msgApi('PUT',`/api/db/conversations/${encodeURIComponent(id)}`,{name:name.trim()});
+    Object.assign(c,updated);
+    closeModal(); renderMsgWin();
+  }catch(e){ showToast('No se pudo renombrar: '+e.message); }
 }
 function msgManageMembers(id){
-  const c=msgConvs().find(x=>x.id===id); if(!c) return;
-  const rows=(SYS.users||[]).map(u=>{
-    const isCreator=u.id===c.createdBy;
+  const c=msgConvsCache.find(x=>x.id===id); if(!c) return;
+  const rows=msgDirectory.map(u=>{
+    const isCreator=u.id===c.created_by;
     return `<label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;cursor:${isCreator?'not-allowed':'pointer'};opacity:${isCreator?'.6':'1'}">
-      <input type="checkbox" class="msg-mm-check" value="${u.id}" ${c.memberIds.includes(u.id)?'checked':''} ${isCreator?'disabled':''} style="width:auto"/>
+      <input type="checkbox" class="msg-mm-check" value="${u.id}" ${(c.member_ids||[]).includes(u.id)?'checked':''} ${isCreator?'disabled':''} style="width:auto"/>
       <span class="msg-avatar" style="width:24px;height:24px;font-size:10px;background:${u.color}">${msgInitials(u.name)}</span>
       <span style="font-size:12px;color:var(--t1)">${msgEsc(u.name)}${isCreator?' (creador)':''}</span>
     </label>`;
@@ -11471,31 +11554,42 @@ function msgManageMembers(id){
     <div class="modal-actions"><button class="btn-cancel" onclick="msgConvMenu('${id}')">Atrás</button><button class="btn-save" onclick="msgSaveMembers('${id}')">Guardar</button></div>`;
   document.getElementById('modal').classList.remove('hidden');
 }
-function msgSaveMembers(id){
-  const c=msgConvs().find(x=>x.id===id); if(!c) return;
-  const ids=Array.from(document.querySelectorAll('.msg-mm-check')).filter(x=>x.checked).map(x=>parseInt(x.value,10));
-  ids.push(c.createdBy);
-  c.memberIds=Array.from(new Set(ids));
-  saveData(); closeModal(); updateBadges(); renderMsgWin();
+async function msgSaveMembers(id){
+  const c=msgConvsCache.find(x=>x.id===id); if(!c) return;
+  const ids=Array.from(document.querySelectorAll('.msg-mm-check')).filter(x=>x.checked).map(x=>x.value);
+  ids.push(c.created_by);
+  try{
+    const updated=await msgApi('PUT',`/api/db/conversations/${encodeURIComponent(id)}`,{member_ids:Array.from(new Set(ids))});
+    Object.assign(c,updated);
+    closeModal(); updateBadges(); renderMsgWin();
+  }catch(e){ showToast('No se pudo guardar: '+e.message); }
 }
-function msgLeaveGroup(id){
-  const c=msgConvs().find(x=>x.id===id); if(!c) return;
+async function msgLeaveGroup(id){
+  const c=msgConvsCache.find(x=>x.id===id); if(!c) return;
   if(!confirm('¿Salir de este grupo?')) return;
-  c.memberIds=(c.memberIds||[]).filter(m=>m!==currentUser.id);
-  if(msgCurConvId===id) msgCurConvId=null;
-  saveData(); closeModal(); updateBadges(); renderMsgWin();
+  try{
+    await msgApi('POST',`/api/db/conversations/${encodeURIComponent(id)}/leave`);
+    msgConvsCache=msgConvsCache.filter(x=>x.id!==id);
+    delete msgThreadCache[id];
+    if(msgCurConvId===id) msgCurConvId=null;
+    closeModal(); updateBadges(); renderMsgWin();
+  }catch(e){ showToast('No se pudo salir del grupo: '+e.message); }
 }
-function msgDeleteConv(id){
+async function msgDeleteConv(id){
   if(!confirm('¿Eliminar esta conversación y todos sus mensajes? Esta acción no se puede deshacer.')) return;
-  SYS.conversations=msgConvs().filter(c=>c.id!==id);
-  if(msgCurConvId===id) msgCurConvId=null;
-  saveData(); closeModal(); updateBadges(); renderMsgWin();
+  try{
+    await msgApi('DELETE',`/api/db/conversations/${encodeURIComponent(id)}`);
+    msgConvsCache=msgConvsCache.filter(c=>c.id!==id);
+    delete msgThreadCache[id];
+    if(msgCurConvId===id) msgCurConvId=null;
+    closeModal(); updateBadges(); renderMsgWin();
+  }catch(e){ showToast('No se pudo eliminar: '+e.message); }
 }
 
 // ---- Visor de imagen ----
 function msgLightbox(convId,msgId,attId){
-  const c=msgConvs().find(x=>x.id===convId); if(!c)return;
-  const m=(c.messages||[]).find(x=>x.id===msgId); if(!m)return;
+  const msgs=msgThreadCache[convId]||[];
+  const m=msgs.find(x=>x.id===msgId); if(!m)return;
   const a=(m.attachments||[]).find(x=>x.id===attId); if(!a)return;
   document.getElementById('modal-inner').innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px">
