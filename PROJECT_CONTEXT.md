@@ -936,9 +936,19 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     desencriptación** (prueba que el `authTag` de GCM funciona de verdad, no solo AES sin integridad), y que una
     clave distinta a la usada para cifrar no desencripta.
 - [ ] **VUL-043 | Secretos en el historial de Git — requiere ROTACIÓN MANUAL del OWNER** (ALTA)
-  - Verificado: `.env` y `.env.save` **siguen en commits anteriores** de `siscon-backend` aunque ya no estén en el
-    checkout. Borrar el archivo no invalida las copias. Ver el plan de rotación en 12.12: `SISCON_TOKEN`,
-    `client_secret` de Intuit, `ANTHROPIC_API_KEY`, anon key de Supabase. **Claude no puede hacer esto.**
+  - **Re-verificado línea por línea contra el historial real de ambos repos (2026-07-24+)** — no solo repetido de
+    memoria. Confirmado con evidencia (valores reales, no plantillas):
+    - `siscon-backend`, archivos `.env` y `.env.save`, commit `abadc64`: `ANTHROPIC_API_KEY` (real, 108 chars),
+      `SISCON_TOKEN` (real), y **`MS_CLIENT_SECRET`/`MS_CLIENT_ID`/`MS_TENANT_ID`** (reales, formato Azure —
+      **este trío NO estaba en el plan de rotación anterior**, es un hallazgo nuevo de esta re-verificación).
+    - `siscon-web/index.html`, commits `5e8a9fb` (se agregó) / `4329303` (se quitó): anon key de Supabase, JWT
+      completo visible en el diff.
+    - `siscon-backend`: `client_secret` de Intuit — **NO se encontró evidencia** en el historial (solo la línea
+      vacía de plantilla en `.env.example`). Se mantiene en la lista por precaución barata, pero sin confirmar.
+    - **Buena noticia verificada:** `SUPABASE_SERVICE_ROLE_KEY` (la llave que ignora RLS) **nunca apareció** en
+      el historial de ninguno de los dos repos.
+  - Borrar los archivos no invalida las copias que ya están en el historial. Ver el plan de rotación detallado,
+    con el orden seguro y el impacto operativo de cada paso, en **12.12**. **Claude no puede ejecutar esto.**
 - [ ] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA — proyecto aparte)
   - Los 4 usuarios comparten un solo registro `settings/1` con proyectos, ajustes, actividad **y todas las
     conversaciones**: el filtro de mensajes privados existe **solo en la interfaz**, así que cada navegador
@@ -1819,15 +1829,48 @@ Lunes 2026-07-24      Martes 2026-07-25     Miércoles 2026-07-26    Jueves 2026
 ### 12.12 Plan de rotación de secretos (acciones manuales del OWNER)
 
 > Los secretos que alguna vez estuvieron en Git o en el frontend deben considerarse **comprometidos**. Claude no
-> ejecuta estas acciones; las prepara y el OWNER las realiza.
+> ejecuta estas acciones; las prepara y el OWNER las realiza. **Re-verificado contra el historial real de ambos
+> repos el 2026-07-24+** (no repetido de memoria) — ver evidencia exacta en VUL-043, Sección 10.
+>
+> Orden pensado para minimizar riesgo de romper algo: primero lo que no tiene impacto operativo, al final lo más
+> delicado. Para las credenciales OAuth (Microsoft, Intuit) la secuencia importa: crear el secreto nuevo → ponerlo
+> en Render → confirmar que sigue funcionando → **recién ahí** borrar el viejo. Invertir ese orden corta la
+> integración hasta corregirlo.
 
-- Rotar `SISCON_TOKEN` (dejará de usarse como auth, pero rotarlo cierra el valor viejo).
-- Rotar el `client_secret` de Intuit (QuickBooks).
-- Rotar la `ANTHROPIC_API_KEY` si estuvo expuesta en el frontend.
-- Revisar en QuickBooks: Apps conectadas, Audit Log, facturas/proveedores/pagos recientes.
-- Revocar y volver a autorizar la conexión de QuickBooks **después** del despliegue corregido.
-- Invalidar sesiones existentes (con Access como IdP, se logra revocando en Entra / rotando la config de Access).
-- **No** reescribir el historial de Git de forma destructiva sin autorización; la rotación es obligatoria porque borrar el archivo actual no invalida las copias anteriores.
+1. **`SISCON_TOKEN`** — riesgo cero. Hoy es inerte en producción: `checkToken()` nunca lo revisa porque
+   `CLOUDFLARE_ENABLED=true` ya deja pasar antes de llegar a esa comprobación. Rotar en Render cuando sea.
+
+2. **`ANTHROPIC_API_KEY`** — bajo riesgo, ~1 minuto de pausa. Generar la nueva en la consola de Anthropic → ponerla
+   en Render → Render reinicia el servicio solo. Durante ese reinicio, OCR de facturas y el chat con Claude no
+   responden (sin pérdida de datos). Revocar la vieja en Anthropic **después** de confirmar que la nueva funciona.
+
+3. **`MS_CLIENT_SECRET`** (+ `MS_CLIENT_ID`/`MS_TENANT_ID`, expuestos en el mismo commit) — el hallazgo nuevo de la
+   re-verificación; requiere el orden correcto. Azure Portal → App registrations → la app de **Graph/Outlook**
+   (no la de Cloudflare Access — son dos apps distintas) → Certificates & secrets → nuevo secreto. Secuencia:
+   (1) crear el secreto nuevo en Azure sin borrar el viejo → (2) `MS_CLIENT_SECRET` nuevo en Render → (3)
+   confirmar que Outlook sigue sincronizando (`GET /api/ms/status` o logs de Render) → (4) recién ahí borrar el
+   secreto viejo en Azure. Al revés: la sincronización de `facturas@sisconcr.com` se cae hasta corregirlo (los
+   correos no se pierden, solo se pausa la importación automática).
+
+4. **`client_secret` de Intuit (QuickBooks)** — no se encontró evidencia de que este haya estado expuesto en el
+   historial (solo la plantilla vacía), se mantiene por precaución. Mismo patrón de secuencia que Microsoft:
+   nuevo secreto en Intuit Developer Portal → Render → confirmar → borrar el viejo. Después, **reconectar
+   QuickBooks desde Ajustes** (el refresh token actual quedó asociado al secreto viejo). Revisar de paso en
+   QuickBooks: Apps conectadas, Audit Log, facturas/proveedores/pagos recientes. Mientras se hace, la
+   sincronización de lectura de QB se pausa (sin pérdida de datos).
+
+5. **Anon key de Supabase** — la más delicada, dejarla para el final. En Supabase, el anon key y el
+   `service_role` key comparten el mismo secreto JWT del proyecto: invalidar de verdad el anon key expuesto
+   implica regenerar ese secreto, lo que también invalida las sesiones activas de Supabase Auth (podría
+   desloguear a los 4 usuarios de golpe). Mitigante ya verificado esta sesión: con RLS `FORCE` + 0 políticas
+   (VUL-016), usar ese anon key hoy devuelve **vacío** en todas las tablas — es urgente pero no crítico. Hacerlo
+   en una ventana avisada, no a ciegas — Claude no tiene acceso al dashboard de Supabase para verificar el paso
+   exacto antes de ejecutarlo.
+
+- `SUPABASE_SERVICE_ROLE_KEY` (la llave que ignora RLS) **nunca apareció** en el historial de ninguno de los dos
+  repos — verificado, no requiere rotación por este motivo.
+- **No** reescribir el historial de Git de forma destructiva sin autorización explícita; la rotación es
+  obligatoria precisamente porque borrar el archivo actual no invalida las copias anteriores en el historial.
 
 ---
 
