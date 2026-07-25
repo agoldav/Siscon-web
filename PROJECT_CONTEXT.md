@@ -846,9 +846,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     `"><script>...`, comillas dobles/simples que rompen atributos) verificando que ningún payload sobrevive
     intacto en el HTML resultante y que sí aparece su forma escapada (no se perdió el dato).
 
-- **Suite de pruebas al cierre de la sesión: 196 en verde.**
+- **Suite de pruebas al cierre de la sesión: 223 en verde.**
   `siscon-backend`: `test-cf-access` 12 · `test-auth-legacy` 31 · `test-table-policy` 37 · `test-schema-rls` 10 ·
-  `test-oauth-hardening` 43 (VUL-037/038/041/042 + cierre de la nota pendiente de VUL-025/026/027).
+  `test-oauth-hardening` 43 (VUL-037/038/041/042 + cierre de la nota pendiente de VUL-025/026/027) ·
+  `test-backups-hardening` 27 (VUL-040 — incluye round-trip real de `encryptBackup()` contra `crypto` de Node).
   `siscon-web`: `test-passwords` 21 · `test-concurrency` 13 · `test-xss` 29.
 
 ## 10. ⏳ Pendiente
@@ -857,7 +858,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### 🔴 Seguridad — hallazgos ABIERTOS de la revisión externa #2 (2026-07-24)
 > Verificados contra el código real. Ordenados por severidad.
-> Con VUL-036 cerrada y este lote (037/038/041/042), solo quedan abiertas VUL-040, 043, 044, 045.
+> Con VUL-036 y 037/038/040/041/042 cerradas, solo quedan abiertas VUL-043, 044, 045 — y VUL-043
+> requiere al OWNER (rotar secretos), VUL-044/045 son arquitectónicas (requieren decisión de diseño).
 
 - [x] **VUL-037 | `/api/ms/refresh-token` entrega el refresh token de Outlook a cualquier usuario** (ALTA)
   - No validaba rol Admin (`checkToken` devuelve `true` con Access encendido — valida identidad, no rol). Era
@@ -901,10 +903,38 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   comparación de `realmId` (con/sin `QBO_REALM_ID`, coincide/no coincide), y — para VUL-041 — las 4 combinaciones
   reales de `checkToken()`: sin nada configurado → 503; con el opt-in → 200 (dev local sigue igual); con el
   opt-in + `SISCON_TOKEN` → 401/200 según el header; con Access activo → 403 (el fix es no-op en producción).
-- [ ] **VUL-040 | Backups sin control de rol ni cifrado** (MEDIA)
-  - `POST /api/backups/create` solo exige usuario autenticado → cualquiera de los 4 se lleva una copia completa a
-    Dropbox. El archivo va comprimido, **no cifrado**. `POST /api/backups/restore/:id` acepta cualquier
-    `confirmPassword` no vacío (`// TODO: validar contraseña`) y **no restaura nada** — responde como si sí.
+- [x] **VUL-040 | Backups sin control de rol ni cifrado** (MEDIA)
+  - `POST /api/backups/create` solo exigía usuario autenticado → cualquiera de los 4 se llevaba una copia completa
+    a Dropbox (incluida `settings`, el blob con TODAS las conversaciones privadas). El archivo iba comprimido,
+    **no cifrado**. `POST /api/backups/restore/:id` aceptaba cualquier `confirmPassword` no vacío
+    (`// TODO: validar contraseña`, nunca completado) y **no restauraba nada** — respondía como si sí, lo que en
+    medio de un incidente real podía hacerle creer a un Admin que sus datos ya estaban recuperados.
+  - **Hallazgo al investigar:** el frontend **no llama a ninguna de las 3 rutas** — no hay UI conectada, y Dropbox
+    tampoco está configurado en producción hoy (confirmado: `.env.example` no traía ninguna variable de Dropbox;
+    coincide con "Backups automáticos" listado como Pendiente). Esto bajó el riesgo inmediato pero no la
+    necesidad del fix: en cuanto alguien configure Dropbox, el hueco se activa solo.
+  - **Corregido:**
+    - `GET /api/backups/list` y `POST /api/backups/create` ahora exigen `validateAdminRole()`.
+    - Cifrado real con AES-256-GCM (`encryptBackup()`, usa el `crypto` ya importado, sin dependencias nuevas)
+      antes de subir a Dropbox, tanto en el endpoint manual como en el scheduler automático (que duplicaba la
+      misma subida sin cifrar). Formato: `iv(12) || authTag(16) || ciphertext`. **Fail-closed** (mismo patrón que
+      VUL-041): sin `BACKUP_ENCRYPTION_KEY` configurada (64 hex = 32 bytes) o con formato inválido, no se sube
+      nada sin cifrar — se rechaza. El scheduler además exige la clave para **arrancar el `setInterval`**, no
+      solo para fallar en cada ciclo. Extensión de archivo `.json.gz.enc` (ya no `.json.gz` a secas).
+    - `POST /api/backups/restore/:id`: se quitó el `confirmPassword` (nunca se comparaba contra nada — era pura
+      apariencia de control). La respuesta ahora es **501 `not_implemented`**, honesta: el backup existe en
+      Dropbox pero no hay restauración automática construida (descargar/desencriptar/reimportar sigue siendo
+      manual). Se sigue auditando el intento (`RESTORE_REQUESTED`). El gate de Administrador que ya tenía se
+      dejó intacto.
+    - `.env.example` documentó por primera vez las variables de Dropbox (no estaban) + `BACKUP_ENCRYPTION_KEY`
+      con el comando exacto para generarla.
+  - Pruebas: `siscon-backend/test-backups-hardening.js` (27/27) — 403 sin JWT en las 3 rutas; cableado de
+    `validateAdminRole` en list/create; que `restore` ya no lee `confirmPassword` del body y responde 501 sin
+    fingir éxito; y, lo más importante, `encryptBackup()` extraída y probada con `crypto` de Node de verdad:
+    fail-closed sin clave/con clave inválida, **round-trip real** (cifra → desencripta con Node crypto → recupera
+    el texto exacto), IV no reutilizado entre llamadas, **manipular un solo byte del ciphertext hace fallar la
+    desencriptación** (prueba que el `authTag` de GCM funciona de verdad, no solo AES sin integridad), y que una
+    clave distinta a la usada para cifrar no desencripta.
 - [ ] **VUL-043 | Secretos en el historial de Git — requiere ROTACIÓN MANUAL del OWNER** (ALTA)
   - Verificado: `.env` y `.env.save` **siguen en commits anteriores** de `siscon-backend` aunque ya no estén en el
     checkout. Borrar el archivo no invalida las copias. Ver el plan de rotación en 12.12: `SISCON_TOKEN`,
@@ -977,7 +1007,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > ⚠️ **Estado (2026-07-24+, tras la revisión externa #2): NO todo está cerrado.** La afirmación anterior de que
 > "todas las vulnerabilidades están cerradas" era **incorrecta** y una revisión independiente lo demostró.
 > Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..036 y 039. **Ya no queda ninguna CRÍTICA abierta.**
-> Abiertas (ALTA/MEDIA): VUL-040, 043, 044, 045 (ver Sección 10). VUL-037/038/041/042 cerradas 2026-07-24+.
+> Abiertas: VUL-043 (ALTA, requiere al OWNER), VUL-044/045 (arquitectónicas, ver Sección 10).
+> VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
 > VUL-021/022 siguen superadas por Cloudflare Access.
