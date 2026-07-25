@@ -771,8 +771,52 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     bytes) y UTF-8 multibyte. **La prueba encontró un bug real**: la longitud de 64 bits iba con las palabras alta
     y baja invertidas, así que solo el string vacío daba el hash correcto.
 
+- [x] **VUL-035 | El CRUD genérico no validaba rol, propiedad ni columnas** (CRÍTICA)
+  - `createCrudRoutes` solo comprobaba que existiera un usuario, y `TABLES` incluye `profiles`. **Explotable:**
+    un usuario **Regular** hacía `PUT /api/db/profiles/{su-id}` con `{"role":"Administrador"}` y se auto-promovía.
+    También leer/reemplazar la configuración completa, borrar perfiles ajenos y disparar `/api/db/import`.
+    RLS no lo frenaba: el backend usa `service_role` (BYPASSRLS).
+  - **NO se eliminó la factory** (rompería la app: todo el runtime va por `settings/1`). Se le puso delante una
+    política por tabla y acción, en `table-policy.js` (módulo aparte para poder probarla sin HTTP ni Supabase,
+    mismo patrón que `cf-access.js`):
+    | Tabla | read | create | update | delete |
+    |---|---|---|---|---|
+    | `settings` (el blob de la app) | any | admin | **any** | admin |
+    | `profiles` | admin | **none** | **none** | **none** |
+    | las otras 15 (por defecto) | admin | admin | admin | admin |
+  - `none` = bloqueado por esta vía **incluso para un Administrador**: los roles se cambian por
+    `PUT /api/auth/users/:id/role`, que valida rol y audita. El default es **fail-closed**: una tabla nueva nace
+    cerrada.
+  - **Por qué no rompe nada:** se verificó que el frontend solo usa `GET/PUT /api/db/settings/1` (4 llamadas) y
+    `POST /api/db/import` (1). Las otras 16 tablas no están en la ruta de datos viva. Además
+    `migrateLocalStorageToSupabase` (la única que llamaba a `import`) está **definida pero nunca se invoca**.
+  - `POST /api/db/import` pasa a exigir Administrador (escritura masiva sobre 15 tablas).
+  - `stripCamposControlados()` quita `deleted_at`/`created_at`/`updated_at` de los payloads: `deleted_at`
+    permitía borrar o revivir registros sin pasar por DELETE (donde se aplica la política y se audita), y
+    `updated_at` habría permitido falsear la versión del control de concurrencia de VUL-033.
+  - Pruebas: `test-table-policy.js` (37/37) — el exploit exacto contra `profiles` para los 3 roles, que `settings`
+    siga funcionando para todos (si esto se rompe, la app deja de guardar), las 15 tablas × 4 acciones × 2 roles,
+    fail-closed ante tabla/acción/rol desconocidos, y el cableado en `server.js`.
+
+- [x] **VUL-039 | `SUPABASE_SCHEMA.sql` reabría RLS** (ALTA si se ejecutaba)
+  - El archivo creaba `create policy ... for all to authenticated using(true) with check(true)` en todas las
+    tablas de negocio, más lectura en `settings` y `audit_log`. Correrlo en un restore o en un despliegue nuevo
+    **deshacía silenciosamente** el hardening: cualquiera con la anon key (pública por definición) leía y escribía
+    todo, incluida `settings`, que contiene el blob con TODOS los datos. Contradecía la documentación, que afirma
+    que producción tiene 0 políticas.
+  - **Corregido:** el archivo ya no crea ninguna política. Ahora hace `enable` + `force row level security` en las
+    18 tablas y **purga** las políticas preexistentes recorriendo `pg_policies` (no depende de acertar los
+    nombres), así que correrlo sobre una instalación con la versión vieja aplicada la **limpia** en vez de dejarla
+    a medias. Idempotente. Queda una consulta de verificación comentada al final (debe devolver 0 filas).
+  - Pruebas: `test-schema-rls.js` (10/10) — analiza el SQL ignorando comentarios (lo que importa es lo que se
+    ejecuta) y falla si reaparece cualquier `create policy`, `using(true)` o `with check(true)`.
+
 - Nota de higiene: la revisión detectó que `test-oauth-vul.js` (documentado antes como "6/6 PASS") **no existe en
   el repo**. Corregido en la Sección 11: VUL-025/026/027 están implementadas pero **sin pruebas automatizadas**.
+
+- **Suite de pruebas al cierre de la sesión: 124 en verde.**
+  `siscon-backend`: `test-cf-access` 12 · `test-auth-legacy` 31 · `test-table-policy` 37 · `test-schema-rls` 10.
+  `siscon-web`: `test-passwords` 21 · `test-concurrency` 13.
 
 ## 10. ⏳ Pendiente
 
@@ -782,15 +826,6 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > Verificados contra el código real. **No** están corregidos. Ordenados por severidad.
 > El nivel de riesgo global sigue siendo **alto** hasta cerrar VUL-035 y VUL-036.
 
-- [ ] **VUL-035 | El CRUD genérico no valida rol, propiedad ni columnas** (CRÍTICA)
-  - `createCrudRoutes` (`server.js`) solo comprueba que exista un usuario. `TABLES` incluye `profiles` y `settings`.
-  - **Explotable hoy:** un usuario **Regular** puede `PUT /api/db/profiles/{su-id}` con `{"role":"Administrador"}`
-    y auto-promoverse. También leer/reemplazar toda la configuración, borrar perfiles ajenos y usar `/api/db/import`.
-  - Como el backend usa `service_role`, **RLS no protege** contra esto (por eso VUL-014/015 se habían dado por
-    "no aplican": esa conclusión depende de que el backend sea buen guardián, y hoy no lo es).
-  - **Plan acordado:** NO eliminar la factory (rompería la app entera, todo el runtime va por `settings/1`). En su
-    lugar, capa de allowlist por tabla y rol: `profiles` sin escritura por CRUD (los roles ya se cambian por
-    `PUT /api/auth/users/:id/role`, que sí valida Admin), `/api/db/import` solo Admin, `DELETE` solo Admin.
 - [ ] **VUL-036 | XSS almacenado — la remediación de VUL-028 quedó incompleta** (CRÍTICA)
   - `esc()` existe y se usa en ~113 puntos, pero quedaron sinks sin escapar con datos libres:
     `cellVal` (`p.name`, `p.client`), notas de documentos, `openUsersModal` (nombre/email mostrados al admin),
@@ -805,10 +840,6 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [ ] **VUL-038 | OAuth de Microsoft con `state` fijo y sin validar** (MEDIA)
   - `/api/ms/connect` manda `state:'siscon'` y el callback no lo comprueba. Aplicar lo mismo que ya se hizo en
     QuickBooks (VUL-025): `state` aleatorio, un solo uso, con TTL.
-- [ ] **VUL-039 | `SUPABASE_SCHEMA.sql` reabre RLS** (ALTA si se ejecuta)
-  - Línea ~358: crea `policy ... for all to authenticated using(true) with check(true)` en todas las tablas de
-    negocio. Contradice lo documentado (producción tiene 0 políticas). Si alguien corre el archivo en un restore
-    o en un despliegue nuevo, **reabre el acceso directo con la anon key**. Hay que corregir el archivo.
 - [ ] **VUL-040 | Backups sin control de rol ni cifrado** (MEDIA)
   - `POST /api/backups/create` solo exige usuario autenticado → cualquiera de los 4 se lleva una copia completa a
     Dropbox. El archivo va comprimido, **no cifrado**. `POST /api/backups/restore/:id` acepta cualquier
@@ -890,10 +921,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 > ⚠️ **Estado (2026-07-24+, tras la revisión externa #2): NO todo está cerrado.** La afirmación anterior de que
 > "todas las vulnerabilidades están cerradas" era **incorrecta** y una revisión independiente lo demostró.
-> Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..034. **Abiertas: VUL-035 a VUL-044** (ver Sección 10),
-> entre ellas dos críticas: **autorización por rol en el CRUD (VUL-035)** y **XSS almacenado (VUL-036, que reabre
-> VUL-028)**. VUL-014/015 se mantienen como "no aplican por arquitectura", **pero esa conclusión depende de que el
-> backend sea buen guardián** — y VUL-035 muestra que hoy no lo es del todo; revisar de nuevo al cerrarla.
+> Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..035 y 039. **Abiertas: VUL-036, 037, 038, 040 a 045**
+> (ver Sección 10). La crítica que queda es **VUL-036 — XSS almacenado** (reabre VUL-028).
+> VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
+> guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
 > VUL-021/022 siguen superadas por Cloudflare Access.
 >
 > **Lección de proceso:** varias VULs se marcaron cerradas por diseño o "dirigidas por riesgo" sin verificación
