@@ -726,7 +726,17 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - **Alcance real del riesgo:** con Access encendido esto **no** daba acceso a los datos (`/api/db/*` sí exigía
     JWT); era toma de control de la identidad de Supabase. Crítico igualmente por ser la última línea si Access
     llegara a apagarse o quedar mal configurado.
-  - Pruebas: `siscon-backend/test-auth-legacy.js` (29/29) — levanta el `server.js` real en un proceso hijo y
+  - **Verificado EN VIVO durante el deploy (2026-07-24), con evidencia del antes y el después.** Se sondeó
+    `POST https://siscon-backend.onrender.com/api/auth/reset-password` (sin JWT, con `resetCode:"cualquiercosa"`
+    y un email inexistente a propósito) mientras Render desplegaba:
+    - Antes de que entrara el deploy → **404 `{"error":"Usuario no encontrado"}"`** ← el código viejo respondiendo:
+      **buscó el usuario por email**. Con un email real habría seguido hasta `updateUserById` y le habría cambiado
+      la contraseña. Confirma que la vulnerabilidad estaba viva en producción, no era teórica.
+    - Después del deploy → **403 `{"error":"Missing Cloudflare Access JWT"}`**.
+    - Barrido final: `signup`, `forgot-password`, `signin`, `accept-invitation`, `/api/db/settings/1` y
+      `/api/ms/refresh-token` → **403**; `/health` → **200** (sigue público, como debe).
+  - Commits: backend `126f1c6`, frontend `adbbc3f`.
+  - Pruebas: `siscon-backend/test-auth-legacy.js` (31/31) — levanta el `server.js` real en un proceso hijo y
     verifica 403 sin JWT en las 6 rutas legadas + `/api/db/*` + `/api/me`, 410 en los handlers, y que la lista
     de públicos siga teniendo solo salud.
 
