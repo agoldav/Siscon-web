@@ -846,12 +846,13 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     `"><script>...`, comillas dobles/simples que rompen atributos) verificando que ningún payload sobrevive
     intacto en el HTML resultante y que sí aparece su forma escapada (no se perdió el dato).
 
-- **Suite de pruebas al cierre de la sesión: 239 en verde** (actualizado tras el incidente en vivo y su fix).
+- **Suite de pruebas al cierre de la sesión: 251 en verde** (actualizado tras el incidente en vivo y sus 3 fixes).
   `siscon-backend`: `test-cf-access` 12 · `test-auth-legacy` 31 · `test-table-policy` 37 · `test-schema-rls` 10 ·
   `test-oauth-hardening` 43 (VUL-037/038/041/042 + cierre de la nota pendiente de VUL-025/026/027) ·
   `test-backups-hardening` 27 (VUL-040 — incluye round-trip real de `encryptBackup()` contra `crypto` de Node) ·
   `test-force-overwrite` 13 (bug real de "guardar de todos modos", ver el incidente en vivo más abajo).
-  `siscon-web`: `test-passwords` 21 · `test-concurrency` 16 · `test-xss` 29.
+  `siscon-web`: `test-passwords` 21 · `test-concurrency` 21 · `test-xss` 29 · `test-save-queue` 7 (bug real del
+  "conflicto contra uno mismo" por guardados solapados — comportamiento real bajo concurrencia, no solo patrón).
 
 ### Sesión 2026-07-24+ (incidente en vivo — login caído tras el hardening; causa real: DNS, no el código)
 > **Producción:** `app.sisconcr.com` quedó devolviendo 502 en el login para todos los usuarios. Investigado y
@@ -921,6 +922,30 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     exigiendo la versión correcta, y el caso borde de fila inexistente con `force`. `siscon-web/test-concurrency.js`
     actualizado (16/16) para el nuevo cableado del frontend.
   - Commits: backend `60141ea`, frontend `8c9d6d4`.
+- **Tercer bug real, encontrado al reproducir el segundo:** tras el fix anterior, el usuario seguía viendo el
+  diálogo "otro usuario guardó cambios" **con una sola pestaña abierta y sin nadie más usando la app** — se
+  confirmó explícitamente que no había otras pestañas/ventanas propias abiertas.
+  - **Causa:** `saveData()` se llama **~127 veces** en `index.html`, y dispara `saveDataToAPI()` sin esperarlo
+    (fire-and-forget). Si una sola acción del usuario (p.ej. crear un proyecto) disparaba dos `saveData()` casi
+    seguidos, ambas llamadas leían el mismo `_settingsVersion` antes de que ninguna respondiera; la primera en
+    volver actualizaba la versión en el servidor, la segunda llegaba con la versión ya vieja y el servidor
+    (correctamente) la marcaba como conflicto — pero el conflicto era **contra sí misma**, en la misma pestaña,
+    sin que existiera ningún otro usuario. Un gap real en el diseño de VUL-033 que no se detectó hasta probarlo
+    con uso real de la app (crear algo, no solo cargar/guardar una vez).
+  - **Corregido:** `saveDataToAPI()` pasa a ser un wrapper con **cola de un solo hueco**. `_saveInFlight` guarda
+    la promesa del guardado en curso; una llamada nueva mientras hay una en vuelo se marca `_saveQueued=true` y
+    reutiliza esa misma promesa en vez de disparar una petición nueva. Al terminar, si quedó algo encolado, se
+    dispara **un solo** guardado de seguimiento (no uno por cada llamada encolada), ya con la versión fresca que
+    acaba de devolver el servidor — nunca choca consigo mismo. Ese guardado de seguimiento nunca hereda
+    `force:true` de una llamada anterior. La lógica real se movió a `_saveDataToAPICore(forzar)`;
+    `_handleSaveConflict` llama al **core directo**, no al wrapper con cola, para evitar un punto muerto (el
+    wrapper vería ese guardado como "ya en vuelo" — es el mismo — y nunca ejecutaría el forzado).
+  - Pruebas: `siscon-web/test-save-queue.js` (7/7, **nuevo**) — extrae el bloque real de `index.html` y lo
+    ejecuta con un `fetch` simulado con **latencia real** (via `setTimeout`), disparando 5 llamadas a
+    `saveDataToAPI()` en el mismo tick (el patrón real del bug) y verificando que **nunca hay más de 1 PUT en
+    vuelo a la vez** — no es una prueba de patrón de código, es de comportamiento real bajo concurrencia.
+    `test-concurrency.js` actualizado (21/21) con el cableado de la cola.
+  - Commits: frontend `8e93d7a`; ajuste de una verificación cruzada en backend `24f2edc` (sin cambios de lógica).
 
 ## 10. ⏳ Pendiente
 
