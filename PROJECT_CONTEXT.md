@@ -846,11 +846,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     `"><script>...`, comillas dobles/simples que rompen atributos) verificando que ningún payload sobrevive
     intacto en el HTML resultante y que sí aparece su forma escapada (no se perdió el dato).
 
-- **Suite de pruebas al cierre de la sesión: 223 en verde.**
+- **Suite de pruebas al cierre de la sesión: 239 en verde** (actualizado tras el incidente en vivo y su fix).
   `siscon-backend`: `test-cf-access` 12 · `test-auth-legacy` 31 · `test-table-policy` 37 · `test-schema-rls` 10 ·
   `test-oauth-hardening` 43 (VUL-037/038/041/042 + cierre de la nota pendiente de VUL-025/026/027) ·
-  `test-backups-hardening` 27 (VUL-040 — incluye round-trip real de `encryptBackup()` contra `crypto` de Node).
-  `siscon-web`: `test-passwords` 21 · `test-concurrency` 13 · `test-xss` 29.
+  `test-backups-hardening` 27 (VUL-040 — incluye round-trip real de `encryptBackup()` contra `crypto` de Node) ·
+  `test-force-overwrite` 13 (bug real de "guardar de todos modos", ver el incidente en vivo más abajo).
+  `siscon-web`: `test-passwords` 21 · `test-concurrency` 16 · `test-xss` 29.
 
 ### Sesión 2026-07-24+ (incidente en vivo — login caído tras el hardening; causa real: DNS, no el código)
 > **Producción:** `app.sisconcr.com` quedó devolviendo 502 en el login para todos los usuarios. Investigado y
@@ -897,6 +898,29 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   por ahora (una dependencia de DNS menos). **Pendiente:** cuando el OWNER recupere acceso al dashboard de
   Cloudflare, investigar por qué desapareció (o si alguna vez existió de verdad) el registro DNS de `api`, y
   confirmar que nada más en la arquitectura documentada en Sección 12 dependa de que ese hostname exista.
+- **Segundo bug real, encontrado al probar el guardado tras la mitigación:** al aparecer el diálogo de conflicto
+  (409, "otro usuario guardó cambios mientras trabajabas") y elegir "Cancelar" (guardar de todos modos), el
+  guardado **siempre** fallaba con `428 missing_version` en vez de sobrescribir.
+  - **Causa:** dos protecciones de esta misma sesión se contradecían entre sí. VUL-033 diseñó el diálogo de
+    conflicto con una vía de escape explícita ("sobrescribir de todos modos"), implementada poniendo
+    `_settingsVersion=null` para saltarse la condición de versión. La decisión posterior de **modo estricto**
+    (VUL-041) trató *cualquier* `expected_updated_at` faltante como "nunca cargó" y lo rechazó con 428 — sin
+    distinguir esa elección explícita del usuario del caso real que el modo estricto quería cubrir (carga inicial
+    fallida en silencio). El bug lo introduje yo al agregar el modo estricto sin reconciliarlo contra la vía de
+    escape que ya existía.
+  - **Corregido:** `force` es ahora una señal explícita, distinta de "no mandé nada". El chequeo pasa a
+    `if (!expected_updated_at && !force)`. Con `force:true` la query salta `.eq('updated_at', ...)` por completo
+    (sobrescribe sin condición — exactamente lo que el diálogo le prometía al usuario). Caso borde corregido de
+    paso: con `force:true` y la fila ya inexistente, responde 404 en vez del engañoso 409 "otro usuario guardó"
+    (con force no hay nada que comparar). Se audita como `UPDATE_FORCED_OVERWRITE`, distinguible de un guardado
+    normal en `/api/audit-log`.
+  - Pruebas: `siscon-backend/test-force-overwrite.js` (13/13) — extrae el handler **real** de
+    `PUT /api/db/settings/:id` (no una reimplementación) y lo ejecuta contra un Supabase simulado que reproduce
+    el chaining real de `supabase-js` (incluye ser "thenable" para `.update().eq().select()` sin `.single()`).
+    Cubre el bug exacto, que el modo estricto real sigue cerrado sin `force`, que el guardado normal sigue
+    exigiendo la versión correcta, y el caso borde de fila inexistente con `force`. `siscon-web/test-concurrency.js`
+    actualizado (16/16) para el nuevo cableado del frontend.
+  - Commits: backend `60141ea`, frontend `8c9d6d4`.
 
 ## 10. ⏳ Pendiente
 
