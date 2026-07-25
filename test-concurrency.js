@@ -65,11 +65,29 @@ const cuerpoConflict = html.slice(iConflict, iConflictFin);
 // bug; lo que importa es que no haya una asignación real — que sí termina en ";" pegado al null)
 ok('ya NO asigna _settingsVersion=null para forzar (esa era la causa del bug)',
   !/_settingsVersion\s*=\s*null;/.test(cuerpoConflict));
-ok('"guardar de todos modos" llama a saveDataToAPI(true) — señal explícita de forzar',
-  /return await saveDataToAPI\(true\)/.test(cuerpoConflict));
-ok('saveDataToAPI acepta el parámetro forzar', /async function saveDataToAPI\(forzar\)/.test(html));
+ok('"guardar de todos modos" llama al CORE directo con forzar=true (evita el punto muerto de la cola)',
+  /return await _saveDataToAPICore\(true\)/.test(cuerpoConflict));
+ok('_saveDataToAPICore acepta el parámetro forzar', /async function _saveDataToAPICore\(forzar\)/.test(html));
 ok('con forzar=true, el body manda force:true en vez de expected_updated_at',
   /if\(forzar\)\s*body\.force\s*=\s*true;\s*else\s*body\.expected_updated_at\s*=\s*_settingsVersion/.test(html));
+
+// BUG real #2 encontrado en vivo (2026-07-24+): saveData() se llama ~127 veces sin esperar
+// saveDataToAPI() (fire-and-forget). Dos guardados casi simultáneos desde la MISMA pestaña leían
+// la misma _settingsVersion antes de que ninguno respondiera; el segundo llegaba con versión ya
+// vieja → 409 "otro usuario guardó" CONTRA SÍ MISMO. Fix: serializar con una cola de un solo hueco.
+console.log('\nFix del "conflicto contra uno mismo" (cola de guardados, un solo en vuelo a la vez):');
+const iWrapper = html.indexOf('function saveDataToAPI(forzar){');
+const iWrapperFin = html.indexOf('\nasync function _saveDataToAPICore', iWrapper);
+const cuerpoWrapper = html.slice(iWrapper, iWrapperFin);
+ok('se pudo extraer el wrapper con cola', /_saveInFlight/.test(cuerpoWrapper) && /_saveQueued/.test(cuerpoWrapper));
+ok('saveDataToAPI ya NO es async function (es el wrapper síncrono con cola)',
+  !/async function saveDataToAPI/.test(html));
+ok('si ya hay un guardado en vuelo, no dispara uno nuevo — encola y reutiliza la promesa en curso',
+  /if\(_saveInFlight\)\{[\s\S]{0,100}_saveQueued\s*=\s*true;[\s\S]{0,100}return _saveInFlight;/.test(cuerpoWrapper));
+ok('al terminar, si quedó algo encolado, dispara UN solo guardado de seguimiento (no uno por llamada)',
+  /\.finally\(\(\)=>\{[\s\S]{0,50}_saveInFlight\s*=\s*null;[\s\S]{0,150}if\(_saveQueued\)/.test(cuerpoWrapper));
+ok('el guardado de seguimiento va sin forzar (no hereda force de una llamada anterior)',
+  /_saveQueued\s*=\s*false;\s*\n\s*saveDataToAPI\(\);/.test(cuerpoWrapper));
 
 // 7) Sin versión base se avisa una sola vez, pero no se guarda en la nube.
 ok('sin versión base devuelve false (no guarda en la nube)',

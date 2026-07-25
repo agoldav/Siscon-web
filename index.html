@@ -1003,13 +1003,42 @@ async function _handleSaveConflict(){
     if(recargar){ location.reload(); return false; }
     // BUG encontrado en vivo (2026-07-24+): antes esto ponía _settingsVersion=null para forzar el
     // sobrescribir, pero el modo estricto del servidor trata CUALQUIER versión faltante como "nunca
-    // cargó" y responde 428 — indistinguible de esta elección explícita del usuario. saveDataToAPI(true)
-    // manda force:true, la señal real de "ya vi el conflicto y decidí sobrescribir de todos modos".
-    return await saveDataToAPI(true);
+    // cargó" y responde 428 — indistinguible de esta elección explícita del usuario. force:true
+    // manda la señal real de "ya vi el conflicto y decidí sobrescribir de todos modos".
+    // Llama al CORE directo (no al wrapper con cola) — esto es la recuperación del MISMO guardado
+    // que ya está en curso, no una petición nueva; pasar por la cola aquí causaría un punto muerto
+    // (el wrapper vería este guardado como "ya en vuelo" y nunca ejecutaría el forzado).
+    return await _saveDataToAPICore(true);
   } finally { _conflictDialogOpen=false; }
 }
 
-async function saveDataToAPI(forzar){
+// VUL-033-bis — BUG real encontrado en vivo (2026-07-24+): saveData() se llama ~127 veces en el
+// código y dispara saveDataToAPI() sin esperarlo (fire-and-forget). Si una sola acción del usuario
+// (p.ej. crear un proyecto) disparaba dos guardados casi seguidos, ambos leían el mismo
+// _settingsVersion antes de que ninguno respondiera; el primero en volver actualizaba la versión,
+// y el segundo llegaba al servidor con una versión ya vieja → 409 "otro usuario guardó" CONTRA SÍ
+// MISMO, en la misma pestaña, sin que hubiera ningún otro usuario. La cola de abajo asegura que
+// nunca haya más de un guardado en vuelo a la vez: si llega uno mientras otro está en curso, se
+// encola UN solo guardado de seguimiento (no uno por cada llamada) que corre con la versión ya
+// fresca en cuanto el actual termina.
+let _saveInFlight=null;
+let _saveQueued=false;
+function saveDataToAPI(forzar){
+  if(_saveInFlight){
+    _saveQueued=true;               // ya hay uno en curso: pedir un guardado más al terminar
+    return _saveInFlight;           // el llamador puede esperar el resultado del que ya va en curso
+  }
+  _saveInFlight=_saveDataToAPICore(forzar).finally(()=>{
+    _saveInFlight=null;
+    if(_saveQueued){
+      _saveQueued=false;
+      saveDataToAPI();               // UN guardado de seguimiento, ya sin forzar, con la version fresca
+    }
+  });
+  return _saveInFlight;
+}
+
+async function _saveDataToAPICore(forzar){
   if(!_sbToken || !currentUser) return false;
   try{
     // Antes de subir, traer las solicitudes remotas y fusionarlas para no pisar resoluciones de otras sesiones
