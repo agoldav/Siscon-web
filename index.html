@@ -12229,7 +12229,25 @@ async function loadSupabaseUsers(){try{const resp=await fetch(BACKEND_URL+'/api/
 async function changeUserRole(id,role){try{const resp=await fetch(BACKEND_URL+'/api/auth/users/'+id+'/role',{method:'PUT',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({role})});const data=await resp.json().catch(()=>({}));if(!resp.ok){alert('Error: '+(data.error||'No se pudo cambiar el rol'));return;}showToast('✓ Rol actualizado');await openUsersModal();}catch(e){alert('Error: '+e.message);}}
 async function deleteSupabaseUser(id){const u=(_sbUsersCache||[]).find(x=>String(x.id)===String(id));const name=(u&&(u.name||u.email||u.username))||'este usuario';if(!confirm('¿Eliminar la cuenta de "'+name+'"? Perderá el acceso al sistema. Esta acción no se puede deshacer.'))return;try{const resp=await fetch(BACKEND_URL+'/api/auth/users/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp'}});const data=await resp.json().catch(()=>({}));if(!resp.ok){alert('Error: '+(data.error||'No se pudo eliminar'));return;}showToast('✓ Cuenta eliminada');await openUsersModal();}catch(e){alert('Error: '+e.message);}}
 function ucopyInvite(code,email){const link='https://app.sisconcr.com?invite='+encodeURIComponent(code)+'&email='+encodeURIComponent(email);try{navigator.clipboard.writeText(link);showToast('Link copiado');}catch(e){prompt('Copia el link:',link);}}
-async function inviteSupabaseUser(){const email=((document.getElementById('invite-email-input')||{}).value||'').trim();const role=(document.getElementById('invite-role-input')||{}).value||'Regular';if(!validateEmail(email)){alert('Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/invite-user',{method:'POST',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,role})});const data=await resp.json().catch(()=>({}));if(!resp.ok){alert('Error: '+(data.message||data.error||'No se pudo crear la invitación'));return;}const link=data.invite_link||'https://app.sisconcr.com';try{await navigator.clipboard.writeText(link);}catch(e){}prompt('✓ Invitación creada para '+email+' ('+role+').\n\nComparte este link con la persona (ya se copió al portapapeles):',link);await openUsersModal();}catch(e){alert('Error: '+e.message);}}
+// VUL-045: alta directa, sin link ni código. Antes esto llamaba a /api/auth/invite-user y el
+// invitado tenía que aceptar un link con una contraseña que nunca usaba para entrar (el acceso
+// real es Cloudflare Access + Microsoft). Ahora el Admin crea la cuenta de un solo paso.
+async function createSupabaseUser(){
+  const email=((document.getElementById('invite-email-input')||{}).value||'').trim();
+  const name=((document.getElementById('invite-name-input')||{}).value||'').trim();
+  const role=(document.getElementById('invite-role-input')||{}).value||'Regular';
+  if(!validateEmail(email)){alert('Email inválido');return;}
+  if(!name){alert('Nombre requerido');return;}
+  try{
+    const resp=await fetch(BACKEND_URL+'/api/auth/create-user',{method:'POST',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,name,role})});
+    const data=await resp.json().catch(()=>({}));
+    if(!resp.ok){alert('Error: '+(data.message||data.error||'No se pudo crear el usuario'));return;}
+    alert('✓ '+(data.message||'Usuario creado.'));
+    const ei=document.getElementById('invite-email-input'); if(ei)ei.value='';
+    const ni=document.getElementById('invite-name-input'); if(ni)ni.value='';
+    await openUsersModal();
+  }catch(e){alert('Error: '+e.message);}
+}
 async function openUsersModal(){
   if(!currentUser||currentUser.role!=='Administrador'){alert('Solo el administrador puede gestionar cuentas de acceso.');return;}
   const {users,invitations}=await loadSupabaseUsers();
@@ -12258,15 +12276,16 @@ async function openUsersModal(){
     </div>`).join('');
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">Cuentas de acceso <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
-    <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Cuentas reales de Supabase Auth (login seguro). Al invitar se genera un link que debes compartir con la persona — aún no se envía email automático.</div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Cuentas reales de Supabase Auth. El acceso real lo controla Cloudflare Access + Microsoft — agrega antes a la persona en la allowlist de Azure, y crea aquí su cuenta con su rol.</div>
     <div class="settings-section" style="max-height:250px;overflow-y:auto"><div class="settings-section-title">Usuarios (${users.length})</div>${usersList||'<div style="color:var(--t3);font-size:12px">Sin usuarios</div>'}</div>
-    ${invList?`<div class="settings-section"><div class="settings-section-title">Invitaciones pendientes</div>${invList}</div>`:''}
-    <div class="settings-section"><div class="settings-section-title">Invitar nuevo usuario</div>
+    ${invList?`<div class="settings-section"><div class="settings-section-title">Invitaciones pendientes (flujo anterior)</div>${invList}</div>`:''}
+    <div class="settings-section"><div class="settings-section-title">Crear usuario</div>
       <div class="ff-row">
         <div class="ff" style="flex:2"><label>Email</label><input id="invite-email-input" type="email" placeholder="nuevo@ejemplo.com" style="width:100%"/></div>
+        <div class="ff" style="flex:2"><label>Nombre</label><input id="invite-name-input" type="text" placeholder="Nombre completo" style="width:100%"/></div>
         <div class="ff"><label>Rol</label><select id="invite-role-input">${roleOpts('Regular')}</select></div>
       </div>
-      <button onclick="inviteSupabaseUser()" style="background:var(--acc);color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;margin-top:6px">✉️ Crear invitación</button>
+      <button onclick="createSupabaseUser()" style="background:var(--acc);color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;margin-top:6px">➕ Crear usuario</button>
     </div>
     <div class="modal-actions"><button class="btn-cancel" onclick="closeModal()">Cerrar</button></div>`;
   document.getElementById('modal').classList.remove('hidden');

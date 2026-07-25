@@ -846,11 +846,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     `"><script>...`, comillas dobles/simples que rompen atributos) verificando que ningún payload sobrevive
     intacto en el HTML resultante y que sí aparece su forma escapada (no se perdió el dato).
 
-- **Suite de pruebas al cierre de la sesión: 251 en verde** (actualizado tras el incidente en vivo y sus 3 fixes).
+- **Suite de pruebas al cierre de la sesión: 273 en verde** (incidente en vivo + VUL-045).
   `siscon-backend`: `test-cf-access` 12 · `test-auth-legacy` 31 · `test-table-policy` 37 · `test-schema-rls` 10 ·
   `test-oauth-hardening` 43 (VUL-037/038/041/042 + cierre de la nota pendiente de VUL-025/026/027) ·
   `test-backups-hardening` 27 (VUL-040 — incluye round-trip real de `encryptBackup()` contra `crypto` de Node) ·
-  `test-force-overwrite` 13 (bug real de "guardar de todos modos", ver el incidente en vivo más abajo).
+  `test-force-overwrite` 13 (bug real de "guardar de todos modos", ver el incidente en vivo más abajo) ·
+  `test-create-user` 22 (VUL-045 — alta directa de usuarios).
   `siscon-web`: `test-passwords` 21 · `test-concurrency` 21 · `test-xss` 29 · `test-save-queue` 7 (bug real del
   "conflicto contra uno mismo" por guardados solapados — comportamiento real bajo concurrencia, no solo patrón).
 
@@ -1044,32 +1045,45 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
       el historial de ninguno de los dos repos.
   - Borrar los archivos no invalida las copias que ya están en el historial. Ver el plan de rotación detallado,
     con el orden seguro y el impacto operativo de cada paso, en **12.12**. **Claude no puede ejecutar esto.**
-- [ ] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA — proyecto aparte)
+- [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
   - Los 4 usuarios comparten un solo registro `settings/1` con proyectos, ajustes, actividad **y todas las
     conversaciones**: el filtro de mensajes privados existe **solo en la interfaz**, así que cada navegador
     descarga los DMs de los demás. Una cuenta comprometida obtiene todo.
-  - En esta sesión se pusieron los dos parches mínimos (VUL-033 concurrencia, VUL-034 contraseñas). La corrección
-    de fondo — normalizar en tablas, separar `conversations`/`messages`, autorizar por registro — es una
-    reescritura grande que toca casi todo el Completado. **Decidir antes de emprenderla.**
+  - **Decisión del OWNER (2026-07-25):** alcance dividido en dos.
+    1. **AHORA (en curso):** separar solo `conversations`/`messages` a sus propias tablas, con autorización por
+       participante en el backend — cierra la fuga real de privacidad sin tocar `projects`/`settings`.
+    2. **PENDIENTE (después, sin fecha):** normalizar el resto del blob (`projects`, `houses`, `transactions`,
+       etc.) en tablas reales con autorización por registro — reescritura grande que toca casi todo lo
+       Completado. **No empezar sin retomarlo explícitamente con el OWNER.**
 
-- [ ] **VUL-045 | Tres registros de identidad separados; agregar a alguien en Azure NO alcanza** (usabilidad + riesgo operativo)
-  - Hoy conviven **tres** fuentes de identidad y hay que mantener las tres a mano:
-    | Dónde | Qué controla | ¿Lo maneja Azure? |
-    |---|---|---|
-    | Cloudflare Access / Entra | **quién entra** (allowlist + MFA) | ✅ |
-    | Supabase `auth.users` + `profiles` | **qué rol tiene** | ❌ |
-    | `SYS.users` (dentro del blob) | directorio de **Mensajes/avatares** | ❌ |
-  - **Consecuencia concreta:** si se agrega a alguien SOLO en Azure, pasa el login de Microsoft, carga la app y
-    después **todo le responde 403** (`getCurrentUser` → `resolveUserByEmail` devuelve null → "No autorizado (sin
-    cuenta en Siscon)"). La red `SISCON_ADMIN_EMAILS` **tampoco lo salva**: solo se aplica dentro del bloque que
-    requiere que la cuenta de Supabase ya exista.
-  - Por eso NO se eliminó el flujo de invitación en esta sesión: es lo único que hoy crea la cuenta + el rol.
-  - **Dirección propuesta (decidir):** reemplazar "invitar" por un alta directa desde *Cuentas de acceso* — el
-    Admin escribe email + rol y el backend crea la cuenta de Supabase con contraseña aleatoria inservible. Sin
-    link, sin código, sin que el invitado invente una contraseña que **nunca se usa para entrar** (entra por
-    Microsoft). Queda un solo paso doble: agregar en Azure + asignar rol en Siscon.
-  - Relacionado: el pendiente histórico de **sincronizar `SYS.users` ↔ Auth** (hoy Mensajes usa ids numéricos
-    locales vs. uuid de Auth) es la tercera pata del mismo problema.
+- [x] **VUL-045 | Tres registros de identidad separados; agregar a alguien en Azure NO alcanza** (usabilidad + riesgo operativo)
+  - Convivían **tres** fuentes de identidad: Cloudflare Access/Entra (quién entra), Supabase `auth.users`+`profiles`
+    (qué rol tiene) y `SYS.users` (directorio de Mensajes/avatares). Si se agregaba a alguien SOLO en Azure, pasaba
+    el login de Microsoft pero la app le daba 403 en todo (`resolveUserByEmail` sin cuenta de Supabase). El flujo
+    de invitación (link + código + contraseña que el invitado nunca usaba para entrar) era el único camino que
+    creaba la cuenta + el rol, y era el paso extra e innecesario.
+  - **Decisión del OWNER (2026-07-25):** alta directa por Admin (la opción recomendada).
+  - **Implementado:** `POST /api/auth/create-user` (Admin-only, `validateAdminRole`) — email + nombre + rol de un
+    solo paso. Genera una contraseña aleatoria de 32 bytes (`crypto.randomBytes`, base64url) que **nadie ve ni
+    necesita** (existe solo porque Supabase Auth exige una al crear el usuario; el acceso real sigue siendo
+    Cloudflare Access + Microsoft). `email_confirm:true` — entra directo, sin paso de verificación de correo. El
+    profile se actualiza con el rol/nombre reales tras el trigger `handle_new_user`. Se audita como
+    `USER_CREATED_DIRECT`.
+  - Frontend: el formulario de "Cuentas de acceso" pasó de "Invitar nuevo usuario" (email + rol) a
+    "Crear usuario" (email + **nombre** + rol — el nombre lo elegía antes el invitado al aceptar, ahora lo pone
+    el Admin). Ya no hay link que copiar ni prompt de "comparte esto".
+  - **No se eliminó** el flujo viejo (`invite-user`/`accept-invitation`) por si hay una invitación ya enviada en
+    curso — queda dormido, sin usarse desde la UI. Limpieza pendiente: confirmar que no haya invitaciones
+    pendientes reales y borrar esas dos rutas + la tabla `user_invitations` si ya no hacen falta.
+  - **Sigue sin resolver, tercera pata del mismo problema:** sincronizar `SYS.users` ↔ Supabase Auth (Mensajes usa
+    ids numéricos locales, no el uuid real de Auth) — los usuarios creados con `create-user` no aparecen
+    automáticamente en el directorio de Mensajes/avatares hasta que alguien los agregue a mano en `SYS.users`.
+  - Pruebas: `siscon-backend/test-create-user.js` (22/22) — 403 sin JWT; cableado de `validateAdminRole`;
+    comportamiento real contra un Supabase simulado (contraseña aleatoria de verdad — dos llamadas seguidas dan
+    valores distintos —, `email_confirm:true`, el profile se actualiza con rol/nombre reales, se audita, **la
+    respuesta nunca incluye la contraseña generada** ni siquiera como substring); las 4 validaciones de entrada;
+    email duplicado rechazado; error de Supabase propagado como 400 (no 500 ni un 201 falso); y verificación
+    cruzada de que el frontend ya llama al endpoint nuevo y no al viejo.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
@@ -1112,7 +1126,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > ⚠️ **Estado (2026-07-24+, tras la revisión externa #2): NO todo está cerrado.** La afirmación anterior de que
 > "todas las vulnerabilidades están cerradas" era **incorrecta** y una revisión independiente lo demostró.
 > Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..036 y 039. **Ya no queda ninguna CRÍTICA abierta.**
-> Abiertas: VUL-043 (ALTA, requiere al OWNER), VUL-044/045 (arquitectónicas, ver Sección 10).
+> Abiertas: VUL-043 (ALTA, requiere al OWNER) y la mitad pendiente de VUL-044 (normalizar el resto del blob,
+> ver Sección 10). VUL-045 cerrada 2026-07-25 (alta directa de usuarios).
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
