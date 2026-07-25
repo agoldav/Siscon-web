@@ -846,8 +846,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     `"><script>...`, comillas dobles/simples que rompen atributos) verificando que ningún payload sobrevive
     intacto en el HTML resultante y que sí aparece su forma escapada (no se perdió el dato).
 
-- **Suite de pruebas al cierre de la sesión: 153 en verde.**
-  `siscon-backend`: `test-cf-access` 12 · `test-auth-legacy` 31 · `test-table-policy` 37 · `test-schema-rls` 10.
+- **Suite de pruebas al cierre de la sesión: 196 en verde.**
+  `siscon-backend`: `test-cf-access` 12 · `test-auth-legacy` 31 · `test-table-policy` 37 · `test-schema-rls` 10 ·
+  `test-oauth-hardening` 43 (VUL-037/038/041/042 + cierre de la nota pendiente de VUL-025/026/027).
   `siscon-web`: `test-passwords` 21 · `test-concurrency` 13 · `test-xss` 29.
 
 ## 10. ⏳ Pendiente
@@ -855,26 +856,55 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
 
 ### 🔴 Seguridad — hallazgos ABIERTOS de la revisión externa #2 (2026-07-24)
-> Verificados contra el código real. **No** están corregidos. Ordenados por severidad.
-> Con VUL-036 cerrada, ya no queda ninguna crítica pendiente de esta revisión — quedan ALTA/MEDIA.
+> Verificados contra el código real. Ordenados por severidad.
+> Con VUL-036 cerrada y este lote (037/038/041/042), solo quedan abiertas VUL-040, 043, 044, 045.
 
-- [ ] **VUL-037 | `/api/ms/refresh-token` entrega el refresh token de Outlook a cualquier usuario** (ALTA)
-  - No valida rol Admin (`checkToken` devuelve `true` con Access encendido). Es exactamente la VUL-003 que se
-    cerró para QuickBooks pero quedó abierta para Microsoft. Quien lo obtenga lee el buzón `facturas@sisconcr.com`
-    indefinidamente, fuera de la app. El frontend lo llama desde Ajustes.
-- [ ] **VUL-038 | OAuth de Microsoft con `state` fijo y sin validar** (MEDIA)
-  - `/api/ms/connect` manda `state:'siscon'` y el callback no lo comprueba. Aplicar lo mismo que ya se hizo en
-    QuickBooks (VUL-025): `state` aleatorio, un solo uso, con TTL.
+- [x] **VUL-037 | `/api/ms/refresh-token` entrega el refresh token de Outlook a cualquier usuario** (ALTA)
+  - No validaba rol Admin (`checkToken` devuelve `true` con Access encendido — valida identidad, no rol). Era
+    exactamente la VUL-003 que se cerró para QuickBooks pero quedó abierta para Microsoft. Quien lo obtenía leía
+    el buzón `facturas@sisconcr.com` indefinidamente, fuera de la app.
+  - **Corregido:** la ruta ahora exige `validateAdminRole()`, igual que el equivalente de QBO (que directamente
+    ya no expone el token — VUL-003). El frontend lo llama desde Ajustes; nada cambia para un Admin.
+- [x] **VUL-038 | OAuth de Microsoft con `state` fijo y sin validar** (MEDIA)
+  - `/api/ms/connect` mandaba `state:'siscon'` (constante) y `/api/ms/callback` ni siquiera lo leía. Un callback
+    forjado con un `code` propio del atacante podía completarse igual y reemplazar la conexión de Outlook.
+    Además `/api/ms/connect` **no tenía ningún gate** (ni `checkToken`) — cualquiera de los 4 usuarios podía
+    iniciar el flujo.
+  - **Corregido:** mismo patrón ya usado en QuickBooks (VUL-025) — `generateMsState()` con
+    `crypto.randomBytes(32)`, guardado en `store.msAuthPending` con TTL 10 min, validado y consumido (un solo
+    uso) en el callback; 403 si inválido/ausente/expirado. `/api/ms/connect` ahora exige Administrador, igual
+    que `/api/qbo/connect`.
+- [x] **VUL-041 | `CLOUDFLARE_ENABLED=false` por defecto — fail-open** (MEDIA)
+  - Un despliegue que olvidara la variable quedaba sin el gate del JWT y dependiendo del `SISCON_TOKEN` legado; si
+    ese tampoco estaba configurado, `checkToken()` **aceptaba el request**. Se confirmó el impacto real: 13 rutas
+    dependen solo de `checkToken` sin `getCurrentUser`/`validateAdminRole` detrás — entre ellas `/api/claude`
+    (gasta la `ANTHROPIC_API_KEY` del servidor) y varias de Outlook.
+  - **Decisión tomada con el OWNER:** no se intentó adivinar "¿esto es producción?" (habría requerido asumir cómo
+    Render configura el entorno, con riesgo real de tumbar producción si la suposición fallaba). En su lugar se
+    invirtió el default: el modo sin Cloudflare Access ahora exige el **opt-in explícito**
+    `ALLOW_INSECURE_LOCAL_DEV=true`. Sin `CLOUDFLARE_ENABLED=true` **ni** ese flag, `checkToken()` responde
+    **503** en vez de abrirse. `.env.example` trae el flag en `true` (así `cp .env.example .env` sigue
+    funcionando igual para desarrollo local sin tocar nada) con una advertencia de no ponerlo nunca en Render.
+    Para la producción actual esto es **no-op**: Render ya tiene `CLOUDFLARE_ENABLED=true` (verificado en vivo),
+    así que el código nunca llega a la rama nueva.
+- [x] **VUL-042 | `realmId` de QuickBooks no se fijaba contra una compañía configurada** (MEDIA)
+  - El callback ligaba el `realmId` al `state` de esa autorización (VUL-026, ya cerraba el riesgo de reasociarlo
+    a mitad de flujo), pero no lo comparaba contra una compañía esperada. Si la cuenta de Intuit que completa el
+    consentimiento tiene acceso a varias compañías, podía autorizar sin querer una distinta de la de Siscon.
+  - **Corregido:** si `QBO_REALM_ID` está fijado en el entorno, el callback exige que coincida (403 si no). Si no
+    está fijado, no se puede validar contra nada — se deja pasar como antes (compatibilidad hacia atrás; hoy
+    Render no tiene ese valor fijado, así que el comportamiento no cambia hasta que se configure a propósito).
+    Documentado en `.env.example` como recomendado.
+- Pruebas del lote completo: `siscon-backend/test-oauth-hardening.js` (33/33) — servidor real en proceso hijo
+  (403 sin JWT en las 4 rutas nuevas/tocadas), extracción y ejecución de `generateMsState`/
+  `saveMsAuthState`/`validateAndClearMsAuthState` (aleatoriedad, un solo uso, TTL, state ausente) y de la
+  comparación de `realmId` (con/sin `QBO_REALM_ID`, coincide/no coincide), y — para VUL-041 — las 4 combinaciones
+  reales de `checkToken()`: sin nada configurado → 503; con el opt-in → 200 (dev local sigue igual); con el
+  opt-in + `SISCON_TOKEN` → 401/200 según el header; con Access activo → 403 (el fix es no-op en producción).
 - [ ] **VUL-040 | Backups sin control de rol ni cifrado** (MEDIA)
   - `POST /api/backups/create` solo exige usuario autenticado → cualquiera de los 4 se lleva una copia completa a
     Dropbox. El archivo va comprimido, **no cifrado**. `POST /api/backups/restore/:id` acepta cualquier
     `confirmPassword` no vacío (`// TODO: validar contraseña`) y **no restaura nada** — responde como si sí.
-- [ ] **VUL-041 | `CLOUDFLARE_ENABLED=false` por defecto en `.env.example`** (MEDIA — fail-open)
-  - Un despliegue que olvide la variable queda sin el gate del JWT y dependiendo del `SISCON_TOKEN` legado; si ese
-    tampoco está configurado, `checkToken()` **acepta el request**. Debe venir fail-closed por defecto.
-- [ ] **VUL-042 | `realmId` de QuickBooks no se fija contra una compañía configurada** (MEDIA)
-  - El callback liga el `realmId` al `state` de esa autorización (eso ya es una mejora), pero no lo compara con un
-    `QBO_REALM_ID` esperado. Quien inicie el flujo puede conectar una compañía distinta.
 - [ ] **VUL-043 | Secretos en el historial de Git — requiere ROTACIÓN MANUAL del OWNER** (ALTA)
   - Verificado: `.env` y `.env.save` **siguen en commits anteriores** de `siscon-backend` aunque ya no estén en el
     checkout. Borrar el archivo no invalida las copias. Ver el plan de rotación en 12.12: `SISCON_TOKEN`,
@@ -947,7 +977,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > ⚠️ **Estado (2026-07-24+, tras la revisión externa #2): NO todo está cerrado.** La afirmación anterior de que
 > "todas las vulnerabilidades están cerradas" era **incorrecta** y una revisión independiente lo demostró.
 > Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..036 y 039. **Ya no queda ninguna CRÍTICA abierta.**
-> Abiertas (ALTA/MEDIA): VUL-037, 038, 040 a 045 (ver Sección 10).
+> Abiertas (ALTA/MEDIA): VUL-040, 043, 044, 045 (ver Sección 10). VUL-037/038/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
 > VUL-021/022 siguen superadas por Cloudflare Access.
@@ -1230,9 +1260,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Descripción: Flow OAuth no implementa PKCE (Proof Key for Public Clients)
   - Severidad: MEDIA
   - Acción realizada: `generatePKCEPair()` genera `code_verifier` (64 bytes base64url) + `code_challenge` (SHA-256 base64url, método S256); `code_challenge` enviado en `/api/qbo/connect`, `code_verifier` validado por Intuit en el intercambio de token del callback.
-  - ⚠️ **Corrección (2026-07-24+):** aquí se documentó un test `test-oauth-vul.js` con "6/6 PASS" que **no existe
-    en el repo** (lo detectó la revisión externa #2). El código de PKCE/state SÍ está implementado, pero
-    **sin pruebas automatizadas**. Pendiente escribirlas junto con VUL-038/042.
+  - ⚠️ **Corrección (2026-07-24+):** aquí se documentó un test `test-oauth-vul.js` con "6/6 PASS" que **no existía
+    en el repo** (lo detectó la revisión externa #2). El código de PKCE/state SÍ estaba implementado, solo
+    faltaban las pruebas. **Cerrado en el mismo lote que VUL-037/038/041/042:** `test-oauth-hardening.js` incluye
+    ahora `generateQBOState`/`generatePKCEPair`/`saveQBOAuth`/`validateAndClearQBOAuth` extraídos del archivo real
+    y probados con `crypto` de Node (el `code_challenge` se verifica que sea de verdad `SHA-256(code_verifier)`,
+    no solo que tenga forma de hash).
   - Commit backend: `052cb85`
 
 #### FASE 6 — Frontend seguro (✅ Completada 2026-07-24 — VUL-028/029/030/031)
