@@ -2031,12 +2031,18 @@ function renderDashList(sorted){
   function cellVal(col, p, realSpent, prog, budgeted, facturado, projPending){
     switch(col.id){
       case 'nombre':
+        // VUL-036: p.name/p.num/p.client son texto libre (nombre y cliente del proyecto) que
+        // cualquiera de los 4 usuarios puede escribir; esta es la vista de Dashboard, la primera
+        // pantalla que ve todo el mundo al entrar.
         return '<div style="display:flex;align-items:center;gap:8px">'
           +(projPending>0?'<span class="notif-badge" style="position:static;min-width:16px;height:16px;font-size:9px">'+(projPending>99?'99+':projPending)+'</span>':'')
-          +'<div><div style="font-size:13px;font-weight:600;color:var(--t1)">'+p.name+'</div>'
-          +'<div style="font-size:10px;color:var(--t3)">'+p.num+(p.client?' · '+p.client:'')+'</div></div></div>';
+          +'<div><div style="font-size:13px;font-weight:600;color:var(--t1)">'+esc(p.name)+'</div>'
+          +'<div style="font-size:10px;color:var(--t3)">'+esc(p.num)+(p.client?' · '+esc(p.client):'')+'</div></div></div>';
       case 'estatus':
-        return '<span class="badge b-gray" style="color:'+(KANBAN_COLORS[p.status]||'var(--t2)')+'">'+p.status+'</span>';
+        // p.status normalmente viene de un <select> con valores fijos, pero como cualquier usuario
+        // puede escribir directo a settings/1 (PUT crudo, sin pasar por la UI), no es un valor de
+        // confianza en tiempo de render — se escapa igual que el resto.
+        return '<span class="badge b-gray" style="color:'+(KANBAN_COLORS[p.status]||'var(--t2)')+'">'+esc(p.status)+'</span>';
       case 'avance':
         return '<div style="font-size:12px;color:var(--t1)">'+prog+'%<div class="prog-bar" style="margin-top:3px;max-width:56px"><div class="prog-fill" style="width:'+prog+'%"></div></div></div>';
       case 'presupuesto':
@@ -4126,12 +4132,16 @@ function renderDocs(){
           :hasBlob&&!isPdf?'viewDoc("'+bId+'","'+d.name.replace(/"/g,'')+'","'+ext+'")'
           :d.url?'window.open("'+d.url+'","_blank")':'';
         const menuId='doc-dd-'+(bId||docKey);
+        // VUL-036: notasTxt "sanitizaba" solo quitando comillas para el atributo title, pero se
+        // insertaba SIN escapar como contenido de texto — un valor como `<img onerror=...>` en las
+        // notas ejecutaba. d.name (nombreCell) tampoco se escapaba: son datos OCR/Outlook, el
+        // vector remoto ya confirmado en VUL-028 (factura con proveedor `<img onerror=...>`).
         const notasTxt=d.notes||'';
-        const notasCell=notasTxt?'<span title="'+notasTxt.replace(/"/g,"'")+'" style="color:var(--t2);font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">'+notasTxt+'</span>':'—';
+        const notasCell=notasTxt?'<span title="'+esc(notasTxt)+'" style="color:var(--t2);font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">'+esc(notasTxt)+'</span>':'—';
         const fechaCell=d.date||'<span style="color:var(--amb)">—</span>';
         const icono='<div class="dt-icon '+cls+'">' +ext+'</div>';
-        const nombreCell='<span style="color:var(--acc)">'+d.name+'</span>';
-        const cellVal={icono,categoria:cat,fecha:fechaCell,nombre:nombreCell,proveedor:vendorName||'—',factura:invoiceNum||'—',monto:amount||'—',notas:notasCell};
+        const nombreCell='<span style="color:var(--acc)">'+esc(d.name)+'</span>';
+        const cellVal={icono,categoria:esc(cat),fecha:fechaCell,nombre:nombreCell,proveedor:esc(vendorName)||'—',factura:esc(invoiceNum)||'—',monto:amount||'—',notas:notasCell};
         const menuDD='<div id="'+menuId+'" class="doc-menu-dd" style="display:none;position:absolute;right:0;top:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);z-index:400;min-width:170px;box-shadow:0 4px 16px rgba(0,0,0,.4)">'
           +(hasBlob&&isPdf?'<button onclick="openPdfNewTab(\''+bId+'\');document.querySelectorAll(\'.doc-menu-dd\').forEach(el=>el.style.display=\'none\')" style="display:block;width:100%;background:transparent;border:none;color:var(--t1);text-align:left;padding:8px 12px;font-size:12px;cursor:pointer">📄 Ver PDF</button>':'')
           +'<button onclick="docRename(\''+docKey+'\')" style="display:block;width:100%;background:transparent;border:none;color:var(--t1);text-align:left;padding:8px 12px;font-size:12px;cursor:pointer">✏️ Renombrar</button>'
@@ -11068,7 +11078,12 @@ function msgUser(id){ return (SYS.users||[]).find(u=>u.id===id)||null; }
 function msgUserName(id){ const u=msgUser(id); return u?u.name:'—'; }
 function msgUserColor(id){ const u=msgUser(id); return u?u.color:'var(--t3)'; }
 function msgInitials(name){ return ((name||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('')||'?').toUpperCase(); }
-function msgEsc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// VUL-036: msgEsc no escapaba comillas. Se usa en ~15 sitios como texto Y dentro de atributos
+// (alt="${msgEsc(a.name)}", download="${msgEsc(a.name)}", value="${msgEsc(msgSearchTerm)}"),
+// y a.name es el nombre del archivo adjunto — texto libre que cualquiera de los 4 usuarios puede
+// escribir. Sin escapar comillas, un nombre de archivo como `x" onerror="alert(1)` rompe fuera del
+// atributo. Ahora usa el mismo escapado que esc() (& < > " ').
+function msgEsc(s){ return esc(s); }
 function msgLinkify(s){ return s.replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">$1</a>'); }
 function msgSizeLabel(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 function msgKindIcon(k){ return k==='image'?'🖼️':k==='audio'?'🎤':k==='video'?'🎬':'📄'; }
@@ -12187,20 +12202,25 @@ async function openUsersModal(){
   _sbUsersCache=users;
   const roleBadge=(r)=>{const c=r==='Administrador'?'var(--acc)':r==='Supervisor'?'var(--amb)':'var(--t3)';return `<span style="font-size:9px;padding:2px 7px;border-radius:10px;background:${c}18;color:${c};border:1px solid ${c}55">${r||'Regular'}</span>`;};
   const roleOpts=(sel)=>['Administrador','Supervisor','Regular'].map(r=>`<option${r===sel?' selected':''}>${r}</option>`).join('');
+  // VUL-036: `name` llega de profiles.name, que el propio usuario invitado elige libremente al
+  // aceptar la invitación (accept-invitation solo valida longitud, no contenido — validateName en
+  // el backend). Es un self-XSS-contra-el-admin: un usuario Regular recién invitado puede escribir
+  // un payload en su nombre que se ejecuta en la sesión del Administrador la próxima vez que abra
+  // "Cuentas de acceso". email/iv.email igual de libres (formato validado, contenido no).
   const usersList=users.map(u=>{
     const email=u.email||u.username||'';
     const name=u.name||email||'Usuario';
     const self=String(u.id)===String(currentUser.id);
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg3);border-radius:6px;margin-bottom:6px">
-      <div style="background:${(u.color||'#2d8cf0')}20;color:${(u.color||'#2d8cf0')};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0">${name.substring(0,2).toUpperCase()}</div>
-      <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:500;color:var(--t1)">${name}${self?' <span style="font-size:9px;color:var(--t3)">(tú)</span>':''}</div><div style="font-size:11px;color:var(--t3);overflow:hidden;text-overflow:ellipsis">${email}</div></div>
+      <div style="background:${(u.color||'#2d8cf0')}20;color:${(u.color||'#2d8cf0')};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0">${esc(name.substring(0,2).toUpperCase())}</div>
+      <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:500;color:var(--t1)">${esc(name)}${self?' <span style="font-size:9px;color:var(--t3)">(tú)</span>':''}</div><div style="font-size:11px;color:var(--t3);overflow:hidden;text-overflow:ellipsis">${esc(email)}</div></div>
       ${self?roleBadge(u.role):`<select onchange="changeUserRole('${u.id}',this.value)" style="font-size:10px;height:26px;width:118px" title="Cambiar rol">${roleOpts(u.role||'Regular')}</select>`}
       ${self?'':`<button onclick="deleteSupabaseUser('${u.id}')" class="oc-btn-del" title="Eliminar cuenta">✕</button>`}
     </div>`;
   }).join('');
   const invList=(invitations||[]).map(iv=>`<div style="display:flex;align-items:center;gap:8px;padding:7px;background:rgba(212,148,26,.06);border:1px solid rgba(212,148,26,.2);border-radius:6px;margin-bottom:5px">
-      <div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--t1)">${iv.email} ${roleBadge(iv.role)}</div><div style="font-size:9px;color:var(--t3)">Invitación pendiente</div></div>
-      <button onclick="ucopyInvite('${(iv.code||'').replace(/[^A-Za-z0-9]/g,'')}','${iv.email.replace(/'/g,'')}')" style="font-size:10px;padding:4px 8px;border:1px solid var(--acc);color:var(--acc);background:transparent;border-radius:5px;cursor:pointer">Copiar link</button>
+      <div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--t1)">${esc(iv.email)} ${roleBadge(iv.role)}</div><div style="font-size:9px;color:var(--t3)">Invitación pendiente</div></div>
+      <button data-code="${esc(iv.code||'')}" data-email="${esc(iv.email||'')}" onclick="ucopyInvite(this.dataset.code,this.dataset.email)" style="font-size:10px;padding:4px 8px;border:1px solid var(--acc);color:var(--acc);background:transparent;border-radius:5px;cursor:pointer">Copiar link</button>
     </div>`).join('');
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">Cuentas de acceso <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>

@@ -814,9 +814,41 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - Nota de higiene: la revisión detectó que `test-oauth-vul.js` (documentado antes como "6/6 PASS") **no existe en
   el repo**. Corregido en la Sección 11: VUL-025/026/027 están implementadas pero **sin pruebas automatizadas**.
 
-- **Suite de pruebas al cierre de la sesión: 124 en verde.**
+- [x] **VUL-036 | XSS almacenado — la remediación de VUL-028 quedó incompleta** (CRÍTICA)
+  - `esc()` existía y se usaba en ~113 puntos, pero quedaron 4 sinks sin escapar con datos libres.
+  - **`cellVal` (Dashboard, vista de Lista)** — `p.name`, `p.num`, `p.client`, `p.status` sin escapar. La vista
+    Kanban del mismo dashboard **ya usaba `esc()` correctamente**; el bug estaba solo en la vista de Lista (la que
+    quedó como default desde la sesión 2026-06-08). Es la primera pantalla que ve todo el mundo al entrar.
+  - **`renderDocs` (nombre y notas de documento)** — `d.name` sin escapar; `d.notes` solo le quitaba las comillas
+    para el atributo `title` pero se insertaba **crudo como contenido de texto** (un `<img onerror=...>` en las
+    notas ejecutaba igual). `d.name` es el vector remoto ya confirmado en VUL-028: factura por email con
+    proveedor `<img onerror=...>` → OCR → guardado → pintado sin escapar en Documentos.
+  - **`msgEsc` (Mensajes, ~15 usos)** — no escapaba comillas. Se usaba dentro de atributos (`alt="${msgEsc(a.name)}"`,
+    `download="${msgEsc(a.name)}"`, `value="${msgEsc(msgSearchTerm)}"`) con `a.name` = nombre de archivo adjunto,
+    texto libre que cualquiera de los 4 usuarios escribe. Fix: `msgEsc` ahora es `esc()`.
+  - **`openUsersModal` (self-XSS contra el Admin)** — `name`/`email` de cada usuario sin escapar. Vector real:
+    `accept-invitation` en el backend solo valida longitud del nombre (`validateName`, ≤100 chars, **sin
+    restricción de contenido**), así que un usuario recién invitado elige su propio `name` y ese payload se
+    ejecuta en la sesión del **Administrador** la próxima vez que abre "Cuentas de acceso" — escalada de
+    privilegio vía XSS. Además el botón "Copiar link" de invitaciones pendientes armaba el `onclick` con el email
+    crudo quitando solo comillas simples; se verificó que `validateEmail` del backend (`/^[^\s@]+@[^\s@]+\.[^\s@]+$/`)
+    **sí permite comillas dobles** en la parte local, así que un email como `x"onmouseover="alert(1)@evil.com`
+    pasaba la validación y rompía el atributo. Fix: el botón ahora lee el email vía `data-email`/`data-code`
+    (escapados), no interpolado directo en el `onclick`.
+  - La CSP con `script-src 'unsafe-inline'` (obligada por el HTML monolítico sin build step) sigue sin frenar
+    manejadores inyectados — el escapado en el render es la defensa real.
+  - **Alcance de esta corrección:** los 4 sinks señalados por la revisión, más el hallazgo del botón de invitación
+    encontrado al auditar el mismo bloque. No se re-auditaron los 134 `innerHTML` del archivo — sigue pendiente
+    una auditoría completa si se quiere blindaje total.
+  - Pruebas: `siscon-web/test-xss.js` (29/29) — extrae los bloques reales de `index.html` (`esc`, `msgEsc`,
+    `cellVal` completa con `KANBAN_COLORS`, el cuerpo de la fila de `renderDocs`, `usersList` e `invList` de
+    `openUsersModal`) y los ejecuta con payloads de ataque reales (`<img src=x onerror=...>`,
+    `"><script>...`, comillas dobles/simples que rompen atributos) verificando que ningún payload sobrevive
+    intacto en el HTML resultante y que sí aparece su forma escapada (no se perdió el dato).
+
+- **Suite de pruebas al cierre de la sesión: 153 en verde.**
   `siscon-backend`: `test-cf-access` 12 · `test-auth-legacy` 31 · `test-table-policy` 37 · `test-schema-rls` 10.
-  `siscon-web`: `test-passwords` 21 · `test-concurrency` 13.
+  `siscon-web`: `test-passwords` 21 · `test-concurrency` 13 · `test-xss` 29.
 
 ## 10. ⏳ Pendiente
 
@@ -824,15 +856,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### 🔴 Seguridad — hallazgos ABIERTOS de la revisión externa #2 (2026-07-24)
 > Verificados contra el código real. **No** están corregidos. Ordenados por severidad.
-> El nivel de riesgo global sigue siendo **alto** hasta cerrar VUL-035 y VUL-036.
+> Con VUL-036 cerrada, ya no queda ninguna crítica pendiente de esta revisión — quedan ALTA/MEDIA.
 
-- [ ] **VUL-036 | XSS almacenado — la remediación de VUL-028 quedó incompleta** (CRÍTICA)
-  - `esc()` existe y se usa en ~113 puntos, pero quedaron sinks sin escapar con datos libres:
-    `cellVal` (`p.name`, `p.client`), notas de documentos, `openUsersModal` (nombre/email mostrados al admin),
-    y `msgEsc` **no escapa comillas** (nombres de adjuntos dentro de atributos).
-  - La CSP lleva `script-src 'unsafe-inline'` (obligado por el HTML monolítico sin build step), así que **no**
-    frena manejadores inyectados. Un XSS lee el blob completo y actúa con la sesión de la víctima.
-  - VUL-028 debe considerarse **reabierta**: se cerró como "dirigida por riesgo" sin auditar los 134 `innerHTML`.
 - [ ] **VUL-037 | `/api/ms/refresh-token` entrega el refresh token de Outlook a cualquier usuario** (ALTA)
   - No valida rol Admin (`checkToken` devuelve `true` con Access encendido). Es exactamente la VUL-003 que se
     cerró para QuickBooks pero quedó abierta para Microsoft. Quien lo obtenga lee el buzón `facturas@sisconcr.com`
@@ -921,8 +946,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 > ⚠️ **Estado (2026-07-24+, tras la revisión externa #2): NO todo está cerrado.** La afirmación anterior de que
 > "todas las vulnerabilidades están cerradas" era **incorrecta** y una revisión independiente lo demostró.
-> Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..035 y 039. **Abiertas: VUL-036, 037, 038, 040 a 045**
-> (ver Sección 10). La crítica que queda es **VUL-036 — XSS almacenado** (reabre VUL-028).
+> Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..036 y 039. **Ya no queda ninguna CRÍTICA abierta.**
+> Abiertas (ALTA/MEDIA): VUL-037, 038, 040 a 045 (ver Sección 10).
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
 > VUL-021/022 siguen superadas por Cloudflare Access.
@@ -1213,11 +1238,13 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 #### FASE 6 — Frontend seguro (✅ Completada 2026-07-24 — VUL-028/029/030/031)
 > XSS y seguridad del navegador
 
-- [~] **VUL-028** | Riesgo XSS almacenado (innerHTML inseguro)
-  - **Estado:** ⚠️ **REABIERTA (2026-07-24+) → continúa como VUL-036 en la Sección 10.** La revisión externa #2
-    encontró sinks sin escapar que la remediación "dirigida por riesgo" no cubrió: `cellVal` (`p.name`,`p.client`),
-    notas de documentos, `openUsersModal` (nombre/email), y `msgEsc` que **no escapa comillas**. El cierre anterior
-    fue prematuro: se declaró cerrada sin auditar los 134 `innerHTML` ni dejar una prueba de regresión.
+- [x] **VUL-028** | Riesgo XSS almacenado (innerHTML inseguro)
+  - **Estado:** ✅ **CERRADA de nuevo (2026-07-24+, tras VUL-036).** Había quedado **reabierta**: la revisión
+    externa #2 encontró sinks sin escapar que la remediación "dirigida por riesgo" no cubrió — `cellVal`
+    (`p.name`,`p.client`), notas de documentos, `openUsersModal` (nombre/email) y `msgEsc` sin escapar comillas.
+    El cierre anterior había sido prematuro: se declaró cerrada sin auditar los 134 `innerHTML` ni dejar una
+    prueba de regresión. Esta vez sí queda con prueba: ver VUL-036 en la Sección 10 para el detalle completo y
+    `test-xss.js` (29/29), que extrae y ejecuta los bloques reales del archivo con payloads de ataque.
   - Descripción: Uso de `innerHTML` con datos de usuario/externos sin sanitización
   - Severidad: ALTA
   - Vector confirmado (remoto, sin insider): factura PDF a `facturas@sisconcr.com` con proveedor `<img onerror=…>` → OCR → guardado → pintado en la lista de transacciones → ejecutaba en el navegador del admin.
