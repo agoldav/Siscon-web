@@ -1001,12 +1001,15 @@ async function _handleSaveConflict(){
       'Cancelar = guardar de todos modos y sobrescribir los cambios del otro usuario.'
     );
     if(recargar){ location.reload(); return false; }
-    _settingsVersion=null;                // el usuario eligió sobrescribir a propósito
-    return await saveDataToAPI();
+    // BUG encontrado en vivo (2026-07-24+): antes esto ponía _settingsVersion=null para forzar el
+    // sobrescribir, pero el modo estricto del servidor trata CUALQUIER versión faltante como "nunca
+    // cargó" y responde 428 — indistinguible de esta elección explícita del usuario. saveDataToAPI(true)
+    // manda force:true, la señal real de "ya vi el conflicto y decidí sobrescribir de todos modos".
+    return await saveDataToAPI(true);
   } finally { _conflictDialogOpen=false; }
 }
 
-async function saveDataToAPI(){
+async function saveDataToAPI(forzar){
   if(!_sbToken || !currentUser) return false;
   try{
     // Antes de subir, traer las solicitudes remotas y fusionarlas para no pisar resoluciones de otras sesiones
@@ -1022,6 +1025,8 @@ async function saveDataToAPI(){
       }
     }catch(e){/* sin red: se guarda lo local igual */}
     const projectsClean=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
+    const body={data:{projects:projectsClean,SYS,activityLog}};
+    if(forzar) body.force=true; else body.expected_updated_at=_settingsVersion;
     const resp=await fetch(`${BACKEND_URL}/api/db/settings/1`, {
       method: 'PUT',
       headers: {
@@ -1029,7 +1034,7 @@ async function saveDataToAPI(){
         'x-siscon-token': 'siscon-2026-pmapp',
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({data:{projects:projectsClean,SYS,activityLog},expected_updated_at:_settingsVersion})
+      body: JSON.stringify(body)
     });
     if(resp.status===409){ return await _handleSaveConflict(); }
     if(resp.status===428){ return _handleMissingVersion(); }
