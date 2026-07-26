@@ -1254,8 +1254,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### 🔴 Seguridad — hallazgos ABIERTOS de la revisión externa #2 (2026-07-24)
 > Verificados contra el código real. Lo cerrado esta sesión (VUL-032..042, 045) se movió a Completado
-> con fecha 2026-07-25. Solo quedan abiertas VUL-043 (requiere al OWNER, rotar secretos) y el resto de
-> VUL-044 (arquitectónica, requiere decisión de diseño — la mitad de Mensajes ya se decidió y está en curso).
+> con fecha 2026-07-25. VUL-044 parte 1 y parte 1.5 (Mensajes y pendingAuthRequests/notifications fuera del
+> blob) se cerraron y verificaron en vivo el 2026-07-25/26 — ver Sección 9. Solo quedan abiertas VUL-043
+> (requiere al OWNER, rotar secretos) y la mitad grande de VUL-044 (normalizar el resto del blob).
 
 - [ ] **VUL-043 | Secretos en el historial de Git — requiere ROTACIÓN MANUAL del OWNER** (ALTA)
   - **Re-verificado línea por línea contra el historial real de ambos repos (2026-07-24+)** — no solo repetido de
@@ -1272,24 +1273,15 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - Borrar los archivos no invalida las copias que ya están en el historial. Ver el plan de rotación detallado,
     con el orden seguro y el impacto operativo de cada paso, en **12.12**. **Claude no puede ejecutar esto.**
 - [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
-  - Los 4 usuarios comparten un solo registro `settings/1` con proyectos, ajustes, actividad **y todas las
-    conversaciones**: el filtro de mensajes privados existe **solo en la interfaz**, así que cada navegador
-    descarga los DMs de los demás. Una cuenta comprometida obtiene todo.
-  - **Decisión del OWNER (2026-07-25):** alcance dividido en dos, y la parte 1 terminó dividiéndose otra vez
-    tras un hallazgo en producción (ver abajo).
-    1. **✅ CERRADA y desplegada (2026-07-25/26):** `conversations`/`messages` separadas a sus propias tablas
-       con autorización por participante en el backend. Verificado en vivo por el OWNER con dos cuentas
-       reales — funcionando correctamente. Ver Sección 9 (sesión 2026-07-25 — VUL-044 parte 1) y Sección 11.2.
-    1.5. **✅ CERRADA y desplegada (2026-07-26):** la prueba en vivo de la parte 1 destapó que
-       `pendingAuthRequests`/`notifications` seguían en el blob y podían chocar en versión con CUALQUIER
-       guardado no relacionado. Se sacaron a sus propias tablas. Al probarla en producción salieron 5 bugs
-       reales más (login, `.contains()` de Supabase, `backendUrl()`, `saveData()` incondicional, `projId`
-       número-vs-string) — todos corregidos y verificados en vivo por el OWNER, más una mejora de UX para el
-       conflicto residual esperado. Ver Sección 9 (sesiones VUL-044 parte 1.5 y "3 bugs reales" en adelante)
-       y Sección 11.2.
-    2. **PENDIENTE (después, sin fecha):** normalizar el resto del blob (`projects`, `houses`, `transactions`,
-       etc.) en tablas reales con autorización por registro — reescritura grande que toca casi todo lo
-       Completado. **No empezar sin retomarlo explícitamente con el OWNER.**
+  - Los 4 usuarios comparten un solo registro `settings/1` con `projects`/`houses`/`transactions`/ajustes/
+    actividad: cualquier guardado de cualquier usuario puede chocar en versión con el guardado de otro,
+    aunque sean acciones sin relación real entre sí (residual mitigado con un mensaje de UX específico, no
+    eliminado — ver Sección 9, sesión 2026-07-26).
+  - `conversations`/`messages` (parte 1) y `pendingAuthRequests`/`notifications` (parte 1.5) ya salieron del
+    blob a sus propias tablas — cerradas y verificadas en vivo, ver Sección 9 y Sección 11.2.
+  - **PENDIENTE (después, sin fecha):** normalizar el resto del blob (`projects`, `houses`, `transactions`,
+    etc.) en tablas reales con autorización por registro — reescritura grande que toca casi todo lo
+    Completado. **No empezar sin retomarlo explícitamente con el OWNER.**
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
