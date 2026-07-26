@@ -1174,6 +1174,40 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   aparece el diálogo de conflicto por esa causa (sigue pudiendo aparecer si de verdad hay dos personas
   editando la misma OC/proyecto a la vez — eso es la mitad grande de VUL-044, todavía pendiente).
 
+### Sesión 2026-07-26 (incidente en vivo — 3 bugs reales encontrados al probar el deploy de arriba)
+> El OWNER corrió la migración y probó en producción con dos cuentas reales. Aparecieron 3 bugs reales,
+> los 3 corregidos y desplegados en la misma sesión. Ninguno es arquitectónico — los 3 son errores puntuales.
+- [x] **Bug 1 — carrera en login: guardaba sin `_settingsVersion` todavía.** `logAction()` llama a
+  `saveData()` por dentro; en `login()`/`bootstrapCloudflareAuth()`/`acceptInvitation()` se llamaba ANTES de
+  `loadDataFromAPI()` (quien fija `_settingsVersion`, VUL-033). El guardado llegaba al backend sin
+  `expected_updated_at` → 428 `missing_version` en (casi) cada login, con el alert correspondiente. La
+  carrera ya existía, pero al quitar el pre-fetch redundante de `_saveDataToAPICore` (parte de la sesión
+  anterior, VUL-044 parte 1.5 — ya no hacía falta fusionar `pendingAuthRequests`) el guardado quedó más
+  rápido y empezó a ganarle la carrera a la carga casi siempre. **Fix:** `loadDataFromAPI()` antes de
+  `logAction()` en los 3 flujos. Frontend commit `2cb3a65`.
+- [x] **Bug 2 — `GET /api/db/conversations`/`.../summary` devolvían 400 SIEMPRE, desde el primer deploy de
+  VUL-044 parte 1.** `.contains('member_ids', [user.id])` — `supabase-js` serializa un **array de JS** con
+  sintaxis de **arreglo de Postgres** (`cs.{valor}`), no JSON, pero `member_ids` es `jsonb` → Postgres
+  rechazaba con `invalid input syntax for type json`. Nunca se detectó antes porque los tests de esa sesión
+  probaban la lógica de autorización con un cliente Supabase fabricado, no la librería real — la lección de
+  siempre (VUL-027) aplicada de nuevo: "se ve bien" no es lo mismo que "se probó contra lo real". **Fix:**
+  pasar el valor como **string** (`JSON.stringify([user.id])`) — evita esa rama del helper y genera el JSON
+  literal correcto (`cs.["valor"]`). Confirmado corriendo la consulta contra `@supabase/supabase-js`
+  2.110.8 real e inspeccionando la query string generada, antes y después del fix. Prueba nueva en
+  `test-conversations-auth.js` (+7, ahora 51/51) que reproduce el bug contra la librería real y prueba el
+  fix, más cableado por regex de las dos rutas. Backend commit `3da1b24`.
+- [x] **Bug 3 — `backendUrl()` ignoraba el resguardo "solo localhost" y rompía el CSP.** Función distinta de
+  la constante `BACKEND_URL` (que sí tiene el resguardo, documentado desde la migración web: "`SYS.backendUrl`
+  solo se respeta para desarrollo local"). `backendUrl()` usaba `SYS.backendUrl` a ciegas si tenía cualquier
+  valor — si quedó guardada la URL vieja de `onrender.com` de antes del cutover a Cloudflare Access, disparaba
+  un fetch directo que el CSP (VUL-030) bloquea correctamente (`/api/tc`, tipo de cambio, y potencialmente QBO
+  connect/Outlook/Claude fallback — todo lo que llama `backendUrl()`). **Fix:** mismo criterio que ya aplicaba
+  `BACKEND_URL` — solo honrar `SYS.backendUrl` si es `localhost`/`127.0.0.1`. Frontend commit `5047484`.
+- **Suite de pruebas al cierre:** backend 10 archivos, 265 pruebas, 0 fallas.
+- **No verificado todavía:** que el usuario Regular pueda loguear sin el error 428, y que la lista de
+  conversaciones/badge de mensajes cargue sin el 400 — pendiente de que el OWNER lo confirme en producción
+  tras estos 3 fixes.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
