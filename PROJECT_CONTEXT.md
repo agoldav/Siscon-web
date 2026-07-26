@@ -1244,10 +1244,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   cierra para reabrirla y ver el material ya agregado, sin el flash de login ni el cambio de tema. Si el
   choque NO es por una aprobación propia, el diálogo genérico se mantiene igual. Frontend commit `7eca951`.
 - **Suite de pruebas al cierre:** backend 10 archivos, 265 pruebas, 0 fallas.
-- **No verificado todavía:** que el usuario Regular pueda loguear sin el error 428, que la lista de
-  conversaciones/badge de mensajes cargue sin el 400, que el flujo completo de aprobar material extra ya no
-  dispare "no se encontró la OC", y que el mensaje nuevo de conflicto aparezca correctamente — pendiente de
-  que el OWNER lo confirme en producción tras los 6 cambios de esta sesión.
+- [x] **Verificado en vivo por el OWNER (2026-07-26):** flujo completo confirmado en producción — login sin
+  el 428, Mensajes sin el 400, aprobación de material extra sin "no se encontró la OC", y el mensaje nuevo de
+  conflicto por aprobación propia funcionando. **VUL-044 parte 1.5 cerrada y verificada.**
 
 ## 10. ⏳ Pendiente
 
@@ -1281,13 +1280,13 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     1. **✅ CERRADA y desplegada (2026-07-25/26):** `conversations`/`messages` separadas a sus propias tablas
        con autorización por participante en el backend. Verificado en vivo por el OWNER con dos cuentas
        reales — funcionando correctamente. Ver Sección 9 (sesión 2026-07-25 — VUL-044 parte 1) y Sección 11.2.
-    1.5. **✅ Código y pruebas listos (2026-07-25/26), pendiente correr migración SQL + verificar en vivo:**
-       la prueba en vivo de la parte 1 destapó que `pendingAuthRequests`/`notifications` seguían en el blob y
-       podían chocar en versión con CUALQUIER guardado no relacionado (ej. aprobar un material de una OC
-       colisionando con el guardado de otra OC distinta). Se sacaron a sus propias tablas — ver Sección 9
-       (sesión VUL-044 parte 1.5) y Sección 11.2. **Pendiente antes de pushear/deployar:** (a) correr
-       `siscon-backend/migration-pending-auth-requests.sql` en Supabase, (b) repetir la prueba en vivo que
-       encontró el bug y confirmar que ya no ocurre por esta causa.
+    1.5. **✅ CERRADA y desplegada (2026-07-26):** la prueba en vivo de la parte 1 destapó que
+       `pendingAuthRequests`/`notifications` seguían en el blob y podían chocar en versión con CUALQUIER
+       guardado no relacionado. Se sacaron a sus propias tablas. Al probarla en producción salieron 5 bugs
+       reales más (login, `.contains()` de Supabase, `backendUrl()`, `saveData()` incondicional, `projId`
+       número-vs-string) — todos corregidos y verificados en vivo por el OWNER, más una mejora de UX para el
+       conflicto residual esperado. Ver Sección 9 (sesiones VUL-044 parte 1.5 y "3 bugs reales" en adelante)
+       y Sección 11.2.
     2. **PENDIENTE (después, sin fecha):** normalizar el resto del blob (`projects`, `houses`, `transactions`,
        etc.) en tablas reales con autorización por registro — reescritura grande que toca casi todo lo
        Completado. **No empezar sin retomarlo explícitamente con el OWNER.**
@@ -1337,8 +1336,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > ver Sección 10). VUL-045 cerrada 2026-07-25 (alta directa de usuarios).
 > VUL-044 parte 1 (conversations/messages fuera del blob) — ✅ cerrada y desplegada, verificada en vivo por
 > el OWNER 2026-07-25/26 (Sección 9). VUL-044 parte 1.5 (pendingAuthRequests/notifications fuera del blob) —
-> código y pruebas listos, **NO desplegado**: falta correr la migración SQL en Supabase y repetir la prueba
-> en vivo que encontró el bug (Sección 9, sesión VUL-044 parte 1.5).
+> ✅ cerrada y desplegada, verificada en vivo por el OWNER 2026-07-26 tras corregir 5 bugs reales encontrados
+> en producción (Sección 9). Solo queda abierta la mitad grande de VUL-044 (normalizar `projects`/`houses`/
+> `transactions`), sin fecha.
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
