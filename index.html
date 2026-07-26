@@ -981,6 +981,20 @@ async function _handleSaveConflict(){
   if(_conflictDialogOpen) return false;   // no apilar diálogos si hay varios saves en vuelo
   _conflictDialogOpen=true;
   try{
+    // Si una solicitud PROPIA se aprobó hace poco, lo más probable es que el choque de versión sea
+    // justo CONTRA esa aprobación (el Admin guardó el efecto en `projects` momentos antes) — no
+    // contra un tercero sin relación. En ese caso, un mensaje específico + recarga liviana (sin
+    // location.reload(), que además reinicia toda la sesión visualmente) es mejor que el diálogo
+    // genérico de conflicto.
+    if(Date.now()-_lastOwnApprovalAt<15000){
+      _lastOwnApprovalAt=0; // consumir: no debe aplicar a un choque distinto más adelante
+      alert('El administrador aprobó tu solicitud. Se va a actualizar la información.');
+      const estabaEnOC=curOCId&&curOCId!=='new';
+      if(estabaEnOC){ curOCId=null; renderOCList(); }
+      await loadDataFromAPI();
+      showToast(estabaEnOC?'Abre la OC de nuevo para ver el material agregado.':'Datos actualizados.');
+      return false;
+    }
     const recargar=confirm(
       'Otro usuario guardó cambios mientras trabajabas.\n\n'+
       'Aceptar = recargar con los datos del servidor (lo tuyo sin guardar queda en este navegador).\n'+
@@ -6099,6 +6113,9 @@ function stopAuthPolling(){ if(_authPollIv){ clearInterval(_authPollIv); _authPo
 const _authShownIds=new Set();
 // Resoluciones ya avisadas/aplicadas en ESTA sesión
 const _authResolvedSeen=new Set();
+// Última vez que se aplicó EN VIVO una aprobación de una solicitud propia (ver _handleSaveConflict):
+// si un guardado choca en versión poco después, lo más probable es que sea contra esa misma aprobación.
+let _lastOwnApprovalAt=0;
 async function pollPendingAuth(){
   if(!_sbToken||!currentUser) return;
   try{
@@ -6118,6 +6135,9 @@ async function pollPendingAuth(){
       if(!r.status||r.status==='pendiente'||_authResolvedSeen.has(r.id)) return;
       if(r.requestedById!==(currentUser&&currentUser.id)) return;
       _authResolvedSeen.add(r.id);
+      // Marca de tiempo: si un guardado choca en versión poco después de esto, lo más probable es que
+      // el choque sea CONTRA esta misma aprobación (no contra un tercero) — ver _handleSaveConflict().
+      if(r.status==='aprobado') _lastOwnApprovalAt=Date.now();
       if(r.status==='aprobado'){
         if(r.type==='type-unlock'){
           const proj=projects.find(p=>String(p.id)===String(r.projId))||curProj;
