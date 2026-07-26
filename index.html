@@ -4750,7 +4750,7 @@ async function garSolicitarAprobacion(gid){
 }
 // Aplica (idempotente) la aprobación/rechazo de una garantía en su sesión
 function applyGarApproval(req, decision){
-  const proj=projects.find(p=>p.id===req.projId)||curProj;
+  const proj=projects.find(p=>String(p.id)===String(req.projId))||curProj;
   const g=(proj&&proj.garantias||[]).find(x=>String(x.id)===String(req.garId));
   if(!g) return false;
   g.approval={ status:decision, reqId:req.id, resolvedBy:req.resolvedBy||'', resolvedAt:req.resolvedAt||Date.now() };
@@ -5945,7 +5945,7 @@ function showPendingAuthPopup(reqId){
 // derivado del id de la solicitud — para que admin Y solicitante puedan aplicarlo
 // cada uno en su sesión sin riesgo de duplicados.
 function applyApprovedExtra(req){
-  const proj=projects.find(p=>p.id===req.projId)||curProj;
+  const proj=projects.find(p=>String(p.id)===String(req.projId))||curProj;
   const oc=(proj&&proj.ocs||[]).find(o=>o.id===req.ocId);
   if(!oc) return false;
   if(!oc.lines)oc.lines={};
@@ -5979,7 +5979,7 @@ async function resolveExtraAuth(reqId, decision){
   if(decision==='aprobado'){
     let ok=false;
     if(req.type==='type-unlock'){
-      const proj=projects.find(p=>p.id===req.projId)||curProj;
+      const proj=projects.find(p=>String(p.id)===String(req.projId))||curProj;
       const t=(proj&&proj.types||[]).find(x=>x.id===req.typeId);
       if(t){ t.typeLocked=false; ok=true; logAction(`Tipo "${req.typeName}" desbloqueado`,'log-edit','Tipos',null,{typeName:req.typeName}); addNotif(`🔓 Tipo ${req.typeName} desbloqueado en ${req.projName}`); }
     } else if(req.type==='house-unlock'){
@@ -6120,7 +6120,7 @@ async function pollPendingAuth(){
       _authResolvedSeen.add(r.id);
       if(r.status==='aprobado'){
         if(r.type==='type-unlock'){
-          const proj=projects.find(p=>p.id===r.projId)||curProj;
+          const proj=projects.find(p=>String(p.id)===String(r.projId))||curProj;
           const t=(proj&&proj.types||[]).find(x=>x.id===r.typeId);
           if(t){ t.typeLocked=false; _applied=true; if(curTab==='tipos')renderTypes(); }
           showToast('🔓 Tu solicitud de desbloqueo para tipo '+r.typeName+' fue aprobada');
@@ -8371,7 +8371,7 @@ function authResolve(approve){
 // derivado del id de la solicitud — para que admin Y solicitante puedan aplicarlo
 // cada uno en su sesión sin riesgo de duplicados.
 function applyApprovedTypeUnlock(req){
-  const proj=projects.find(p=>p.id===req.projId)||curProj;
+  const proj=projects.find(p=>String(p.id)===String(req.projId))||curProj;
   const h=(proj&&proj.houses||[]).find(x=>x.id===req.houseId);
   if(!h) return false;
   h.typeLocked=false;
@@ -10175,7 +10175,7 @@ async function vbSubmitMatAuth(lineIdx, houseId){
 }
 // Aplica (idempotente) el material aprobado a las compras no presupuestadas de la casa.
 function applyApprovedVbExtra(req){
-  const proj=projects.find(p=>p.id===req.projId)||curProj;
+  const proj=projects.find(p=>String(p.id)===String(req.projId))||curProj;
   const h=(proj&&proj.houses||[]).find(x=>x.id===req.houseId);
   if(!h) return false;
   if(!h.purchases)h.purchases=[];
