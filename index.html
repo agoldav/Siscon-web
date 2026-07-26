@@ -6017,7 +6017,12 @@ async function resolveExtraAuth(reqId, decision){
     }
     // Eliminar notificaciones pending-auth relacionadas (ahora son filas propias, no el blob)
     notifClearByLink('pending-auth').catch(()=>{});
-    saveData(); // persiste el efecto en `projects` (línea de OC, desbloqueo, garantía) — sigue en el blob
+    // Bug real en producción (2026-07-26): esto llamaba a saveData() SIEMPRE, incluso cuando `ok` era
+    // false (ej. "no se encontró la OC" porque el solicitante aún no la había guardado). Ese guardado
+    // no persistía nada real pero SÍ subía la versión de `settings/1` — suficiente para chocar en
+    // conflicto con el guardado legítimo de otro usuario, sin relación real entre ambos. Solo tiene
+    // sentido guardar si de verdad se aplicó algo a `projects`.
+    if(ok) saveData(); // persiste el efecto en `projects` (línea de OC, desbloqueo, garantía) — sigue en el blob
     closeModal();
     showToast(ok?(req.type==='house-unlock'||req.type==='type-unlock'?'🔓 Desbloqueado':req.type==='garantia-budget'?'✅ Garantía aprobada':'✅ Material aprobado y agregado a la OC'):'Solicitud aprobada');
     updateNotifBadge();
