@@ -902,7 +902,6 @@ let SYS = {
   },
   subcontractors: [], // {id,name,idNum,idType,insured,phone,email,address,crew:[{id,name,role,idNum,idType,insured,phone,email,address}]}
   googleMapsKey: 'AIzaSyCFKPbq02rnkIAe3cnzSeS7ztSoVP8TuTA',
-  claudeKey: '',
   backendUrl: '',   // URL del backend (proxy) p.ej. https://siscon-backend.onrender.com
   backendToken: '', // token compartido opcional
   stats: {open:true,scope:'todos',time:'todo',from:'',to:'',showGastado:false,showPendiente:false,cashWindow:'1m',cashProjects:null,unbilledProjects:null,_menuInfo:false,_menuCash:false,_menuUnbilled:false},
@@ -1667,11 +1666,6 @@ function openSettings(){
       <button onclick="testBackend()" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">↻ Probar backend</button>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Claude (Anthropic) — directo (solo si no usas backend)</div>
-      <div style="font-size:11px;color:var(--t3);margin-bottom:8px">Si configuras el backend arriba, NO necesitas esta key aquí. Llamar directo desde el navegador suele fallar por CORS.</div>
-      <div class="ff"><label>Claude API Key</label><input id="s-claude" type="password" value="${SYS.claudeKey||''}" placeholder="sk-ant-..." style="width:100%"/></div>
-    </div>
-    <div class="settings-section">
       <div class="settings-section-title">Google Maps</div>
       <div class="ff"><label>Google Maps API Key</label>
         <input id="s-gmaps" placeholder="AIza..." value="${SYS.googleMapsKey||''}" style="width:100%"/>
@@ -1718,7 +1712,6 @@ function openSettings(){
 function saveSettings(){
   const xr=document.getElementById('s-xrate'); if(xr)SYS.exchangeRate=parseFloat(xr.value)||530;
   const gm=document.getElementById('s-gmaps'); if(gm)SYS.googleMapsKey=gm.value.trim();
-  const ck=document.getElementById('s-claude'); if(ck)SYS.claudeKey=ck.value.trim();
   const bu=document.getElementById('s-backend'); if(bu)SYS.backendUrl=bu.value.trim().replace(/\/$/,'');
   const bt=document.getElementById('s-backend-token'); if(bt)SYS.backendToken=bt.value.trim();
   const mu=document.getElementById('s-mail-user');
@@ -12198,8 +12191,7 @@ function setTheme(t){
   logAction('Tema cambiado a '+SYS.theme,'log-edit','Sistema',null,{theme:SYS.theme});
 }
 
-// ===== Claude API — vía backend (recomendado) o directo (fallback) =====
-function claudeKey(){ return (SYS.claudeKey||'').trim(); }
+// ===== Claude API — siempre vía backend =====
 // Bug real en producción (2026-07-26): esta función ignoraba el resguardo que sí tiene la
 // constante BACKEND_URL (arriba) — usaba SYS.backendUrl "a ciegas" si tenía cualquier valor,
 // incluida una URL vieja de onrender.com guardada de antes del cutover a Cloudflare Access.
@@ -12207,27 +12199,21 @@ function claudeKey(){ return (SYS.claudeKey||'').trim(); }
 // connect... because it appears in neither the connect-src directive nor the default-src".
 // Mismo criterio que ya documentaba el comentario de BACKEND_URL: SYS.backendUrl solo aplica
 // para desarrollo local.
+// Bug real en producción (2026-07-25+): backendUrl() devuelve '' bajo Plan B (mismo origen,
+// BACKEND_URL=''), que es un valor VÁLIDO ("usa rutas /api/* relativas"), pero `if(be)` lo trata
+// como "no hay backend" porque '' es falsy en JS — caía siempre al fallback de pegar la key
+// directo en el navegador. Se eliminó el fallback: el backend está garantizado (BACKEND_URL
+// nunca es null/undefined), así que ya no hace falta la rama directa ni exponer una API key en
+// el navegador.
 function backendUrl(){
   const v=(SYS.backendUrl||'').trim().replace(/\/$/,'');
   return (v && /localhost|127\.0\.0\.1/.test(v)) ? v : BACKEND_URL;
 }
 async function claudeCall(body){
   const be=backendUrl();
-  if(be){
-    const headers={'Content-Type':'application/json','x-siscon-token':'siscon-2026-pmapp'};
-    const r=await fetch(be+'/api/claude',{method:'POST',headers,body:JSON.stringify(body)});
-    if(!r.ok){ const t=await r.text().catch(()=>''); throw new Error('Backend HTTP '+r.status+' '+t.slice(0,200)); }
-    return r.json();
-  }
-  // fallback directo (suele fallar por CORS)
-  const k=claudeKey();
-  if(!k) throw new Error('Configura el Backend en Ajustes (recomendado) o pega la API key de Claude.');
-  const r=await fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','x-api-key':k,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify(body)
-  });
-  if(!r.ok){ const t=await r.text().catch(()=>''); throw new Error('HTTP '+r.status+' '+t.slice(0,200)); }
+  const headers={'Content-Type':'application/json'};
+  const r=await fetch(be+'/api/claude',{method:'POST',headers,body:JSON.stringify(body)});
+  if(!r.ok){ const t=await r.text().catch(()=>''); throw new Error('Backend HTTP '+r.status+' '+t.slice(0,200)); }
   return r.json();
 }
 async function testBackend(){
