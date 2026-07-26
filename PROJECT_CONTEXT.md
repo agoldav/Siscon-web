@@ -1203,10 +1203,17 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   un fetch directo que el CSP (VUL-030) bloquea correctamente (`/api/tc`, tipo de cambio, y potencialmente QBO
   connect/Outlook/Claude fallback — todo lo que llama `backendUrl()`). **Fix:** mismo criterio que ya aplicaba
   `BACKEND_URL` — solo honrar `SYS.backendUrl` si es `localhost`/`127.0.0.1`. Frontend commit `5047484`.
+- [x] **Bug 4 — `resolveExtraAuth` guardaba aunque `applyApprovedExtra`/etc. fallaran.** Encontrado al
+  reprobar los 3 fixes de arriba: el Admin aprobó un material y `applyApprovedExtra` no encontró la OC
+  (`ok=false` — la orden del Regular no había terminado de sincronizar todavía), pero el código llamaba a
+  `saveData()` **sin condición** de todos modos. Ese guardado no persistía nada real pero sí subía la versión
+  de `settings/1`, chocando con el guardado legítimo del Regular momentos después — la misma clase de bug que
+  motivó VUL-044 parte 1.5, en un sitio que esa sesión no tocó. **Fix:** `saveData()` solo si `ok` (mismo
+  patrón que ya tenía correctamente el lado del solicitante en `pollPendingAuth`). Frontend commit `23fbfab`.
 - **Suite de pruebas al cierre:** backend 10 archivos, 265 pruebas, 0 fallas.
-- **No verificado todavía:** que el usuario Regular pueda loguear sin el error 428, y que la lista de
-  conversaciones/badge de mensajes cargue sin el 400 — pendiente de que el OWNER lo confirme en producción
-  tras estos 3 fixes.
+- **No verificado todavía:** que el usuario Regular pueda loguear sin el error 428, que la lista de
+  conversaciones/badge de mensajes cargue sin el 400, y que el flujo completo de aprobar material extra ya
+  no dispare el conflicto espurio — pendiente de que el OWNER lo confirme en producción tras los 4 fixes.
 
 ## 10. ⏳ Pendiente
 
