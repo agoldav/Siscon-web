@@ -1205,15 +1205,39 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   `BACKEND_URL` — solo honrar `SYS.backendUrl` si es `localhost`/`127.0.0.1`. Frontend commit `5047484`.
 - [x] **Bug 4 — `resolveExtraAuth` guardaba aunque `applyApprovedExtra`/etc. fallaran.** Encontrado al
   reprobar los 3 fixes de arriba: el Admin aprobó un material y `applyApprovedExtra` no encontró la OC
-  (`ok=false` — la orden del Regular no había terminado de sincronizar todavía), pero el código llamaba a
-  `saveData()` **sin condición** de todos modos. Ese guardado no persistía nada real pero sí subía la versión
-  de `settings/1`, chocando con el guardado legítimo del Regular momentos después — la misma clase de bug que
-  motivó VUL-044 parte 1.5, en un sitio que esa sesión no tocó. **Fix:** `saveData()` solo si `ok` (mismo
-  patrón que ya tenía correctamente el lado del solicitante en `pollPendingAuth`). Frontend commit `23fbfab`.
+  (`ok=false`), pero el código llamaba a `saveData()` **sin condición** de todos modos. Ese guardado no
+  persistía nada real pero sí subía la versión de `settings/1`, chocando con el guardado legítimo del Regular
+  momentos después — la misma clase de bug que motivó VUL-044 parte 1.5, en un sitio que esa sesión no tocó.
+  **Fix:** `saveData()` solo si `ok` (mismo patrón que ya tenía correctamente el lado del solicitante en
+  `pollPendingAuth`). Frontend commit `23fbfab`.
+  > ⚠️ **Corrección:** la causa que se anotó originalmente aquí para el `ok=false` ("la orden aún no había
+  > terminado de sincronizar") era una suposición sin verificar — quedó descartada por los datos reales del
+  > Bug 5 de abajo. La causa real de por qué `applyApprovedExtra` no encontraba la OC era otra (Bug 5), no un
+  > problema de timing.
+- [x] **Bug 5 — `req.projId` se comparaba número contra string; NUNCA coincidía, en los 5 tipos de
+  solicitud.** El bug real detrás del "no se encontró la OC" — encontrado con datos reales de Supabase (no
+  suposición): se verificó que el `ocId` guardado en `pending_auth_requests.data` coincidía **exacto** con el
+  `id` real de la OC, lo que descartó la hipótesis de sincronización y apuntó a la comparación en sí. Los
+  `id` de proyecto en la app son **números** (`Date.now()`, sin prefijo), pero la columna nueva `proj_id` de
+  `pending_auth_requests` es `text` — Postgres/PostgREST siempre la devuelve como **string**. Por eso
+  `projects.find(p=>p.id===req.projId)` nunca coincidía, en ninguno de los 5 tipos de solicitud
+  (`extra-material`, `type-unlock`, `house-unlock`, `garantia-budget`, `vb-extra-material`) — el
+  `||curProj` de respaldo solo "salvaba" el caso cuando el Admin ya tenía esa OC/proyecto abierto por
+  casualidad; si aprobaba desde el popup automático al loguearse (`curProj` todavía `null` en ese momento),
+  fallaba siempre. **Fix:** `String(p.id)===String(req.projId)` en las 6 funciones afectadas — mismo patrón
+  defensivo que `applyGarApproval` ya usaba para `garId` desde antes (precedente ya establecido en el
+  código, no una idea nueva). `typeId`/`houseId`/`ocId`/`garId` no tenían este problema: viajan dentro del
+  `data jsonb` (que preserva el tipo original), no en una columna propia. Frontend commit `2149fa5`.
+  - **Dato huérfano dejado por el bug:** 3 solicitudes de material ya habían quedado marcadas `aprobado` en
+    la base de datos sin que el material se aplicara nunca a la OC (porque `applyApprovedExtra` fallaba
+    siempre). Como ya no están `pendiente`, la ventana emergente no las vuelve a mostrar. Se corrió un
+    `UPDATE` puntual (por `id`) para devolverlas a `pendiente` y poder re-procesarlas con el fix activo — no
+    fue necesario para las demás solicitudes del sistema, solo para esas 3 filas específicas.
 - **Suite de pruebas al cierre:** backend 10 archivos, 265 pruebas, 0 fallas.
 - **No verificado todavía:** que el usuario Regular pueda loguear sin el error 428, que la lista de
   conversaciones/badge de mensajes cargue sin el 400, y que el flujo completo de aprobar material extra ya
-  no dispare el conflicto espurio — pendiente de que el OWNER lo confirme en producción tras los 4 fixes.
+  no dispare "no se encontró la OC" ni el conflicto espurio — pendiente de que el OWNER lo confirme en
+  producción tras los 5 fixes.
 
 ## 10. ⏳ Pendiente
 
