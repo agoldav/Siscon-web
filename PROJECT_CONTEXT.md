@@ -1248,9 +1248,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   el 428, Mensajes sin el 400, aprobación de material extra sin "no se encontró la OC", y el mensaje nuevo de
   conflicto por aprobación propia funcionando. **VUL-044 parte 1.5 cerrada y verificada.**
 
-### Sesión 2026-07-25/26 (VUL-043 — rotación de secretos, pasos 1-2 de 5 + bug real de claudeCall())
-> Continuación del plan de rotación de la Sección 12.12. Se hace uno a la vez, en el orden seguro documentado;
-> el OWNER ejecuta cada paso en el dashboard correspondiente, Claude guía y verifica.
+### Sesión 2026-07-25/26 (VUL-043 — rotación de secretos completada + bug real de claudeCall())
+> Continuación del plan de rotación de la Sección 12.12. Se hizo uno a la vez, en el orden seguro documentado;
+> el OWNER ejecutó cada paso en el dashboard correspondiente, Claude guió y verificó.
 - [x] **Paso 1 — `SISCON_TOKEN` rotado** en Render (riesgo cero, inerte en producción porque
   `CLOUDFLARE_ENABLED=true` ya deja pasar antes de esa comprobación).
 - [x] **Paso 2 — `ANTHROPIC_API_KEY` rotada** en la consola de Anthropic + Render. Verificación inicial
@@ -1274,8 +1274,53 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     sigue hardcodeado como header `x-siscon-token` en ~10 llamadas más del archivo (login, invitaciones,
     reset de password, gestión de usuarios). No afecta funcionalidad (`checkToken()` no lo exige en
     producción), queda anotado para una limpieza futura si se retoma.
-- **Quedan del plan de 12.12:** paso 3 (`MS_CLIENT_SECRET`/`MS_CLIENT_ID`/`MS_TENANT_ID` en Azure), paso 4
-  (`client_secret` de Intuit, sin confirmar exposición), paso 5 (anon key de Supabase, el más delicado).
+- [x] **Paso 3 — `MS_CLIENT_SECRET` rotado** en Azure. App correcta identificada **verificando el
+  `MS_CLIENT_ID` real contra el historial del repo** (no por el nombre): `Siscon`
+  (`1abc2f0f-7043-49be-b458-185db33144ec`), no `Cloudflare Access - Siscon` (esa es el IdP del login — tocarle
+  el secreto habría tumbado el acceso de todos). Secuencia segura respetada: secreto nuevo en Azure → Render →
+  verificar → recién ahí borrar el viejo.
+  - **Verificado:** logs de Render con `[ms] Tokens restored via bootstrap ✓` + botón "📥 Refrescar" del buzón
+    sin error. Secreto viejo borrado en Azure después de confirmar.
+  - **Confirmado en el código, no supuesto:** los refresh tokens de Azure AD **no** se invalidan al rotar el
+    client secret (el secreto autentica la app en el intercambio, no queda grabado en el token), por eso
+    `msBootstrapIfNeeded()` siguió funcionando sin reconectar Outlook.
+  - **Decisión — `MS_CLIENT_ID` y `MS_TENANT_ID` NO se rotan** aunque salieron en el mismo commit: no son
+    secretos (el client ID es un identificador público de la app; el tenant ID es descubrible públicamente para
+    cualquier dominio de M365). Sin el secreto no sirven. Rotarlos exigiría un App Registration nuevo desde
+    cero (redirect URIs, reconsentir permisos, reconectar el buzón) sin ganancia real de seguridad.
+- [x] **Paso 4 — `client_secret` de Intuit: NO requiere rotación (verificado, no supuesto).** El plan lo
+  listaba "por precaución barata, pero sin confirmar". Se corrió la búsqueda en el historial real de
+  `siscon-backend`: `QBO_CLIENT_SECRET` **no aparece en ningún commit** — solo la línea vacía de `.env.example`.
+  Decisión del OWNER: saltarlo. Queda descartado con evidencia, ya no "pendiente por precaución".
+- [x] **Paso 5 — anon key de Supabase revocada, SIN regenerar el JWT secret y SIN desloguear a nadie.**
+  - **El plan de 12.12 quedó obsoleto:** describía el camino legacy (regenerar el JWT secret → invalida anon y
+    service_role a la vez → riesgo de tumbar la app y desloguear a los 4 usuarios). El proyecto ya tiene el
+    **esquema nuevo de llaves** de Supabase (`sb_publishable_...` / `sb_secret_...`), que permite revocar las
+    legacy sin tocar el secreto de firma.
+  - **Hallazgos previos que hicieron el cambio seguro:** (a) la anon key **ya no se usa en ninguna parte** —
+    el frontend no la tiene desde VUL-029 y el backend solo usa `SUPABASE_SERVICE_ROLE_KEY`; (b) el único
+    consumidor real es el backend en Render (los tests la dejan vacía a propósito); (c) las sesiones de usuario
+    se validan con `supabase.auth.getUser(token)` — llamada a la API de GoTrue, **no** verificación local contra
+    el JWT secret, así que revocar llaves de API no invalida sesiones.
+  - **Ejecución:** el valor de `SUPABASE_SERVICE_ROLE_KEY` en Render se cambió de la service_role legacy a la
+    llave nueva `sb_secret_...` (**solo el valor; el nombre de la variable no cambia y no hubo cambio de
+    código**) → se verificó en vivo → recién entonces "Disable JWT-based API keys", que revoca de un golpe la
+    anon key expuesta en Git y la service_role legacy.
+  - **Verificación del privilegio crítico (`BYPASSRLS`), por cadena lógica no por suposición:** un guardado
+    exitoso prueba que la lectura previa funcionó, porque `loadDataFromAPI()` es quien fija `_settingsVersion`
+    y sin él el guardado habría fallado con 428 `missing_version` (VUL-033). El OWNER guardó cambios sin error
+    → la llave nueva ignora RLS igual que la vieja, que es de lo que depende VUL-016.
+  - **Verificado además:** `GET /` → `{"supabase":true,"claude":true}`; `GET /api/db/settings/1` sin JWT → 403
+    (VUL-019 sigue cerrada); datos intactos tras deshabilitar las llaves legacy; sin errores en los logs de Render.
+  - ⚠️ **Verificación pendiente (única de esta sesión):** el OWNER **aún no ha probado un ciclo completo de
+    logout → login** después de deshabilitar las llaves legacy. La sesión abierta seguiría funcionando aunque
+    `signInWithPassword` estuviera roto, así que un fallo ahí no se notaría hasta que a alguien se le venza el
+    token. Probarlo al inicio de la próxima sesión. Si fallara, el arreglo es re-habilitar las llaves legacy
+    desde esa misma pantalla de Supabase.
+- **Hallazgo de infraestructura (no es un problema):** `api.sisconcr.com` no resuelve (NXDOMAIN). Es lo
+  esperado — tras el incidente de DNS documentado, el rewrite de `vercel.json` apunta directo a
+  `siscon-backend.onrender.com` (una dependencia de DNS menos). Se anota porque un `curl` a `api.sisconcr.com`
+  falla y podría confundirse con una caída del backend.
 
 ## 10. ⏳ Pendiente
 
@@ -1284,26 +1329,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 ### 🔴 Seguridad — hallazgos ABIERTOS de la revisión externa #2 (2026-07-24)
 > Verificados contra el código real. Lo cerrado esta sesión (VUL-032..042, 045) se movió a Completado
 > con fecha 2026-07-25. VUL-044 parte 1 y parte 1.5 (Mensajes y pendingAuthRequests/notifications fuera del
-> blob) se cerraron y verificaron en vivo el 2026-07-25/26 — ver Sección 9. Solo quedan abiertas VUL-043
-> (requiere al OWNER, rotar secretos) y la mitad grande de VUL-044 (normalizar el resto del blob).
+> blob) se cerraron y verificaron en vivo el 2026-07-25/26 — ver Sección 9. **VUL-043 (rotación de secretos)
+> se completó el 2026-07-26** — ver Sección 9. Solo queda abierta la mitad grande de VUL-044 (normalizar el
+> resto del blob).
 
-- [~] **VUL-043 | Secretos en el historial de Git — requiere ROTACIÓN MANUAL del OWNER** (ALTA)
-  - **En progreso (2026-07-25/26):** pasos 1-2 de 5 completados y verificados — `SISCON_TOKEN` y
-    `ANTHROPIC_API_KEY` rotados (ver Sección 9). Quedan: paso 3 (Microsoft/Azure), paso 4 (Intuit), paso 5
-    (Supabase anon key). Detalle y orden seguro en 12.12.
-  - **Re-verificado línea por línea contra el historial real de ambos repos (2026-07-24+)** — no solo repetido de
-    memoria. Confirmado con evidencia (valores reales, no plantillas):
-    - `siscon-backend`, archivos `.env` y `.env.save`, commit `abadc64`: `ANTHROPIC_API_KEY` (real, 108 chars),
-      `SISCON_TOKEN` (real), y **`MS_CLIENT_SECRET`/`MS_CLIENT_ID`/`MS_TENANT_ID`** (reales, formato Azure —
-      **este trío NO estaba en el plan de rotación anterior**, es un hallazgo nuevo de esta re-verificación).
-    - `siscon-web/index.html`, commits `5e8a9fb` (se agregó) / `4329303` (se quitó): anon key de Supabase, JWT
-      completo visible en el diff.
-    - `siscon-backend`: `client_secret` de Intuit — **NO se encontró evidencia** en el historial (solo la línea
-      vacía de plantilla en `.env.example`). Se mantiene en la lista por precaución barata, pero sin confirmar.
-    - **Buena noticia verificada:** `SUPABASE_SERVICE_ROLE_KEY` (la llave que ignora RLS) **nunca apareció** en
-      el historial de ninguno de los dos repos.
-  - Borrar los archivos no invalida las copias que ya están en el historial. Ver el plan de rotación detallado,
-    con el orden seguro y el impacto operativo de cada paso, en **12.12**. **Claude no puede ejecutar esto.**
 - [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
   - Los 4 usuarios comparten un solo registro `settings/1` con `projects`/`houses`/`transactions`/ajustes/
     actividad: cualquier guardado de cualquier usuario puede chocar en versión con el guardado de otro,
@@ -1355,9 +1384,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 > ⚠️ **Estado (2026-07-24+, tras la revisión externa #2): NO todo está cerrado.** La afirmación anterior de que
 > "todas las vulnerabilidades están cerradas" era **incorrecta** y una revisión independiente lo demostró.
-> Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..036 y 039. **Ya no queda ninguna CRÍTICA abierta.**
-> Abiertas: VUL-043 (ALTA, requiere al OWNER) y la mitad pendiente de VUL-044 (normalizar el resto del blob,
-> ver Sección 10). VUL-045 cerrada 2026-07-25 (alta directa de usuarios).
+> Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..036, 039 y **043**. **Ya no queda ninguna CRÍTICA
+> ni ALTA abierta.** Abierta: solo la mitad pendiente de VUL-044 (normalizar el resto del blob, ver Sección 10).
+> VUL-045 cerrada 2026-07-25 (alta directa de usuarios).
+> **VUL-043 cerrada 2026-07-26** — rotados `SISCON_TOKEN`, `ANTHROPIC_API_KEY`, `MS_CLIENT_SECRET` y revocada
+> la anon key de Supabase (vía "Disable JWT-based API keys", sin regenerar el JWT secret); el `client_secret`
+> de Intuit se descartó con evidencia (nunca estuvo en el historial). Detalle en Sección 9 y 12.12.
 > VUL-044 parte 1 (conversations/messages fuera del blob) — ✅ cerrada y desplegada, verificada en vivo por
 > el OWNER 2026-07-25/26 (Sección 9). VUL-044 parte 1.5 (pendingAuthRequests/notifications fuera del blob) —
 > ✅ cerrada y desplegada, verificada en vivo por el OWNER 2026-07-26 tras corregir 5 bugs reales encontrados
@@ -2176,18 +2208,31 @@ Lunes 2026-07-24      Martes 2026-07-25     Miércoles 2026-07-26    Jueves 2026
 | Sin alertas de anomalías (VUL-024) | MEDIA | Logs de Cloudflare + auditoría; alertas automáticas en sesión siguiente |
 | Dependencia de Cloudflare + Microsoft | BAJA | Aceptable para uso interno; si Access cae, se puede desactivar la policy temporalmente |
 | Cobertura de tests | MEDIA | Suite negativa manual en Día 4; automatización en sesión siguiente |
-| Secretos históricos en Git (VUL-histórico) | ALTA | Requiere **rotación manual** por el OWNER (ver 12.12) — borrar el archivo no invalida copias previas |
+| ~~Secretos históricos en Git (VUL-043)~~ | ~~ALTA~~ → **CERRADO** | ✅ Rotación ejecutada por el OWNER el 2026-07-26 (ver 12.12). Las copias en el historial quedaron inservibles al rotar los secretos |
 
-### 12.12 Plan de rotación de secretos (acciones manuales del OWNER)
+### 12.12 Plan de rotación de secretos — ✅ EJECUTADO Y COMPLETADO (2026-07-26)
 
-> Los secretos que alguna vez estuvieron en Git o en el frontend deben considerarse **comprometidos**. Claude no
-> ejecuta estas acciones; las prepara y el OWNER las realiza. **Re-verificado contra el historial real de ambos
-> repos el 2026-07-24+** (no repetido de memoria) — ver evidencia exacta en VUL-043, Sección 10.
+> **Estado: cerrado.** Los 5 puntos quedaron resueltos el 2026-07-26 (VUL-043). Se conserva el plan como
+> registro de lo ejecutado y del razonamiento de cada decisión. Bitácora paso a paso en la Sección 9, sesión
+> 2026-07-25/26.
+>
+> Los secretos que alguna vez estuvieron en Git o en el frontend se trataron como **comprometidos**. Claude no
+> ejecuta estas acciones; las preparó y el OWNER las realizó. **Re-verificado contra el historial real de ambos
+> repos el 2026-07-24+** (no repetido de memoria) — ver evidencia exacta abajo.
 >
 > Orden pensado para minimizar riesgo de romper algo: primero lo que no tiene impacto operativo, al final lo más
 > delicado. Para las credenciales OAuth (Microsoft, Intuit) la secuencia importa: crear el secreto nuevo → ponerlo
 > en Render → confirmar que sigue funcionando → **recién ahí** borrar el viejo. Invertir ese orden corta la
 > integración hasta corregirlo.
+>
+> **Evidencia original de exposición** (verificada línea por línea contra el historial, no de memoria):
+> - `siscon-backend`, `.env` y `.env.save`, commit `abadc64`: `ANTHROPIC_API_KEY` (real, 108 chars),
+>   `SISCON_TOKEN` (real), y `MS_CLIENT_SECRET`/`MS_CLIENT_ID`/`MS_TENANT_ID` (reales, formato Azure — este trío
+>   fue un hallazgo nuevo de esa re-verificación, no estaba en el plan anterior).
+> - `siscon-web/index.html`, commits `5e8a9fb` (se agregó) / `4329303` (se quitó): anon key de Supabase, JWT
+>   completo visible en el diff.
+> - `SUPABASE_SERVICE_ROLE_KEY` (la llave que ignora RLS) **nunca apareció** en el historial de ningún repo.
+> - Borrar los archivos no invalida las copias ya presentes en el historial — por eso la rotación era obligatoria.
 
 1. **`SISCON_TOKEN`** ✅ **Rotado y confirmado (2026-07-25).** — riesgo cero. Hoy es inerte en producción:
    `checkToken()` nunca lo revisa porque `CLOUDFLARE_ENABLED=true` ya deja pasar antes de llegar a esa
@@ -2197,32 +2242,47 @@ Lunes 2026-07-24      Martes 2026-07-25     Miércoles 2026-07-26    Jueves 2026
    Se encontró y corrigió de paso un bug real en `claudeCall()` que impedía probarla (ver Sección 9, sesión
    2026-07-25/26). Key vieja revocada en Anthropic tras confirmar que la nueva funciona.
 
-3. **`MS_CLIENT_SECRET`** (+ `MS_CLIENT_ID`/`MS_TENANT_ID`, expuestos en el mismo commit) — el hallazgo nuevo de la
-   re-verificación; requiere el orden correcto. Azure Portal → App registrations → la app de **Graph/Outlook**
-   (no la de Cloudflare Access — son dos apps distintas) → Certificates & secrets → nuevo secreto. Secuencia:
-   (1) crear el secreto nuevo en Azure sin borrar el viejo → (2) `MS_CLIENT_SECRET` nuevo en Render → (3)
-   confirmar que Outlook sigue sincronizando (`GET /api/ms/status` o logs de Render) → (4) recién ahí borrar el
-   secreto viejo en Azure. Al revés: la sincronización de `facturas@sisconcr.com` se cae hasta corregirlo (los
-   correos no se pierden, solo se pausa la importación automática).
+3. **`MS_CLIENT_SECRET`** ✅ **Rotado y verificado en vivo (2026-07-26).** App correcta identificada
+   comparando el `MS_CLIENT_ID` real del historial contra el dashboard: **`Siscon`**
+   (`1abc2f0f-7043-49be-b458-185db33144ec`) — *no* `Cloudflare Access - Siscon`, que es el IdP del login y
+   tocarle el secreto habría tumbado el acceso de todos. Secuencia respetada: secreto nuevo en Azure → Render →
+   confirmar (`[ms] Tokens restored via bootstrap ✓` + "📥 Refrescar" sin error) → borrar el viejo.
+   - **`MS_CLIENT_ID`/`MS_TENANT_ID`: NO se rotan.** Aunque salieron en el mismo commit, no son secretos (el
+     client ID es un identificador público; el tenant ID es descubrible públicamente para cualquier dominio de
+     M365) y sin el secreto no sirven. Rotarlos exigiría un App Registration nuevo desde cero, sin ganancia real.
+   - **Verificado en el código, no supuesto:** los refresh tokens de Azure AD sobreviven a la rotación del client
+     secret, por eso `msBootstrapIfNeeded()` siguió funcionando sin reconectar Outlook.
 
-4. **`client_secret` de Intuit (QuickBooks)** — no se encontró evidencia de que este haya estado expuesto en el
-   historial (solo la plantilla vacía), se mantiene por precaución. Mismo patrón de secuencia que Microsoft:
-   nuevo secreto en Intuit Developer Portal → Render → confirmar → borrar el viejo. Después, **reconectar
-   QuickBooks desde Ajustes** (el refresh token actual quedó asociado al secreto viejo). Revisar de paso en
-   QuickBooks: Apps conectadas, Audit Log, facturas/proveedores/pagos recientes. Mientras se hace, la
-   sincronización de lectura de QB se pausa (sin pérdida de datos).
+4. **`client_secret` de Intuit (QuickBooks)** ✅ **Descartado con evidencia (2026-07-26) — no requiere rotación.**
+   Se buscó `QBO_CLIENT_SECRET` en el historial completo de `siscon-backend`: **no aparece en ningún commit**,
+   solo la línea vacía de `.env.example`. Nunca estuvo expuesto. Decisión del OWNER: saltarlo.
+   *(Si algún día se rota igual: mismo patrón que Microsoft, pero además hay que **reconectar QuickBooks desde
+   Ajustes**, porque el refresh token de Intuit sí queda asociado al secreto viejo.)*
 
-5. **Anon key de Supabase** — la más delicada, dejarla para el final. En Supabase, el anon key y el
-   `service_role` key comparten el mismo secreto JWT del proyecto: invalidar de verdad el anon key expuesto
-   implica regenerar ese secreto, lo que también invalida las sesiones activas de Supabase Auth (podría
-   desloguear a los 4 usuarios de golpe). Mitigante ya verificado esta sesión: con RLS `FORCE` + 0 políticas
-   (VUL-016), usar ese anon key hoy devuelve **vacío** en todas las tablas — es urgente pero no crítico. Hacerlo
-   en una ventana avisada, no a ciegas — Claude no tiene acceso al dashboard de Supabase para verificar el paso
-   exacto antes de ejecutarlo.
+5. **Anon key de Supabase** ✅ **Revocada (2026-07-26), sin regenerar el JWT secret y sin desloguear a nadie.**
+   - **El plan original de este punto quedó obsoleto:** asumía el esquema legacy (anon y `service_role` firmadas
+     por el mismo JWT secret → revocar implicaba regenerarlo → tumbar sesiones y arriesgar la app). El proyecto
+     ya tiene el **esquema nuevo de llaves** (`sb_publishable_...` / `sb_secret_...`), que permite revocar las
+     legacy sin tocar el secreto de firma.
+   - **Camino real ejecutado:** (1) `SUPABASE_SERVICE_ROLE_KEY` en Render cambió de valor a la llave nueva
+     `sb_secret_...` — solo el valor, el nombre de la variable no cambia y **no hubo cambio de código**;
+     (2) verificación en vivo; (3) **"Disable JWT-based API keys"**, que revoca de un golpe la anon key expuesta
+     en Git y la service_role legacy.
+   - **Por qué fue seguro (verificado antes de ejecutar):** la anon key ya no se usaba en ninguna parte (el
+     frontend no la tiene desde VUL-029, el backend solo usa `SUPABASE_SERVICE_ROLE_KEY`); el único consumidor
+     real es el backend en Render; y las sesiones se validan con `supabase.auth.getUser(token)` — llamada a la
+     API de GoTrue, no verificación local contra el JWT secret.
+   - **Verificación del privilegio crítico (`BYPASSRLS`), por cadena lógica:** un guardado exitoso prueba que la
+     lectura previa funcionó, porque `loadDataFromAPI()` es quien fija `_settingsVersion` y sin él el guardado
+     habría fallado con 428 `missing_version` (VUL-033). El guardado del OWNER pasó limpio → la llave nueva
+     ignora RLS igual que la vieja, que es de lo que depende VUL-016.
+   - ⚠️ **Verificación pendiente:** falta un ciclo completo **logout → login** tras deshabilitar las llaves
+     legacy (una sesión ya abierta seguiría funcionando aunque `signInWithPassword` estuviera roto). Probar al
+     inicio de la próxima sesión; si fallara, re-habilitar las llaves legacy desde esa misma pantalla.
 
 - `SUPABASE_SERVICE_ROLE_KEY` (la llave que ignora RLS) **nunca apareció** en el historial de ninguno de los dos
-  repos — verificado, no requiere rotación por este motivo.
-- **No** reescribir el historial de Git de forma destructiva sin autorización explícita; la rotación es
+  repos — verificado, no requirió rotación por este motivo.
+- **No** reescribir el historial de Git de forma destructiva sin autorización explícita; la rotación era
   obligatoria precisamente porque borrar el archivo actual no invalida las copias anteriores en el historial.
 
 ---
