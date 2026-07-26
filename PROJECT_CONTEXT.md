@@ -1233,11 +1233,21 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     siempre). Como ya no están `pendiente`, la ventana emergente no las vuelve a mostrar. Se corrió un
     `UPDATE` puntual (por `id`) para devolverlas a `pendiente` y poder re-procesarlas con el fix activo — no
     fue necesario para las demás solicitudes del sistema, solo para esas 3 filas específicas.
+- [x] **Mejora de UX pedida por el OWNER tras probar el flujo con los 5 fixes arriba:** con `projects`/OCs
+  todavía en el blob compartido (mitad grande de VUL-044, sin empezar), aprobar una solicitud propia sigue
+  pudiendo chocar en versión con el guardado del solicitante — es el residual esperado, no un bug nuevo. Pero
+  el diálogo genérico "Otro usuario guardó cambios..." + `location.reload()` confundía (parecía un logout,
+  cambiaba el tema oscuro→claro). `pollPendingAuth()` ahora marca `_lastOwnApprovalAt` al aplicar en vivo la
+  aprobación de una solicitud propia; `_handleSaveConflict()` usa esa marca (ventana de 15s, se consume al
+  usarla) para mostrar un mensaje específico de un solo botón ("El administrador aprobó tu solicitud...") y
+  hacer un refresco liviano (`loadDataFromAPI()`, sin `location.reload()`) — si había una OC abierta, se
+  cierra para reabrirla y ver el material ya agregado, sin el flash de login ni el cambio de tema. Si el
+  choque NO es por una aprobación propia, el diálogo genérico se mantiene igual. Frontend commit `7eca951`.
 - **Suite de pruebas al cierre:** backend 10 archivos, 265 pruebas, 0 fallas.
 - **No verificado todavía:** que el usuario Regular pueda loguear sin el error 428, que la lista de
-  conversaciones/badge de mensajes cargue sin el 400, y que el flujo completo de aprobar material extra ya
-  no dispare "no se encontró la OC" ni el conflicto espurio — pendiente de que el OWNER lo confirme en
-  producción tras los 5 fixes.
+  conversaciones/badge de mensajes cargue sin el 400, que el flujo completo de aprobar material extra ya no
+  dispare "no se encontró la OC", y que el mensaje nuevo de conflicto aparezca correctamente — pendiente de
+  que el OWNER lo confirme en producción tras los 6 cambios de esta sesión.
 
 ## 10. ⏳ Pendiente
 
