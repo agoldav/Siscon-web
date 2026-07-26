@@ -1248,6 +1248,35 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   el 428, Mensajes sin el 400, aprobación de material extra sin "no se encontró la OC", y el mensaje nuevo de
   conflicto por aprobación propia funcionando. **VUL-044 parte 1.5 cerrada y verificada.**
 
+### Sesión 2026-07-25/26 (VUL-043 — rotación de secretos, pasos 1-2 de 5 + bug real de claudeCall())
+> Continuación del plan de rotación de la Sección 12.12. Se hace uno a la vez, en el orden seguro documentado;
+> el OWNER ejecuta cada paso en el dashboard correspondiente, Claude guía y verifica.
+- [x] **Paso 1 — `SISCON_TOKEN` rotado** en Render (riesgo cero, inerte en producción porque
+  `CLOUDFLARE_ENABLED=true` ya deja pasar antes de esa comprobación).
+- [x] **Paso 2 — `ANTHROPIC_API_KEY` rotada** en la consola de Anthropic + Render. Verificación inicial
+  reveló un bug real (no relacionado con la rotación en sí) que impedía probarla — ver abajo.
+- [x] **Bug real encontrado al verificar — `claudeCall()` caía siempre al fallback roto bajo Plan B
+  (mismo origen).** `backendUrl()` devuelve `''` cuando `BACKEND_URL=''` (Plan B, valor válido: "usa rutas
+  `/api/*` relativas"), pero `claudeCall()` hacía `if(be){...}` y `''` es *falsy* en JS — nunca entraba a la
+  rama del backend real, caía siempre al fallback de pegar la API key de Claude directo en el navegador
+  (mensaje "Configura el Backend en Ajustes..."). Bug distinto del ya cerrado en `backendUrl()` (commit
+  `5047484`, sesión 2026-07-26) — mismo síntoma superficial, causa distinta, en la función que sí la llama.
+  - **Fix:** `claudeCall()` ya no chequea `if(be)`; usa `backendUrl()` siempre (nunca es `null`/`undefined`).
+  - **Eliminado (ya no se requería):** el fallback de fetch directo a `api.anthropic.com` con una API key
+    pegada en el navegador (mismo riesgo que cerraron VUL-029/030 — key expuesta en cliente); `claudeKey()`,
+    `SYS.claudeKey`, el campo "Claude (Anthropic) — directo" en Ajustes, y su lectura en `saveSettings()`.
+    También se quitó de `claudeCall()` el header `x-siscon-token` que traía hardcodeado el valor **viejo**
+    de `SISCON_TOKEN` (no se valida en producción, `checkToken()` lo ignora con Cloudflare Access activo).
+  - Frontend commit `4dcbcfb`, desplegado a Vercel.
+  - **Verificado en vivo por el OWNER (2026-07-26):** login vía Cloudflare Access + chat/OCR de Claude
+    funcionando en `app.sisconcr.com` con la key nueva.
+  - **Nota (no corregida, fuera de alcance de esta sesión):** el mismo token viejo `siscon-2026-pmapp`
+    sigue hardcodeado como header `x-siscon-token` en ~10 llamadas más del archivo (login, invitaciones,
+    reset de password, gestión de usuarios). No afecta funcionalidad (`checkToken()` no lo exige en
+    producción), queda anotado para una limpieza futura si se retoma.
+- **Quedan del plan de 12.12:** paso 3 (`MS_CLIENT_SECRET`/`MS_CLIENT_ID`/`MS_TENANT_ID` en Azure), paso 4
+  (`client_secret` de Intuit, sin confirmar exposición), paso 5 (anon key de Supabase, el más delicado).
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1258,7 +1287,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > blob) se cerraron y verificaron en vivo el 2026-07-25/26 — ver Sección 9. Solo quedan abiertas VUL-043
 > (requiere al OWNER, rotar secretos) y la mitad grande de VUL-044 (normalizar el resto del blob).
 
-- [ ] **VUL-043 | Secretos en el historial de Git — requiere ROTACIÓN MANUAL del OWNER** (ALTA)
+- [~] **VUL-043 | Secretos en el historial de Git — requiere ROTACIÓN MANUAL del OWNER** (ALTA)
+  - **En progreso (2026-07-25/26):** pasos 1-2 de 5 completados y verificados — `SISCON_TOKEN` y
+    `ANTHROPIC_API_KEY` rotados (ver Sección 9). Quedan: paso 3 (Microsoft/Azure), paso 4 (Intuit), paso 5
+    (Supabase anon key). Detalle y orden seguro en 12.12.
   - **Re-verificado línea por línea contra el historial real de ambos repos (2026-07-24+)** — no solo repetido de
     memoria. Confirmado con evidencia (valores reales, no plantillas):
     - `siscon-backend`, archivos `.env` y `.env.save`, commit `abadc64`: `ANTHROPIC_API_KEY` (real, 108 chars),
@@ -2157,12 +2189,13 @@ Lunes 2026-07-24      Martes 2026-07-25     Miércoles 2026-07-26    Jueves 2026
 > en Render → confirmar que sigue funcionando → **recién ahí** borrar el viejo. Invertir ese orden corta la
 > integración hasta corregirlo.
 
-1. **`SISCON_TOKEN`** — riesgo cero. Hoy es inerte en producción: `checkToken()` nunca lo revisa porque
-   `CLOUDFLARE_ENABLED=true` ya deja pasar antes de llegar a esa comprobación. Rotar en Render cuando sea.
+1. **`SISCON_TOKEN`** ✅ **Rotado y confirmado (2026-07-25).** — riesgo cero. Hoy es inerte en producción:
+   `checkToken()` nunca lo revisa porque `CLOUDFLARE_ENABLED=true` ya deja pasar antes de llegar a esa
+   comprobación.
 
-2. **`ANTHROPIC_API_KEY`** — bajo riesgo, ~1 minuto de pausa. Generar la nueva en la consola de Anthropic → ponerla
-   en Render → Render reinicia el servicio solo. Durante ese reinicio, OCR de facturas y el chat con Claude no
-   responden (sin pérdida de datos). Revocar la vieja en Anthropic **después** de confirmar que la nueva funciona.
+2. **`ANTHROPIC_API_KEY`** ✅ **Rotada y verificada en vivo (2026-07-26)** — bajo riesgo, ~1 minuto de pausa.
+   Se encontró y corrigió de paso un bug real en `claudeCall()` que impedía probarla (ver Sección 9, sesión
+   2026-07-25/26). Key vieja revocada en Anthropic tras confirmar que la nueva funciona.
 
 3. **`MS_CLIENT_SECRET`** (+ `MS_CLIENT_ID`/`MS_TENANT_ID`, expuestos en el mismo commit) — el hallazgo nuevo de la
    re-verificación; requiere el orden correcto. Azure Portal → App registrations → la app de **Graph/Outlook**
