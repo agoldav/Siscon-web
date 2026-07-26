@@ -12175,7 +12175,17 @@ function setTheme(t){
 
 // ===== Claude API — vía backend (recomendado) o directo (fallback) =====
 function claudeKey(){ return (SYS.claudeKey||'').trim(); }
-function backendUrl(){ return ((SYS.backendUrl||'').trim().replace(/\/$/,'')) || BACKEND_URL; }
+// Bug real en producción (2026-07-26): esta función ignoraba el resguardo que sí tiene la
+// constante BACKEND_URL (arriba) — usaba SYS.backendUrl "a ciegas" si tenía cualquier valor,
+// incluida una URL vieja de onrender.com guardada de antes del cutover a Cloudflare Access.
+// Eso disparaba un fetch directo a onrender.com que el CSP bloquea (VUL-030): "Refused to
+// connect... because it appears in neither the connect-src directive nor the default-src".
+// Mismo criterio que ya documentaba el comentario de BACKEND_URL: SYS.backendUrl solo aplica
+// para desarrollo local.
+function backendUrl(){
+  const v=(SYS.backendUrl||'').trim().replace(/\/$/,'');
+  return (v && /localhost|127\.0\.0\.1/.test(v)) ? v : BACKEND_URL;
+}
 async function claudeCall(body){
   const be=backendUrl();
   if(be){
