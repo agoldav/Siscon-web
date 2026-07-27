@@ -786,7 +786,8 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
   <div id="app-body">
     <div id="sidebar">
       <div class="sb-logo">AP<br>SIS</div>
-      <button class="sb-icon" onclick="renderDash()" title="Dashboard"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/></svg></span><span class="sb-txt">Inicio</span></button>
+      <button class="sb-icon" id="sb-nav-inicio" onclick="goInicio()" title="Dashboard"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/></svg></span><span class="sb-txt">Inicio</span></button>
+      <button class="sb-icon" id="sb-nav-proyectos" onclick="goProyectos()" onmouseenter="showProyectosQuickMenu(event)" onmouseleave="hideProyectosQuickMenu()" title="Proyectos"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="3" y1="12" x2="21" y2="12"/></svg></span><span class="sb-txt">Proyectos</span></button>
       <button class="sb-icon" data-newtab="subs" onclick="openSubsWin()" title="Subcontratistas · Cmd+clic: pestaña nueva"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 9a2.5 2.5 0 1 0 0-5"/><path d="M15 14.5c2.4.4 4 2.3 4 5.5"/></svg></span><span class="sb-txt">Subcont.</span></button>
       <button class="sb-icon" data-newtab="calc" onclick="openCalcWin()" title="Calculadora de Avance · Cmd+clic: pestaña nueva"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><line x1="8" y1="7.5" x2="16" y2="7.5"/><line x1="8" y1="12" x2="8" y2="12"/><line x1="12" y1="12" x2="12" y2="12"/><line x1="16" y1="12" x2="16" y2="12"/><line x1="8" y1="15.5" x2="8" y2="15.5"/><line x1="12" y1="15.5" x2="12" y2="15.5"/><line x1="16" y1="15.5" x2="16" y2="19"/><line x1="8" y1="19" x2="12" y2="19"/></svg></span><span class="sb-txt">Avance</span></button>
       <button class="sb-icon" data-newtab="route" onclick="openRouteWin()" title="Creación de Ruta · Cmd+clic: pestaña nueva"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-7.2 7-12a7 7 0 1 0-14 0c0 4.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.4"/></svg></span><span class="sb-txt">Ruta</span></button>
@@ -1977,6 +1978,7 @@ const PROJ_STATUSES=['Sin iniciar','En proceso','En Pausa','Terminado'];
 const KANBAN_COLORS={'Sin iniciar':'var(--t3)','En proceso':'var(--acc)','En Pausa':'var(--amb)','Terminado':'var(--grn)'};
 let kanbanDragProjId=null;
 let dashView='list'; // 'kanban' | 'list'
+let dashboardView='inicio'; // 'inicio' (stats) | 'proyectos' (tabla/kanban de proyectos)
 let dashListCols=[
   {id:'nombre',     label:'Proyecto',      w:'2fr',  vis:true, locked:true},
   {id:'estatus',    label:'Estatus',       w:'100px',vis:true},
@@ -2035,13 +2037,54 @@ document.addEventListener('click',e=>{
   }
 });
 
+function goInicio(){ dashboardView='inicio'; renderDash(); }
+function goProyectos(){ dashboardView='proyectos'; renderDash(); }
+
+// ===== Menú rápido (hover) del ícono "Proyectos" del sidebar: 10 con actividad más reciente, listados A→Z =====
+let _projQuickMenuEl=null, _projQuickMenuTimer=null;
+function showProyectosQuickMenu(e){
+  clearTimeout(_projQuickMenuTimer);
+  if(_projQuickMenuEl) return;
+  const recent=[...projects].sort((a,b)=>(b.lastActivity||0)-(a.lastActivity||0)).slice(0,10);
+  recent.sort((a,b)=>a.name.localeCompare(b.name));
+  if(!recent.length) return;
+  const el=document.createElement('div');
+  el.id='proj-quick-menu';
+  el.style.cssText='position:fixed;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);box-shadow:var(--shadow-md);min-width:210px;max-width:260px;padding:6px 0;z-index:5000';
+  el.innerHTML='<div style="padding:6px 14px 8px;font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">Proyectos recientes</div>'
+    +recent.map(p=>'<button onclick="hideProyectosQuickMenu(true);openProj('+p.id+')" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:8px 14px;font-size:12px;color:var(--t1);cursor:pointer" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'transparent\'">'+esc(p.name)+'</button>').join('')
+    +'<button onclick="hideProyectosQuickMenu(true);goProyectos()" style="display:block;width:100%;text-align:left;background:transparent;border:none;border-top:1px solid var(--border);margin-top:4px;padding:8px 14px;font-size:12px;color:var(--acc);cursor:pointer;font-weight:500">Ver todos los proyectos →</button>';
+  document.body.appendChild(el);
+  const r=e.currentTarget.getBoundingClientRect();
+  el.style.left=(r.right+8)+'px';
+  const maxTop=window.innerHeight-el.offsetHeight-10;
+  el.style.top=Math.max(8,Math.min(r.top-4,maxTop))+'px';
+  el.addEventListener('mouseenter',()=>clearTimeout(_projQuickMenuTimer));
+  el.addEventListener('mouseleave',()=>hideProyectosQuickMenu());
+  _projQuickMenuEl=el;
+}
+function hideProyectosQuickMenu(immediate){
+  clearTimeout(_projQuickMenuTimer);
+  const doHide=()=>{ if(_projQuickMenuEl){ _projQuickMenuEl.remove(); _projQuickMenuEl=null; } };
+  if(immediate) doHide(); else _projQuickMenuTimer=setTimeout(doHide,150);
+}
+function updateSidebarNavActive(){
+  const bi=document.getElementById('sb-nav-inicio'), bp=document.getElementById('sb-nav-proyectos');
+  if(bi) bi.classList.toggle('active', dashboardView==='inicio');
+  if(bp) bp.classList.toggle('active', dashboardView==='proyectos');
+}
 function renderDash(){
   curProj=null; showCreate=false;
   if(typeof applyTheme==='function') applyTheme();
   document.getElementById('metricbar-wrap').classList.add('hidden');
   document.getElementById('tabbar').classList.add('hidden');
   document.getElementById('bcrumb').innerHTML='';
+  updateSidebarNavActive();
+  if(dashboardView==='proyectos'){ renderProjectsList(); return; }
+  document.getElementById('content').innerHTML=`<div id="dash-stats">${renderDashStats()}</div>`;
+}
 
+function renderProjectsList(){
   let sorted=[...projects];
   if(dashSort==='alpha-asc') sorted.sort((a,b)=>a.name.localeCompare(b.name));
   else if(dashSort==='alpha-desc') sorted.sort((a,b)=>b.name.localeCompare(a.name));
@@ -2049,7 +2092,6 @@ function renderDash(){
   else if(dashSort==='activity-desc') sorted.sort((a,b)=>b.lastActivity-a.lastActivity);
 
   document.getElementById('content').innerHTML=`
-    <div id="dash-stats">${renderDashStats()}</div>
     <div class="th-row">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <button class="btn-new-proj" onclick="openNewProjModal()">+ Crear Proyecto</button>
@@ -2135,7 +2177,7 @@ function renderDashList(sorted){
         // confianza en tiempo de render — se escapa igual que el resto.
         return '<span class="badge b-gray" style="color:'+(KANBAN_COLORS[p.status]||'var(--t2)')+'">'+esc(p.status)+'</span>';
       case 'avance':
-        return '<div style="font-size:12px;color:var(--t1)">'+prog+'%<div class="prog-bar" style="margin-top:3px;max-width:56px"><div class="prog-fill" style="width:'+prog+'%"></div></div></div>';
+        return '<div style="font-size:12px;color:var(--t1);display:inline-block">'+prog+'%<div class="prog-bar" style="margin:3px auto 0;width:56px"><div class="prog-fill" style="width:'+prog+'%"></div></div></div>';
       case 'presupuesto':
         return '<div style="font-size:12px;color:var(--t1)">'+fmt(p.budget)+'</div>';
       case 'gastado':
@@ -2155,12 +2197,13 @@ function renderDashList(sorted){
 
   const headerCells=visCols.map((c,i)=>{
     const isDraggable=!c.locked;
+    const align=c.id==='nombre'?'left':'center';
     return '<div draggable="'+(isDraggable?'true':'false')+'" data-col-id="'+c.id+'"'
       +' ondragstart="if(event.currentTarget.draggable){_dlColDrag=\''+c.id+'\';event.currentTarget.style.opacity=\'.4\';}"'
       +' ondragend="event.currentTarget.style.opacity=\'1\';"'
       +' ondragover="event.preventDefault();"'
       +' ondrop="dlColDrop(\''+c.id+'\',event);"'
-      +' style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;font-weight:600;'+(isDraggable?'cursor:grab;':'')+'">'
+      +' style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;font-weight:600;text-align:'+align+';'+(isDraggable?'cursor:grab;':'')+'">'
       +c.label+'</div>';
   }).join('');
 
@@ -2170,16 +2213,16 @@ function renderDashList(sorted){
     const budgeted=p.types.reduce((s,t)=>s+((getCatTotal(t)||t.budget||0)*p.houses.filter(h=>h.typeId===t.id).length),0);
     const facturado=(p.invClient||[]).filter(x=>x.status!=='Anulada').reduce((s,x)=>s+(x.amount||0),0);
     const projPending=Object.keys(TXN_DEFS).reduce((s,k)=>s+(p[TXN_DEFS[k].key]||[]).filter(x=>x._pending).length,0);
-    const cells=visCols.map(c=>'<div>'+cellVal(c,p,realSpent,prog,budgeted,facturado,projPending)+'</div>').join('');
-    return '<div style="display:grid;grid-template-columns:'+tplCols+';gap:0;padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;align-items:center" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'" onclick="openProj('+p.id+')">'
+    const cells=visCols.map(c=>'<div style="text-align:'+(c.id==='nombre'?'left':'center')+'">'+cellVal(c,p,realSpent,prog,budgeted,facturado,projPending)+'</div>').join('');
+    return '<div style="display:grid;grid-template-columns:'+tplCols+';gap:14px;padding:11px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;align-items:center" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'" onclick="openProj('+p.id+')">'
       +cells
-      +'<div onclick="event.stopPropagation()">'
+      +'<div onclick="event.stopPropagation()" style="text-align:center">'
       +'<button class="icon-btn" style="font-size:15px;padding:2px 5px" onclick="projMenuToggle('+p.id+',event)" title="Opciones">⋯</button>'
       +'</div></div>';
   }).join('');
 
   return '<div style="background:var(--bg1);border:1px solid var(--border);border-radius:var(--rlg);overflow:hidden">'
-    +'<div style="display:grid;grid-template-columns:'+tplCols+';gap:0;background:var(--bg3);border-bottom:1px solid var(--border);padding:8px 14px">'+headerCells+'<div></div></div>'
+    +'<div style="display:grid;grid-template-columns:'+tplCols+';gap:14px;background:var(--bg3);border-bottom:1px solid var(--border);padding:10px 16px">'+headerCells+'<div></div></div>'
     +rows+'</div>';
 }
 
@@ -2319,6 +2362,7 @@ function openProj(id){
   if(curProj.paymentTermDays===undefined)curProj.paymentTermDays=30;
   curProj.houses.forEach(h=>{ if(h.crewMemberIds===undefined)h.crewMemberIds=[]; if(h.log===undefined)h.log=[]; });
   showCreate=false; typeEditId=null; curTab='info'; curTxnTab='oc';
+  dashboardView=null; if(typeof updateSidebarNavActive==='function') updateSidebarNavActive();
   document.getElementById('metricbar-wrap').classList.remove('hidden');
   document.getElementById('tabbar').classList.remove('hidden');
   const lb=document.getElementById('metric-lock-btn');
