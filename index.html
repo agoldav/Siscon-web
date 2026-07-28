@@ -2167,8 +2167,10 @@ function renderDashList(sorted){
         // VUL-036: p.name/p.num/p.client son texto libre (nombre y cliente del proyecto) que
         // cualquiera de los 4 usuarios puede escribir; esta es la vista de Dashboard, la primera
         // pantalla que ve todo el mundo al entrar.
+        // El slot del badge de pendientes siempre se reserva (aunque esté vacío) para que el
+        // nombre del proyecto arranque en la misma posición en todas las filas.
         return '<div style="display:flex;align-items:center;gap:8px">'
-          +(projPending>0?'<span class="notif-badge" style="position:static;min-width:16px;height:16px;font-size:9px">'+(projPending>99?'99+':projPending)+'</span>':'')
+          +(projPending>0?'<span class="notif-badge" style="position:static;min-width:16px;height:16px;font-size:9px;flex-shrink:0">'+(projPending>99?'99+':projPending)+'</span>':'<span style="display:inline-block;width:16px;height:16px;flex-shrink:0"></span>')
           +'<div><div style="font-size:13px;font-weight:600;color:var(--t1)">'+esc(p.name)+'</div>'
           +'<div style="font-size:10px;color:var(--t3)">'+esc(p.num)+(p.client?' · '+esc(p.client):'')+'</div></div></div>';
       case 'estatus':
@@ -2177,7 +2179,7 @@ function renderDashList(sorted){
         // confianza en tiempo de render — se escapa igual que el resto.
         return '<span class="badge b-gray" style="color:'+(KANBAN_COLORS[p.status]||'var(--t2)')+'">'+esc(p.status)+'</span>';
       case 'avance':
-        return '<div style="font-size:12px;color:var(--t1);display:inline-block">'+prog+'%<div class="prog-bar" style="margin:3px auto 0;width:56px"><div class="prog-fill" style="width:'+prog+'%"></div></div></div>';
+        return '<div style="font-size:12px;color:var(--t1)">'+prog+'%<div class="prog-bar" style="margin-top:3px;width:56px"><div class="prog-fill" style="width:'+prog+'%"></div></div></div>';
       case 'presupuesto':
         return '<div style="font-size:12px;color:var(--t1)">'+fmt(p.budget)+'</div>';
       case 'gastado':
@@ -2197,13 +2199,12 @@ function renderDashList(sorted){
 
   const headerCells=visCols.map((c,i)=>{
     const isDraggable=!c.locked;
-    const align=c.id==='nombre'?'left':'center';
     return '<div draggable="'+(isDraggable?'true':'false')+'" data-col-id="'+c.id+'"'
       +' ondragstart="if(event.currentTarget.draggable){_dlColDrag=\''+c.id+'\';event.currentTarget.style.opacity=\'.4\';}"'
       +' ondragend="event.currentTarget.style.opacity=\'1\';"'
       +' ondragover="event.preventDefault();"'
       +' ondrop="dlColDrop(\''+c.id+'\',event);"'
-      +' style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;font-weight:600;text-align:'+align+';'+(isDraggable?'cursor:grab;':'')+'">'
+      +' style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;font-weight:600;text-align:center;'+(isDraggable?'cursor:grab;':'')+'">'
       +c.label+'</div>';
   }).join('');
 
@@ -2213,7 +2214,7 @@ function renderDashList(sorted){
     const budgeted=p.types.reduce((s,t)=>s+((getCatTotal(t)||t.budget||0)*p.houses.filter(h=>h.typeId===t.id).length),0);
     const facturado=(p.invClient||[]).filter(x=>x.status!=='Anulada').reduce((s,x)=>s+(x.amount||0),0);
     const projPending=Object.keys(TXN_DEFS).reduce((s,k)=>s+(p[TXN_DEFS[k].key]||[]).filter(x=>x._pending).length,0);
-    const cells=visCols.map(c=>'<div style="text-align:'+(c.id==='nombre'?'left':'center')+'">'+cellVal(c,p,realSpent,prog,budgeted,facturado,projPending)+'</div>').join('');
+    const cells=visCols.map(c=>'<div style="text-align:left">'+cellVal(c,p,realSpent,prog,budgeted,facturado,projPending)+'</div>').join('');
     return '<div style="display:grid;grid-template-columns:'+tplCols+';gap:14px;padding:11px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;align-items:center" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'" onclick="openProj('+p.id+')">'
       +cells
       +'<div onclick="event.stopPropagation()" style="text-align:center">'
