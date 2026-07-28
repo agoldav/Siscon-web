@@ -1360,8 +1360,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 ### Sesión 2026-07-27 (VUL-044 Fase A — projects/houses fuera del blob, implementación y cutover)
 > Backend + frontend + SQL/migración. **Backend `3116bfa` desplegado en Render; frontend `759862f`
 > y documentación `a15045f` desplegados en Vercel. SQL y migración real completados en producción.**
-> VUL-044 completa sigue abierta porque aún quedan otras colecciones del blob y la prueba funcional
-> de esta fase con dos usuarios autenticados.
+> **Fase A cerrada y verificada en vivo por el OWNER el 2026-07-27.** VUL-044 completa sigue abierta
+> porque aún quedan otras colecciones grandes dentro de `projects.data` y `settings/1`.
 - [x] Auditoría del trabajo parcial que había quedado al agotarse el contexto: se detectaron frontend
   ausente, mezcla de ids text/número, PUT parcial que vaciaba `data`, cascada no atómica, migración
   reejecutable desde un blob obsoleto, rollback falso y una prueba de concurrencia desactualizada.
@@ -1405,9 +1405,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   conflicto genérico. La regresión de comportamiento simula un 409 real de proyecto, confirma un solo
   mensaje, una sola recarga desde servidor, cierre de la OC abierta y cero sobrescrituras forzadas.
   Suite completa: 7 archivos / 135 aserciones en verde.
-- [ ] **Pendiente para cerrar Fase A:** prueba funcional en vivo con dos usuarios autenticados
-  después de desplegar esta corrección (cargar, editar y verificar sincronización/conflictos). No
-  ejecutar sin las sesiones de usuario.
+- [x] **Cierre funcional de Fase A verificado por el OWNER (2026-07-27):** prueba en producción con
+  dos usuarios autenticados aprobada. El usuario solicitó material fuera de presupuesto, el
+  administrador lo aprobó y el solicitante recibió el mensaje específico con un solo OK; al aceptarlo
+  cargó el estado autoritativo guardado por el administrador, sin mostrar el diálogo genérico de
+  recargar/sobrescribir. **Fase A (`projects`/`houses`) cerrada.**
 
 ## 10. ⏳ Pendiente
 
@@ -1421,18 +1423,19 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > resto del blob).
 
 - [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
-  - Los 4 usuarios comparten un solo registro `settings/1` con `projects`/`houses`/`transactions`/ajustes/
-    actividad: cualquier guardado de cualquier usuario puede chocar en versión con el guardado de otro,
-    aunque sean acciones sin relación real entre sí (residual mitigado con un mensaje de UX específico, no
-    eliminado — ver Sección 9, sesión 2026-07-26).
+  - Después de Fase A, `projects` y `houses` ya tienen filas propias y dejaron `settings/1`. Todavía
+    quedan colecciones grandes —incluidas transacciones/OCs y otros datos dentro de `projects.data`,
+    además de ajustes/actividad en `settings/1`— cuyos cambios comparten versión por fila y pueden
+    chocar aunque afecten subcolecciones distintas.
   - `conversations`/`messages` (parte 1) y `pendingAuthRequests`/`notifications` (parte 1.5) ya salieron del
     blob a sus propias tablas — cerradas y verificadas en vivo, ver Sección 9 y Sección 11.2.
-  - **Fase A (`projects`/`houses`):** implementada, migrada y desplegada el 2026-07-27. Conteos exactos
+  - **Fase A (`projects`/`houses`) — ✅ CERRADA:** implementada, migrada, desplegada y verificada en
+    vivo con dos usuarios el 2026-07-27. Conteos exactos
     en producción: 3 proyectos y 30 casas; sin ids faltantes/inesperados ni relaciones incorrectas;
     marcador de migración registrado y frontend normalizado publicado. La primera prueba multiusuario
     encontró y corrigió una escritura artificial de `settings/1` durante el login y una regresión que
-    omitía el mensaje específico de aprobación en los nuevos conflictos por fila. Solo falta repetir la
-    prueba funcional en vivo con dos usuarios autenticados para cerrar la fase.
+    omitía el mensaje específico de aprobación en los nuevos conflictos por fila. La repetición final
+    del flujo de aprobación fue aprobada por el OWNER.
   - **PENDIENTE después de Fase A:** normalizar `transactions` y las demás colecciones que todavía viven
     dentro de `projects.data`, además del resto de `settings/1`. Hacerlo por fases, no como reescritura única.
 
@@ -1485,8 +1488,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > VUL-044 parte 1 (conversations/messages fuera del blob) — ✅ cerrada y desplegada, verificada en vivo por
 > el OWNER 2026-07-25/26 (Sección 9). VUL-044 parte 1.5 (pendingAuthRequests/notifications fuera del blob) —
 > ✅ cerrada y desplegada, verificada en vivo por el OWNER 2026-07-26 tras corregir 5 bugs reales encontrados
-> en producción (Sección 9). Solo queda abierta la mitad grande de VUL-044 (normalizar `projects`/`houses`/
-> `transactions`), sin fecha.
+> en producción (Sección 9). VUL-044 Fase A (`projects`/`houses`) también quedó cerrada y verificada
+> el 2026-07-27. Sigue abierta la normalización de `transactions` y las demás colecciones que todavía
+> comparten `projects.data`/`settings/1`, sin fecha.
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
