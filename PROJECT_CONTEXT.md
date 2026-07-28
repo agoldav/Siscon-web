@@ -1357,10 +1357,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   `agoldav/Siscon-web` → Vercel. Tag de respaldo `backup-pre-redesign-2026-07-27` creado y pusheado sobre
   el commit previo al rediseño, por si hay que revertir.
 
-### Sesión 2026-07-27 (VUL-044 Fase A — projects/houses fuera del blob, implementación local)
-> Backend + frontend + SQL/migración. **Commits locales `3116bfa` (backend) y `759862f` (frontend);
-> sin push, sin migración real y sin deploy. VUL-044 NO se marca cerrada hasta completar el cutover
-> y la prueba en vivo.**
+### Sesión 2026-07-27 (VUL-044 Fase A — projects/houses fuera del blob, implementación y cutover)
+> Backend + frontend + SQL/migración. **Backend `3116bfa` desplegado en Render; frontend `759862f`
+> y documentación `a15045f` desplegados en Vercel. SQL y migración real completados en producción.**
+> VUL-044 completa sigue abierta porque aún quedan otras colecciones del blob y la prueba funcional
+> de esta fase con dos usuarios autenticados.
 - [x] Auditoría del trabajo parcial que había quedado al agotarse el contexto: se detectaron frontend
   ausente, mezcla de ids text/número, PUT parcial que vaciaba `data`, cascada no atómica, migración
   reejecutable desde un blob obsoleto, rollback falso y una prueba de concurrencia desactualizada.
@@ -1383,8 +1384,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Verificación local: sintaxis completa OK; backend 11 archivos / 312 aserciones en verde; frontend
   6 archivos / 115 aserciones en verde. Se agregaron pruebas de comportamiento real para alta,
   actualización y borrado normalizados.
-- [ ] **Pendiente para cerrar Fase A:** ejecutar SQL + dry-run, migración real, push/deploy escalonado y
-  prueba en vivo con dos usuarios. No ejecutar automáticamente.
+- [x] Cutover de producción: SQL aplicado y validado; cuatro filas legacy sin referencias archivadas
+  reversiblemente; dry-run exitoso; migración real de 3 proyectos y 30 casas; marcador
+  `vul-044-phase-a-projects-houses` registrado; auditoría independiente `all_checks_passed=true`;
+  backend saludable (`/health` → 200) y frontend publicado en Vercel con el lector normalizado.
+- [ ] **Pendiente para cerrar Fase A:** prueba funcional en vivo con dos usuarios autenticados
+  (cargar, editar y verificar sincronización/conflictos). No ejecutar sin las sesiones de usuario.
 
 ## 10. ⏳ Pendiente
 
@@ -1404,9 +1409,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     eliminado — ver Sección 9, sesión 2026-07-26).
   - `conversations`/`messages` (parte 1) y `pendingAuthRequests`/`notifications` (parte 1.5) ya salieron del
     blob a sus propias tablas — cerradas y verificadas en vivo, ver Sección 9 y Sección 11.2.
-  - **Fase A (`projects`/`houses`):** implementada, probada y guardada en commits locales el 2026-07-27;
-    todavía sin migración, push ni deploy. No se considera cerrada hasta verificar el cutover en vivo
-    con dos usuarios.
+  - **Fase A (`projects`/`houses`):** implementada, migrada y desplegada el 2026-07-27. Conteos exactos
+    en producción: 3 proyectos y 30 casas; sin ids faltantes/inesperados ni relaciones incorrectas;
+    marcador de migración registrado y frontend normalizado publicado. Solo falta la prueba funcional
+    en vivo con dos usuarios autenticados para cerrar la fase.
   - **PENDIENTE después de Fase A:** normalizar `transactions` y las demás colecciones que todavía viven
     dentro de `projects.data`, además del resto de `settings/1`. Hacerlo por fases, no como reescritura única.
 
