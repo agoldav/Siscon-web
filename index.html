@@ -2204,7 +2204,7 @@ function renderDashList(sorted){
       +' ondragend="event.currentTarget.style.opacity=\'1\';"'
       +' ondragover="event.preventDefault();"'
       +' ondrop="dlColDrop(\''+c.id+'\',event);"'
-      +' style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;font-weight:600;text-align:center;'+(isDraggable?'cursor:grab;':'')+'">'
+      +' style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;font-weight:600;text-align:left;'+(isDraggable?'cursor:grab;':'')+'">'
       +c.label+'</div>';
   }).join('');
 
@@ -8704,6 +8704,30 @@ function saveSubs(){ SYS.subcontractors=JSON.parse(JSON.stringify(subsWork)).map
 // ════════════════════════════════════════════════════════════
 let calcState={ivaShow:false,sections:[]};
 let calcEditId=null; // id del avance en edición ('new' o id existente) o null = lista
+let calcListFilter={mode:'todos',from:'',to:''}; // filtro de periodo en la lista de avances
+function calcPeriodRange(mode){
+  const now=new Date(); const y=now.getFullYear(), m=now.getMonth(), d=now.getDate();
+  if(mode==='week'){
+    const dow=(now.getDay()+6)%7; // lunes=0 ... domingo=6
+    const start=new Date(y,m,d-dow), end=new Date(y,m,d-dow+6);
+    return {from:start.toISOString().slice(0,10), to:end.toISOString().slice(0,10)};
+  }
+  if(mode==='month'){
+    const start=new Date(y,m,1), end=new Date(y,m+1,0);
+    return {from:start.toISOString().slice(0,10), to:end.toISOString().slice(0,10)};
+  }
+  return null;
+}
+function calcInPeriod(dateStr){
+  if(calcListFilter.mode==='todos') return true;
+  if(!dateStr) return false;
+  let from=calcListFilter.from, to=calcListFilter.to;
+  if(calcListFilter.mode!=='range'){ const r=calcPeriodRange(calcListFilter.mode); from=r.from; to=r.to; }
+  if(!from||!to) return true;
+  return dateStr>=from && dateStr<=to;
+}
+function calcSetFilterMode(mode){ calcListFilter.mode=mode; renderCalcList(); }
+function calcSetFilterDate(which,val){ calcListFilter[which]=val; renderCalcList(); }
 // #16: ventana principal con lista de avances guardados
 function openCalcWin(){
   if(!currentUser){ alert('Inicia sesión primero.'); return; }
@@ -8722,12 +8746,20 @@ function renderCalcWin(){
 }
 function renderCalcList(){
   if(!SYS.subAdvanceRecords)SYS.subAdvanceRecords=[];
-  const recs=SYS.subAdvanceRecords;
+  const recs=SYS.subAdvanceRecords.filter(r=>calcInPeriod(r.date));
   const body=document.getElementById('calc-win'); const foot=document.getElementById('calc-foot');
   if(foot) foot.innerHTML=`<button class="btn-cancel" onclick="fwinClose('calc',true)">Cerrar</button><button class="btn-save" onclick="calcNew()">+ Crear Nuevo Avance</button>`;
   if(!body)return;
   body.innerHTML=`
-    <div style="font-size:12px;color:var(--t2);margin-bottom:10px">${recs.length} avance(s) registrado(s)</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <div style="font-size:12px;color:var(--t2)">${recs.length} avance(s) registrado(s)</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+        <select style="font-size:12px" onchange="calcSetFilterMode(this.value)">
+          ${[['todos','Todos'],['week','Semana en Curso'],['month','Mes en Curso'],['range','Rango de fechas']].map(([v,l])=>`<option value="${v}"${calcListFilter.mode===v?' selected':''}>${l}</option>`).join('')}
+        </select>
+        ${calcListFilter.mode==='range'?`<input type="date" value="${calcListFilter.from||''}" onchange="calcSetFilterDate('from',this.value)" style="font-size:11px"/><input type="date" value="${calcListFilter.to||''}" onchange="calcSetFilterDate('to',this.value)" style="font-size:11px"/>`:''}
+      </div>
+    </div>
     ${recs.length?recs.map(r=>{
       const sub=SYS.subcontractors.find(s=>s.id===r.subId);
       return `<div class="oc-list-item" onclick="calcOpen('${r.id}')">
@@ -8736,7 +8768,7 @@ function renderCalcList(){
         <span style="font-size:12px;font-weight:600;color:var(--grn)">${fmt(r.total||0)}</span>
         <span class="qbo-badge${r.billed?'':' pending'}">${r.billed?'✓ Facturado':'Sin facturar'}</span>
         ${!r.billed?`<button onclick="event.stopPropagation();calcDeleteAdvance('${r.id}')" style="background:transparent;border:none;color:var(--t3);font-size:12px;padding:4px 8px;cursor:pointer;border-radius:6px" title="Eliminar avance" onmouseenter="this.style.color='var(--red)'" onmouseleave="this.style.color='var(--t3)'">✕</button>`:''}
-      </div>`;}).join(''):'<div style="color:var(--t3);text-align:center;padding:30px;font-size:12px">No hay avances. Crea uno con "+ Crear Nuevo Avance".</div>'}`;
+      </div>`;}).join(''):`<div style="color:var(--t3);text-align:center;padding:30px;font-size:12px">${calcListFilter.mode==='todos'?'No hay avances. Crea uno con "+ Crear Nuevo Avance".':'No hay avances en el periodo seleccionado.'}</div>`}`;
 }
 function calcNew(){
   calcEditId='new';
