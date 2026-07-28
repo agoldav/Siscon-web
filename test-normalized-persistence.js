@@ -54,10 +54,12 @@ ok('proyectos eliminados usan DELETE y limpian sus casas locales',
   /if\(projectId===id\)/.test(html));
 ok('casas eliminadas usan DELETE',
   /_dbRowRequest\('DELETE',`\/api\/db\/houses\//.test(html));
-ok('409/428 requieren decisión explícita del usuario',
+ok('409/428 genuinos requieren decisión explícita del usuario',
   /if\(resp\.status===409\|\|resp\.status===428\)/.test(html) &&
   /async function _handleRowConflict/.test(html) &&
   /const reload=confirm\(/.test(html));
+ok('una aprobación propia usa el flujo específico antes del diálogo genérico por fila',
+  /async function _handleRowConflict[\s\S]{0,250}_handleRecentOwnApproval\(\)[\s\S]{0,250}const reload=confirm\(/.test(html));
 ok('el overwrite por conflicto usa force:true explícito',
   /replace_data:true,force:true/.test(html));
 

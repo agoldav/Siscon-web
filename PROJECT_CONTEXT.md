@@ -1396,6 +1396,15 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   omite PUTs de settings cuando no cambió su contenido. Los cambios reales siguen guardándose y la cola
   conserva modificaciones que ocurren durante un PUT. Regresión completa: 7 archivos / 127 aserciones
   en verde.
+- [x] **Regresión de UX detectada después de Fase A:** la solución ya verificada para una aprobación
+  propia (mensaje de un solo OK + `loadDataFromAPI()`, sin diálogo genérico ni sobrescritura) seguía
+  presente, pero solo en `_handleSaveConflict()` para `settings/1`. La normalización introdujo
+  `_handleRowConflict()` para `projects`/`houses` sin consultar `_lastOwnApprovalAt`; por eso aprobar
+  material fuera de presupuesto podía volver a mostrar “Otro usuario guardó cambios…”. Se extrajo el
+  flujo acordado a `_handleRecentOwnApproval()` y ahora ambos manejadores lo ejecutan antes del
+  conflicto genérico. La regresión de comportamiento simula un 409 real de proyecto, confirma un solo
+  mensaje, una sola recarga desde servidor, cierre de la OC abierta y cero sobrescrituras forzadas.
+  Suite completa: 7 archivos / 135 aserciones en verde.
 - [ ] **Pendiente para cerrar Fase A:** prueba funcional en vivo con dos usuarios autenticados
   después de desplegar esta corrección (cargar, editar y verificar sincronización/conflictos). No
   ejecutar sin las sesiones de usuario.
@@ -1421,8 +1430,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - **Fase A (`projects`/`houses`):** implementada, migrada y desplegada el 2026-07-27. Conteos exactos
     en producción: 3 proyectos y 30 casas; sin ids faltantes/inesperados ni relaciones incorrectas;
     marcador de migración registrado y frontend normalizado publicado. La primera prueba multiusuario
-    encontró y corrigió una escritura artificial de `settings/1` durante el login. Solo falta repetir
-    la prueba funcional en vivo con dos usuarios autenticados para cerrar la fase.
+    encontró y corrigió una escritura artificial de `settings/1` durante el login y una regresión que
+    omitía el mensaje específico de aprobación en los nuevos conflictos por fila. Solo falta repetir la
+    prueba funcional en vivo con dos usuarios autenticados para cerrar la fase.
   - **PENDIENTE después de Fase A:** normalizar `transactions` y las demás colecciones que todavía viven
     dentro de `projects.data`, además del resto de `settings/1`. Hacerlo por fases, no como reescritura única.
 

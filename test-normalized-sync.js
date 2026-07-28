@@ -16,12 +16,22 @@ function ok(name, cond, detail) {
   else { fail++; console.error('  ✗ FALLA:', name, detail || ''); }
 }
 
-function environment(initialProjects) {
+function environment(initialProjects, options = {}) {
   const calls = [];
+  const alerts = [];
+  const confirms = [];
+  const toasts = [];
   let version = 1;
+  let conflictPending = !!options.conflictOnFirstPut;
+  let loadCount = 0;
+  let renderOCListCount = 0;
   async function fetchMock(url, options = {}) {
     const body = options.body ? JSON.parse(options.body) : undefined;
     calls.push({ url, method: options.method, body });
+    if (conflictPending && options.method === 'PUT') {
+      conflictPending = false;
+      return { ok: false, status: 409, json: async () => ({ error: 'version_conflict' }) };
+    }
     version++;
     return {
       ok: true,
@@ -34,8 +44,17 @@ function environment(initialProjects) {
     fetch: fetchMock,
     _sbToken: 'token',
     BACKEND_URL: '',
-    confirm: () => { throw new Error('No se esperaba un conflicto'); },
-    loadDataFromAPI: async () => true,
+    confirm: message => {
+      confirms.push(message);
+      if (!options.allowConfirm) throw new Error('No se esperaba el diálogo genérico de conflicto');
+      return true;
+    },
+    alert: message => alerts.push(message),
+    loadDataFromAPI: async () => { loadCount++; return true; },
+    showToast: message => toasts.push(message),
+    curOCId: options.curOCId || null,
+    renderOCList: () => { renderOCListCount++; },
+    _lastOwnApprovalAt: options.recentOwnApproval ? Date.now() : 0,
     console,
   };
   const factory = new Function(
@@ -46,7 +65,15 @@ function environment(initialProjects) {
       'sizes:()=>({p:_projectSnapshots.size,h:_houseSnapshots.size})' +
     '};'
   );
-  return { api: factory(...Object.values(sandbox)), calls };
+  return {
+    api: factory(...Object.values(sandbox)),
+    calls,
+    alerts,
+    confirms,
+    toasts,
+    getLoadCount: () => loadCount,
+    getRenderOCListCount: () => renderOCListCount,
+  };
 }
 
 (async () => {
@@ -81,6 +108,30 @@ function environment(initialProjects) {
   ok('house manda su versión original',
     puts.some(call => call.url === '/api/db/houses/202' && call.body.expected_updated_at === 'h1'));
   ok('ambos reemplazos completos son explícitos', puts.every(call => call.body.replace_data === true));
+
+  console.log('\nAprobación propia con conflicto en fila normalizada:');
+  const approvalProject = {
+    id: 251, name: 'Proyecto aprobación', num: 'P-AP', houses: [], types: [], uploads: [], ocs: [],
+  };
+  const approval = environment([approvalProject], {
+    conflictOnFirstPut: true,
+    recentOwnApproval: true,
+    curOCId: 'oc-abierta',
+  });
+  approval.api._rememberProjectRow({ updated_at: 'p1' }, approvalProject);
+  approval.api.activate();
+  approvalProject.ocs.push({ id: 'oc-abierta', material: 'Material aprobado' });
+  ok('el guardado se detiene después de recargar la versión aprobada',
+    await approval.api._syncNormalizedProjectsHouses() === false);
+  ok('muestra el mensaje específico con un solo OK',
+    approval.alerts.length === 1 &&
+    approval.alerts[0] === 'El administrador aprobó tu solicitud. Se va a actualizar la información.',
+    approval.alerts);
+  ok('no muestra el diálogo genérico de recargar/sobrescribir', approval.confirms.length === 0, approval.confirms);
+  ok('recarga una sola vez los datos autoritativos del servidor', approval.getLoadCount() === 1);
+  ok('cierra la OC abierta para reabrirla actualizada', approval.getRenderOCListCount() === 1);
+  ok('no intenta sobrescribir por fuerza la aprobación del administrador',
+    approval.calls.length === 1 && approval.calls[0].body.force !== true, approval.calls);
 
   console.log('\nBorrado con cascada:');
   const deleteHouse = { id: 302, num: 'Casa 3', status: 'Sin iniciar' };

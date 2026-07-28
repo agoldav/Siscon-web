@@ -1076,7 +1076,23 @@ async function _dbRowRequest(method,path,body){
   const data=await resp.json().catch(()=>({}));
   return {resp,data};
 }
+// Una aprobación propia puede chocar con la versión que el administrador acaba de guardar. Ese caso
+// no requiere decidir entre recargar/sobrescribir: se informa con un solo OK y se toma la versión
+// autoritativa del servidor. Lo comparten los conflictos del blob histórico y los de filas normalizadas.
+async function _handleRecentOwnApproval(){
+  if(Date.now()-_lastOwnApprovalAt>=15000)return false;
+  _lastOwnApprovalAt=0; // consumir: no debe aplicarse a un choque distinto más adelante
+  alert('El administrador aprobó tu solicitud. Se va a actualizar la información.');
+  const estabaEnOC=curOCId&&curOCId!=='new';
+  if(estabaEnOC){curOCId=null;renderOCList();}
+  await loadDataFromAPI();
+  showToast(estabaEnOC?'Abre la OC de nuevo para ver el material agregado.':'Datos actualizados.');
+  return true;
+}
 async function _handleRowConflict(label,id,payload,path){
+  // VUL-044 Fase A movió projects/houses a filas propias. Las aprobaciones ahora chocan aquí, no
+  // necesariamente en settings/1; conservar el flujo específico ya verificado por el OWNER.
+  if(await _handleRecentOwnApproval())return null;
   const reload=confirm(
     `Otro usuario guardó cambios en ${label} mientras trabajabas.\n\n`+
     'Aceptar = cargar la versión del servidor.\n'+
@@ -1201,20 +1217,7 @@ async function _handleSaveConflict(){
   if(_conflictDialogOpen) return false;   // no apilar diálogos si hay varios saves en vuelo
   _conflictDialogOpen=true;
   try{
-    // Si una solicitud PROPIA se aprobó hace poco, lo más probable es que el choque de versión sea
-    // justo CONTRA esa aprobación (el Admin guardó el efecto en `projects` momentos antes) — no
-    // contra un tercero sin relación. En ese caso, un mensaje específico + recarga liviana (sin
-    // location.reload(), que además reinicia toda la sesión visualmente) es mejor que el diálogo
-    // genérico de conflicto.
-    if(Date.now()-_lastOwnApprovalAt<15000){
-      _lastOwnApprovalAt=0; // consumir: no debe aplicar a un choque distinto más adelante
-      alert('El administrador aprobó tu solicitud. Se va a actualizar la información.');
-      const estabaEnOC=curOCId&&curOCId!=='new';
-      if(estabaEnOC){ curOCId=null; renderOCList(); }
-      await loadDataFromAPI();
-      showToast(estabaEnOC?'Abre la OC de nuevo para ver el material agregado.':'Datos actualizados.');
-      return false;
-    }
+    if(await _handleRecentOwnApproval())return false;
     const recargar=confirm(
       'Otro usuario guardó cambios mientras trabajabas.\n\n'+
       'Aceptar = recargar con los datos del servidor (lo tuyo sin guardar queda en este navegador).\n'+
@@ -6440,7 +6443,7 @@ function stopAuthPolling(){ if(_authPollIv){ clearInterval(_authPollIv); _authPo
 const _authShownIds=new Set();
 // Resoluciones ya avisadas/aplicadas en ESTA sesión
 const _authResolvedSeen=new Set();
-// Última vez que se aplicó EN VIVO una aprobación de una solicitud propia (ver _handleSaveConflict):
+// Última vez que se aplicó EN VIVO una aprobación de una solicitud propia (ver _handleRecentOwnApproval):
 // si un guardado choca en versión poco después, lo más probable es que sea contra esa misma aprobación.
 let _lastOwnApprovalAt=0;
 async function pollPendingAuth(){
@@ -6463,7 +6466,7 @@ async function pollPendingAuth(){
       if(r.requestedById!==(currentUser&&currentUser.id)) return;
       _authResolvedSeen.add(r.id);
       // Marca de tiempo: si un guardado choca en versión poco después de esto, lo más probable es que
-      // el choque sea CONTRA esta misma aprobación (no contra un tercero) — ver _handleSaveConflict().
+      // el choque sea CONTRA esta misma aprobación (no contra un tercero) — ver _handleRecentOwnApproval().
       if(r.status==='aprobado') _lastOwnApprovalAt=Date.now();
       if(r.status==='aprobado'){
         if(r.type==='type-unlock'){

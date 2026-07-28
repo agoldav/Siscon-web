@@ -51,6 +51,8 @@ ok('ante conflicto se pregunta al usuario (no decide la app)',
 ok('si el usuario elige recargar, recarga', /_handleSaveConflict[\s\S]{0,900}location\.reload\(\)/.test(html));
 ok('no se apilan diálogos si hay varios guardados en vuelo',
   /if\(_conflictDialogOpen\)\s*return false/.test(html));
+ok('settings conserva el flujo específico para una aprobación propia',
+  /async function _handleSaveConflict[\s\S]{0,250}_handleRecentOwnApproval\(\)/.test(html));
 
 // BUG real encontrado en producción (2026-07-24+): "guardar de todos modos" ponía
 // _settingsVersion=null para forzar el sobrescribir, pero el modo estricto del servidor (428)
