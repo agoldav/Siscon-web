@@ -1008,6 +1008,158 @@ if(!window._fetchWrappedCF){
   };
 }
 
+// VUL-044 Fase A: projects/houses ya no viven dentro del blob settings/1. Estas estructuras
+// mantienen la versión y la última fotografía confirmada de cada fila sin contaminar el modelo
+// histórico de la UI (que sigue usando ids Date.now() numéricos y casas anidadas por proyecto).
+const _projectVersions=new Map();
+const _houseVersions=new Map();
+const _projectSnapshots=new Map();
+const _houseSnapshots=new Map();
+const _houseProjectIds=new Map();
+let _normalizedProjectsLoaded=false;
+
+function _restoreDbId(value){
+  if(typeof value!=='string'||!/^\d+$/.test(value))return value;
+  const n=Number(value);
+  return Number.isSafeInteger(n)?n:value;
+}
+function _projectFromRow(row){
+  const extra=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)?row.data:{};
+  const last=row.last_activity?new Date(row.last_activity).getTime():null;
+  return {...extra,
+    id:_restoreDbId(row.id),name:row.name||'',num:row.num||'',client:row.client||'',
+    razonSocial:row.razon_social||'',correo:row.correo||'',status:row.status||'',
+    startDate:row.start_date||'',lastActivity:Number.isFinite(last)?last:(extra.lastActivity||Date.now()),
+    budget:Number(row.budget)||0,salePrice:Number(row.sale_price)||0,utilityPct:Number(row.utility_pct)||0,
+    area:Number(row.area)||0,areaInstalled:Number(row.area_installed)||0,locked:!!row.locked,
+    exchangeRate:Number(row.exchange_rate)||0,address:row.address||'',lat:Number(row.lat)||0,lng:Number(row.lng)||0,
+    billCycleDays:Number(row.bill_cycle_days)||0,paymentTermDays:Number(row.payment_term_days)||0,
+  };
+}
+function _houseFromRow(row){
+  const extra=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)?row.data:{};
+  return {...extra,
+    id:_restoreDbId(row.id),projectId:_restoreDbId(row.project_id),num:row.num||'',
+    status:row.status||'Sin iniciar',
+    crewMemberIds:Array.isArray(row.crew_member_ids)?row.crew_member_ids:(extra.crewMemberIds||[]),
+    log:Array.isArray(row.log)?row.log:(extra.log||[]),
+  };
+}
+function _projectCloudPayload(project){
+  const {houses,...rest}=project||{};
+  return {...rest,uploads:(rest.uploads||[]).map(({blobId,url,...upload})=>upload)};
+}
+function _houseCloudPayload(house,projectId){
+  const {projectId:_oldProjectId,...rest}=house||{};
+  return {...rest,projectId};
+}
+function _snapshot(value){return JSON.stringify(value);}
+function _rememberProjectRow(row,project){
+  const id=String(project.id);
+  _projectVersions.set(id,row.updated_at||null);
+  _projectSnapshots.set(id,_snapshot(_projectCloudPayload(project)));
+}
+function _rememberHouseRow(row,house,projectId){
+  const id=String(house.id);
+  _houseVersions.set(id,row.updated_at||null);
+  _houseSnapshots.set(id,_snapshot(_houseCloudPayload(house,projectId)));
+  _houseProjectIds.set(id,String(projectId));
+}
+function _clearNormalizedState(){
+  _projectVersions.clear();_houseVersions.clear();_projectSnapshots.clear();
+  _houseSnapshots.clear();_houseProjectIds.clear();
+}
+async function _dbRowRequest(method,path,body){
+  const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
+  if(body!==undefined)headers['Content-Type']='application/json';
+  const resp=await fetch(`${BACKEND_URL}${path}`,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
+  const data=await resp.json().catch(()=>({}));
+  return {resp,data};
+}
+async function _handleRowConflict(label,id,payload,path){
+  const reload=confirm(
+    `Otro usuario guardó cambios en ${label} mientras trabajabas.\n\n`+
+    'Aceptar = cargar la versión del servidor.\n'+
+    'Cancelar = sobrescribirla con tus cambios.'
+  );
+  if(reload){await loadDataFromAPI();return null;}
+  const {resp,data}=await _dbRowRequest('PUT',path,{...payload,replace_data:true,force:true});
+  if(!resp.ok){console.error(`No se pudo forzar ${label} ${id}:`,data);return null;}
+  return data;
+}
+async function _syncNormalizedProjectsHouses(){
+  if(!_normalizedProjectsLoaded)return true;
+
+  const currentProjects=new Map(projects.map(project=>[String(project.id),project]));
+  const currentHouses=new Map();
+  projects.forEach(project=>(project.houses||[]).forEach(house=>{
+    currentHouses.set(String(house.id),{house,projectId:project.id});
+  }));
+
+  // Proyectos eliminados primero; la RPC borra sus casas en la misma transacción.
+  for(const id of [..._projectSnapshots.keys()]){
+    if(currentProjects.has(id))continue;
+    const {resp,data}=await _dbRowRequest('DELETE',`/api/db/projects/${encodeURIComponent(id)}`);
+    if(!resp.ok){console.error('No se pudo eliminar proyecto',id,data);return false;}
+    _projectVersions.delete(id);_projectSnapshots.delete(id);
+    for(const [houseId,projectId] of [..._houseProjectIds.entries()]){
+      if(projectId===id){
+        _houseVersions.delete(houseId);_houseSnapshots.delete(houseId);_houseProjectIds.delete(houseId);
+      }
+    }
+  }
+
+  // Crear/actualizar proyectos antes de sus casas (FK houses.project_id).
+  for(const [id,project] of currentProjects){
+    const payload=_projectCloudPayload(project);
+    const snap=_snapshot(payload);
+    if(!_projectSnapshots.has(id)){
+      const {resp,data}=await _dbRowRequest('POST','/api/db/projects',payload);
+      if(!resp.ok){console.error('No se pudo crear proyecto',id,data);return false;}
+      _rememberProjectRow(data,project);
+    }else if(_projectSnapshots.get(id)!==snap){
+      const body={...payload,replace_data:true,expected_updated_at:_projectVersions.get(id)};
+      let {resp,data}=await _dbRowRequest('PUT',`/api/db/projects/${encodeURIComponent(id)}`,body);
+      if(resp.status===409||resp.status===428){
+        data=await _handleRowConflict('este proyecto',id,payload,`/api/db/projects/${encodeURIComponent(id)}`);
+        if(!data)return false;
+        resp={ok:true};
+      }
+      if(!resp.ok){console.error('No se pudo actualizar proyecto',id,data);return false;}
+      _rememberProjectRow(data,project);
+    }
+  }
+
+  // Casas eliminadas de proyectos que siguen vivos.
+  for(const id of [..._houseSnapshots.keys()]){
+    if(currentHouses.has(id))continue;
+    const {resp,data}=await _dbRowRequest('DELETE',`/api/db/houses/${encodeURIComponent(id)}`);
+    if(!resp.ok){console.error('No se pudo eliminar casa',id,data);return false;}
+    _houseVersions.delete(id);_houseSnapshots.delete(id);_houseProjectIds.delete(id);
+  }
+
+  for(const [id,{house,projectId}] of currentHouses){
+    const payload=_houseCloudPayload(house,projectId);
+    const snap=_snapshot(payload);
+    if(!_houseSnapshots.has(id)){
+      const {resp,data}=await _dbRowRequest('POST','/api/db/houses',payload);
+      if(!resp.ok){console.error('No se pudo crear casa',id,data);return false;}
+      _rememberHouseRow(data,house,projectId);
+    }else if(_houseSnapshots.get(id)!==snap){
+      const body={...payload,replace_data:true,expected_updated_at:_houseVersions.get(id)};
+      let {resp,data}=await _dbRowRequest('PUT',`/api/db/houses/${encodeURIComponent(id)}`,body);
+      if(resp.status===409||resp.status===428){
+        data=await _handleRowConflict('esta casa',id,payload,`/api/db/houses/${encodeURIComponent(id)}`);
+        if(!data)return false;
+        resp={ok:true};
+      }
+      if(!resp.ok){console.error('No se pudo actualizar casa',id,data);return false;}
+      _rememberHouseRow(data,house,projectId);
+    }
+  }
+  return true;
+}
+
 // VUL-033: control de concurrencia optimista sobre el blob settings/1.
 // `_settingsVersion` es el `updated_at` que traía el registro la última vez que cargamos o
 // guardamos. Se manda en cada PUT; si el servidor ve otro valor, alguien más escribió en el
@@ -1095,11 +1247,17 @@ function saveDataToAPI(forzar){
 async function _saveDataToAPICore(forzar){
   if(!_sbToken || !currentUser) return false;
   try{
-    // VUL-044 (parte 1.5): antes había que traer y fusionar SYS.pendingAuthRequests remoto antes
-    // de cada guardado, para no pisar una resolución hecha en otra sesión — ya no hace falta:
-    // esas solicitudes viven en su propia tabla, resueltas por su propio endpoint, no por este save.
-    const projectsClean=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
-    const body={data:{projects:projectsClean,SYS,activityLog}};
+    // Primero persiste projects/houses por fila. Solo después actualiza SYS/activityLog.
+    // Si todavía se está usando un backend anterior (fallback del loader), conserva el contrato
+    // viejo y manda projects dentro del blob para no cortar el entorno durante el despliegue.
+    if(_normalizedProjectsLoaded){
+      const rowsOk=await _syncNormalizedProjectsHouses();
+      if(!rowsOk)return false;
+    }
+    const body={data:{SYS,activityLog}};
+    if(!_normalizedProjectsLoaded){
+      body.data.projects=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
+    }
     if(forzar) body.force=true; else body.expected_updated_at=_settingsVersion;
     const resp=await fetch(`${BACKEND_URL}/api/db/settings/1`, {
       method: 'PUT',
@@ -1142,18 +1300,59 @@ function saveData(){
 async function loadDataFromAPI(){
   if(!_sbToken || !currentUser) return false;
   try{
-    const resp=await fetch(`${BACKEND_URL}/api/db/settings/1`, {
-      headers: {'Authorization': `Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'}
-    });
+    const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
+    const [resp,projectsResp,housesResp]=await Promise.all([
+      fetch(`${BACKEND_URL}/api/db/settings/1`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/projects`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/houses`,{headers}),
+    ]);
     if(!resp.ok){ console.error('Error cargando desde API:', await resp.json()); return false; }
     const record=await resp.json();
     _settingsVersion=record.updated_at||null;   // VUL-033: versión base para detectar conflictos
     if(_settingsVersion) _versionWarned=false;  // se recuperó la sincronía: volver a avisar si se pierde
     if(record.data && typeof record.data==='string') record.data=JSON.parse(record.data);
     const d=record.data||{};
-    if(d.projects) projects=d.projects;
     if(d.SYS) applyDefaults(d.SYS);
     if(d.activityLog) activityLog=d.activityLog;
+
+    if(projectsResp.ok&&housesResp.ok){
+      const projectData=await projectsResp.json();
+      const houseData=await housesResp.json();
+      const rows=Array.isArray(projectData.projects)?projectData.projects:[];
+      const houseRows=Array.isArray(houseData.houses)?houseData.houses:[];
+      // Durante el despliegue escalonado, tablas vacías + blob con datos significa "la migración
+      // todavía no corrió", no "se borraron todos los proyectos". Mantener el lector viejo evita
+      // una pantalla vacía accidental. Tras el cutover el primer save elimina projects del blob.
+      if(rows.length||!Array.isArray(d.projects)||d.projects.length===0){
+        _clearNormalizedState();
+        const loaded=rows.map(row=>{
+          const project=_projectFromRow(row);project.houses=[];
+          _rememberProjectRow(row,project);
+          return project;
+        });
+        const byProject=new Map(loaded.map(project=>[String(project.id),project]));
+        for(const row of houseRows){
+          const house=_houseFromRow(row);
+          const project=byProject.get(String(house.projectId));
+          if(!project)throw new Error(`Casa ${house.id} referencia proyecto inexistente ${house.projectId}`);
+          project.houses.push(house);
+          _rememberHouseRow(row,house,project.id);
+          delete house.projectId;
+        }
+        projects=loaded;
+        _normalizedProjectsLoaded=true;
+      }else{
+        console.warn('VUL-044 Fase A: tablas vacías; se mantiene temporalmente projects desde settings/1.');
+        projects=d.projects;
+        _normalizedProjectsLoaded=false;
+        _clearNormalizedState();
+      }
+    }else{
+      console.warn('VUL-044 Fase A: backend sin rutas projects/houses; usando settings/1 temporalmente.');
+      if(d.projects)projects=d.projects;
+      _normalizedProjectsLoaded=false;
+      _clearNormalizedState();
+    }
     return true;
   }catch(e){ console.error('Error cargando desde API:', e); return false; }
 }

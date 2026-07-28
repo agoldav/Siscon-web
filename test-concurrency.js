@@ -31,7 +31,7 @@ ok('tras guardar se actualiza la versión con la respuesta',
 // 4) Trampa sutil: la lectura previa que hace saveDataToAPI para fusionar pendingAuthRequests
 //    NO debe refrescar la versión. Si lo hiciera, siempre coincidiría y el conflicto nunca
 //    se detectaría — el control quedaría de adorno.
-const iSave = html.indexOf('async function saveDataToAPI(forzar)');
+const iSave = html.indexOf('async function _saveDataToAPICore(forzar)');
 const iFin = html.indexOf('\nfunction saveData()', iSave);
 const cuerpoSave = html.slice(iSave, iFin);
 const iPut = cuerpoSave.indexOf("method: 'PUT'");
@@ -47,7 +47,7 @@ ok('428 (sin versión base) tiene manejo propio',
 
 // 6) El conflicto se le pregunta al usuario; no se resuelve solo en ninguna dirección.
 ok('ante conflicto se pregunta al usuario (no decide la app)',
-  /_handleSaveConflict[\s\S]{0,600}confirm\(/.test(html));
+  /_handleSaveConflict[\s\S]{0,1400}confirm\(/.test(html));
 ok('si el usuario elige recargar, recarga', /_handleSaveConflict[\s\S]{0,900}location\.reload\(\)/.test(html));
 ok('no se apilan diálogos si hay varios guardados en vuelo',
   /if\(_conflictDialogOpen\)\s*return false/.test(html));
@@ -59,7 +59,7 @@ ok('no se apilan diálogos si hay varios guardados en vuelo',
 // vez de sobrescribir. Fix: una señal explícita (force:true) distinta de "no mandé nada".
 console.log('\nFix del bug de "guardar de todos modos" (force explícito, no versión=null):');
 const iConflict = html.indexOf('async function _handleSaveConflict()');
-const iConflictFin = html.indexOf('\nasync function saveDataToAPI', iConflict);
+const iConflictFin = html.indexOf('\nlet _saveInFlight', iConflict);
 const cuerpoConflict = html.slice(iConflict, iConflictFin);
 // (el código puede MENCIONAR "_settingsVersion=null" en un comentario explicando la historia del
 // bug; lo que importa es que no haya una asignación real — que sí termina en ";" pegado al null)
