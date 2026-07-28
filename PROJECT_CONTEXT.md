@@ -1411,6 +1411,39 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   cargó el estado autoritativo guardado por el administrador, sin mostrar el diálogo genérico de
   recargar/sobrescribir. **Fase A (`projects`/`houses`) cerrada.**
 
+### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
+> Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
+> modelo de datos. El diff queda confinado al bloque CSS del panel y a `renderMetric()`.
+- [x] **Panel métrico rediseñado** a partir de una propuesta visual del OWNER: pasa de una rejilla plana
+  de 5×4 celdas (`.mi`/`.mi-label`/`.mi-val`) a una tarjeta con tres bandas separadas (clases nuevas con
+  prefijo `pm-`, sin colisión con nada existente):
+  1. Identidad — ícono de edificio, **Proyecto {nombre}** en grande, número, Cliente, Correo y el
+     selector de Estatus alineado a la derecha.
+  2. **Avance instalado** — porcentaje en 30px, barra de progreso y `{instalada} m² de {total} m²`;
+     Fecha de inicio al extremo derecho.
+  3. Cifras — Presupuesto · Costo Real · Disponible · Precio de Venta · Utilidad Real (con
+     "Presupuestada N%" como línea secundaria) y **Salud/Proyección convertidas en badges** con borde
+     de color, en vez de texto plano con ✓/✗.
+- [x] **Edición conservada en el mismo panel** (decisión del OWNER frente a la alternativa de un modal):
+  al abrir el candado los valores se convierten en inputs en su lugar. **Se mantienen los 10 campos
+  editables** de antes — `name`, `num`, `client`, `razonSocial`, `correo`, `startDate`, `area`, `budget`,
+  `salePrice`, `utilityPct` — más el selector de estatus. `areaInstalled` sigue siendo de solo lectura
+  (se calcula desde las casas), igual que antes.
+- [x] **Razón Social** (que la propuesta eliminaba) se conserva: en modo bloqueado aparece como línea
+  gris bajo el Cliente **solo cuando difiere** de él; en modo edición vuelve a ser un campo propio. Así
+  no se pierde la capacidad de editarla, que se usa para facturación a cliente.
+- [x] Área Total y % Utilidad Presupuestada pasan a texto secundario en modo bloqueado, pero siguen
+  siendo editables al desbloquear. La fecha de inicio ahora se muestra con `fmtDate()` (dd/mm/aaaa)
+  en vez del ISO crudo, y con `—` cuando está vacía.
+- [x] El candado (`#metric-lock-btn`) se reposicionó a la banda superior. Se dejó como elemento
+  estático fuera de `#mgrid` a propósito: `openProj()` lo referencia por id **antes** de llamar a
+  `renderMetric()`, así que moverlo dentro del HTML generado lo rompería en la primera apertura.
+- [x] **Verificación:** sintaxis del `<script>` completo OK; **suite del frontend 7/7 en verde**
+  (incluida `test-xss.js` — todos los campos de usuario nuevos pasan por `esc()` y los numéricos por
+  `toLocaleString`). Render real con Chrome headless en tema claro y oscuro, y con casos borde:
+  razón social distinta, proyecto vacío con nombre largo (trunca con elipsis y muestra `—`), y
+  disponible negativo con avance al 100%.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
