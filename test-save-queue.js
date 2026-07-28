@@ -33,6 +33,7 @@ function construirEntorno({ latenciaMs = 30 } = {}) {
   let putsEnVuelo = 0;
   let maxPutsSimultaneos = 0;
   let contadorVersion = 1;
+  const SYS = {};
 
   function fetchSimulado(url, opts) {
     if (opts && opts.method === 'PUT') {
@@ -61,7 +62,7 @@ function construirEntorno({ latenciaMs = 30 } = {}) {
     currentUser: { id: 'u1' },
     BACKEND_URL: '',
     projects: [],
-    SYS: {},
+    SYS,
     activityLog: [],
     _normalizedProjectsLoaded: false,
     _syncNormalizedProjectsHouses: async () => true,
@@ -70,17 +71,25 @@ function construirEntorno({ latenciaMs = 30 } = {}) {
   };
   const fn = new Function(...Object.keys(sandbox), bloqueSrc + '\nreturn { saveDataToAPI, _saveDataToAPICore };');
   const exportado = fn(...Object.values(sandbox));
-  return { ...exportado, putsRealizados, getMaxSimultaneos: () => maxPutsSimultaneos, getPutsEnVuelo: () => putsEnVuelo };
+  return {
+    ...exportado,
+    SYS,
+    putsRealizados,
+    getMaxSimultaneos: () => maxPutsSimultaneos,
+    getPutsEnVuelo: () => putsEnVuelo,
+  };
 }
 
 (async () => {
   console.log('Bug #2 — cola de guardados (nunca más de un PUT en vuelo a la vez):');
 
   const env = construirEntorno({ latenciaMs: 40 });
-  // Simula lo que pasaba en vivo: una sola acción del usuario dispara VARIOS saveData() seguidos
-  // en el mismo tick (fire-and-forget, sin esperar ninguno) — exactamente el patrón real del código.
+  // Simula un primer guardado y luego un cambio REAL mientras ese PUT sigue en vuelo. Las llamadas
+  // repetidas se coalescen, pero el guardado de seguimiento debe conservar el cambio nuevo.
   const resultados = [];
   resultados.push(env.saveDataToAPI());
+  await new Promise(r => setTimeout(r, 5));
+  env.SYS.changedWhileSaving = true;
   resultados.push(env.saveDataToAPI());
   resultados.push(env.saveDataToAPI());
   resultados.push(env.saveDataToAPI());

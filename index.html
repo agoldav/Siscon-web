@@ -1165,8 +1165,22 @@ async function _syncNormalizedProjectsHouses(){
 // guardamos. Se manda en cada PUT; si el servidor ve otro valor, alguien más escribió en el
 // medio y responde 409 en vez de dejar que sobrescribamos su trabajo en silencio.
 let _settingsVersion=null;
+// Fotografía exacta del último payload de settings confirmado/cargado. Muchas rutinas históricas
+// llaman saveData() aunque no hayan cambiado SYS/activityLog; en ese caso no hay motivo para hacer
+// PUT ni para invalidar la versión de las demás sesiones.
+let _settingsSnapshot=null;
 let _conflictDialogOpen=false;
 let _versionWarned=false;
+
+function _settingsCloudData(){
+  const data={SYS,activityLog};
+  // Compatibilidad temporal con un backend anterior al cutover normalizado.
+  if(!_normalizedProjectsLoaded){
+    data.projects=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
+  }
+  return data;
+}
+function _settingsCloudSnapshot(data){ return JSON.stringify(data); }
 
 // No tenemos versión base: la carga desde el servidor falló y estamos trabajando sobre los datos
 // del navegador. El servidor rechaza el guardado (428) para que no pisemos el estado remoto a
@@ -1254,10 +1268,13 @@ async function _saveDataToAPICore(forzar){
       const rowsOk=await _syncNormalizedProjectsHouses();
       if(!rowsOk)return false;
     }
-    const body={data:{SYS,activityLog}};
-    if(!_normalizedProjectsLoaded){
-      body.data.projects=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
-    }
+    const settingsData=_settingsCloudData();
+    const nextSettingsSnapshot=_settingsCloudSnapshot(settingsData);
+    // Un saveData() sin cambios reales puede venir de login, polling o chequeos de estado. Las
+    // filas normalizadas ya se sincronizaron arriba; omitir este PUT evita conflictos artificiales
+    // en settings/1 sin perder ninguna modificación de projects/houses.
+    if(!forzar&&_settingsSnapshot!==null&&nextSettingsSnapshot===_settingsSnapshot) return true;
+    const body={data:settingsData};
     if(forzar) body.force=true; else body.expected_updated_at=_settingsVersion;
     const resp=await fetch(`${BACKEND_URL}/api/db/settings/1`, {
       method: 'PUT',
@@ -1277,6 +1294,7 @@ async function _saveDataToAPICore(forzar){
     }
     const saved=await resp.json().catch(()=>null);
     if(saved&&saved.updated_at) _settingsVersion=saved.updated_at;
+    _settingsSnapshot=nextSettingsSnapshot;
     return true;
   }catch(e){ console.error('Error de sincronización API:', e); return false; }
 }
@@ -1353,6 +1371,7 @@ async function loadDataFromAPI(){
       _normalizedProjectsLoaded=false;
       _clearNormalizedState();
     }
+    _settingsSnapshot=_settingsCloudSnapshot(_settingsCloudData());
     return true;
   }catch(e){ console.error('Error cargando desde API:', e); return false; }
 }
@@ -1483,6 +1502,11 @@ async function migrateLocalStorageToSupabase(){
 // ========== ACTIVITY LOG ==========
 let activityLog = [];
 function logAction(action, type, context, before, after){
+  // Autenticarse/cerrar sesión no es un cambio de negocio. Estos eventos deben auditarse fuera del
+  // settings compartido; guardarlos en settings/1 invalidaba la versión global de todos los
+  // usuarios y provocaba un conflicto apenas una segunda persona iniciaba sesión.
+  if(action==='Inicio de sesión'||action==='Inicio de sesión (Cloudflare Access)'||
+     action==='Invitación aceptada'||action==='Cierre de sesión') return;
   activityLog.unshift({
     id: Date.now(),
     action, type, context,
@@ -1772,11 +1796,10 @@ async function login(){
     document.getElementById('topbar-user-label').textContent=data.user.name;
     document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';
     document.getElementById('sb-btn-settings').style.display=data.user.role==='Administrador'?'':'none';
-    // _settingsVersion (VUL-033) todavía es null acá — loadDataFromAPI() es quien lo fija. logAction()
-    // llama a saveData() por dentro; llamarlo ANTES disparaba un guardado sin versión → 428 en cada login
-    // (carrera latente: se volvió más frecuente al sacar el pre-fetch de _saveDataToAPICore en VUL-044).
+    // Cargar primero fija versión + snapshot. El login es un evento de autenticación, no un cambio
+    // de negocio: NO debe agregarse al activityLog compartido ni ejecutar saveData(), porque eso
+    // invalida settings/1 para todas las demás sesiones apenas alguien entra.
     const _apiOk=await loadDataFromAPI();
-    logAction('Inicio de sesión','log-create','Sistema',null,{user:data.user.name});
     if(!_apiOk || !(Array.isArray(projects)&&projects.length)) loadData();
     renderDash();
     handleOpenHash();
@@ -1830,9 +1853,8 @@ async function bootstrapCloudflareAuth(){
     document.getElementById('topbar-user-label').textContent=currentUser.email;
     document.getElementById('btn-settings').style.display=currentUser.role==='Administrador'?'':'none';
     document.getElementById('sb-btn-settings').style.display=currentUser.role==='Administrador'?'':'none';
-    // Ver nota igual en login(): loadDataFromAPI() antes de logAction() para no guardar sin versión.
+    // Igual que login(): autenticarse no debe mutar settings/1 ni generar conflictos artificiales.
     const _apiOk=await loadDataFromAPI();
-    logAction('Inicio de sesión (Cloudflare Access)','log-create','Sistema',null,{user:currentUser.email});
     if(!_apiOk || !(Array.isArray(projects)&&projects.length)) loadData();
     renderDash();
     handleOpenHash();

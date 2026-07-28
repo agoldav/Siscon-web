@@ -1388,8 +1388,17 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   reversiblemente; dry-run exitoso; migración real de 3 proyectos y 30 casas; marcador
   `vul-044-phase-a-projects-houses` registrado; auditoría independiente `all_checks_passed=true`;
   backend saludable (`/health` → 200) y frontend publicado en Vercel con el lector normalizado.
+- [x] Primera prueba en vivo con dos usuarios: detectó un falso conflicto apenas entraba la segunda
+  persona. La causa no estaba en `projects`/`houses`: ambos flujos de login agregaban un evento al
+  `activityLog` compartido y ejecutaban un PUT de `settings/1`, invalidando la versión de las sesiones
+  ya abiertas aunque nadie hubiera editado datos de negocio. Se eliminó esa escritura de autenticación,
+  se agregó una defensa en `logAction` para esos eventos y una fotografía del payload confirmado que
+  omite PUTs de settings cuando no cambió su contenido. Los cambios reales siguen guardándose y la cola
+  conserva modificaciones que ocurren durante un PUT. Regresión completa: 7 archivos / 127 aserciones
+  en verde.
 - [ ] **Pendiente para cerrar Fase A:** prueba funcional en vivo con dos usuarios autenticados
-  (cargar, editar y verificar sincronización/conflictos). No ejecutar sin las sesiones de usuario.
+  después de desplegar esta corrección (cargar, editar y verificar sincronización/conflictos). No
+  ejecutar sin las sesiones de usuario.
 
 ## 10. ⏳ Pendiente
 
@@ -1411,8 +1420,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     blob a sus propias tablas — cerradas y verificadas en vivo, ver Sección 9 y Sección 11.2.
   - **Fase A (`projects`/`houses`):** implementada, migrada y desplegada el 2026-07-27. Conteos exactos
     en producción: 3 proyectos y 30 casas; sin ids faltantes/inesperados ni relaciones incorrectas;
-    marcador de migración registrado y frontend normalizado publicado. Solo falta la prueba funcional
-    en vivo con dos usuarios autenticados para cerrar la fase.
+    marcador de migración registrado y frontend normalizado publicado. La primera prueba multiusuario
+    encontró y corrigió una escritura artificial de `settings/1` durante el login. Solo falta repetir
+    la prueba funcional en vivo con dos usuarios autenticados para cerrar la fase.
   - **PENDIENTE después de Fase A:** normalizar `transactions` y las demás colecciones que todavía viven
     dentro de `projects.data`, además del resto de `settings/1`. Hacerlo por fases, no como reescritura única.
 

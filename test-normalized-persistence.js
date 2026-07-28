@@ -38,9 +38,9 @@ ok('los payloads de uploads excluyen blobId/url efímeros',
 
 console.log('\nSincronización incremental:');
 ok('save core sincroniza filas antes de settings',
-  /const rowsOk=await _syncNormalizedProjectsHouses\(\)[\s\S]{0,250}const body=\{data:\{SYS,activityLog\}\}/.test(html));
+  /const rowsOk=await _syncNormalizedProjectsHouses\(\)[\s\S]{0,350}const settingsData=_settingsCloudData\(\)/.test(html));
 ok('en modo normalizado settings ya no recibe projects',
-  /if\(!_normalizedProjectsLoaded\)\{[\s\S]{0,180}body\.data\.projects=/.test(html));
+  /function _settingsCloudData\(\)[\s\S]{0,250}if\(!_normalizedProjectsLoaded\)\{[\s\S]{0,180}data\.projects=/.test(html));
 ok('proyectos nuevos usan POST',
   /_dbRowRequest\('POST','\/api\/db\/projects',payload\)/.test(html));
 ok('proyectos modificados mandan versión y replace_data',
@@ -65,7 +65,7 @@ console.log('\nCompatibilidad y almacenamiento local:');
 ok('localStorage conserva el modelo completo para recuperación local',
   /localStorage\.setItem\(LS_KEY,JSON\.stringify\(\{projects:projectsClean,SYS,activityLog\}\)\)/.test(html));
 ok('backend anterior conserva escritura legacy temporal',
-  /if\(!_normalizedProjectsLoaded\)[\s\S]{0,200}body\.data\.projects/.test(html));
+  /if\(!_normalizedProjectsLoaded\)[\s\S]{0,200}data\.projects/.test(html));
 
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);
