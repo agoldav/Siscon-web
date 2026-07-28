@@ -1322,6 +1322,70 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   `siscon-backend.onrender.com` (una dependencia de DNS menos). Se anota porque un `curl` a `api.sisconcr.com`
   falla y podría confundirse con una caída del backend.
 
+### Sesión 2026-07-27 (rediseño visual completo del frontend — estilo dashboard moderno)
+> Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio ni de modelo de datos.
+> Todo se probó primero en una copia offline (`redesign-preview/`, fuera del repo, con un botón de "modo
+> demo" quitado antes de cada despliegue) antes de subir a producción.
+- [x] **Nueva identidad visual** inspirada en el dashboard de referencia w3crm-vue: tipografía Poppins,
+  paleta de colores nueva (acento azul `#0d99ff`), tarjetas con sombra y radios grandes, para tema claro y oscuro.
+- [x] **Sidebar lateral de navegación** nueva (Inicio, Proyectos, Subcontratistas, Calculadora de Avance,
+  Ruta, Bodega, Sin clasificar, Informes, Cotizaciones, Mensajes, Ajustes) — reutiliza las funciones
+  existentes, no duplica lógica.
+- [x] **Topbar rediseñado**: barra oscura fija en ambos temas.
+- [x] **Ajustes → Apariencia**: selector de tema (ya existía) + **color de acento configurable** (nuevo,
+  global para todos los usuarios, picker + 6 presets). De paso se corrigió un bug real: el tema global
+  (`SYS.theme`) no se reaplicaba al iniciar sesión otros usuarios (`applyTheme()` no se llamaba tras el
+  login) — ahora se reaplica en `renderDash()`.
+- [x] **Gráficas SVG modernizadas** (dibujadas a mano, sin librerías): líneas de cuadrícula, barras con
+  esquinas redondeadas, dona con track de fondo, línea con relleno degradado.
+- [x] **~230 emojis reemplazados** por un set de íconos SVG lineales consistentes en sidebar, topbar, menús
+  ⋮ (documentos/bitácora/tareas/mensajes/tipos/OC), candados de tipo bloqueado, toggles Kanban/Lista,
+  adjuntos de mensajes (imagen/audio/video), semáforo de recuperación, etc. Quedaron sin tocar los símbolos
+  tipográficos simples (✓ ✕ ✗ →) y el texto decorativo de toasts/notificaciones/bitácora de auditoría.
+- [x] **Vista "Proyectos" separada de "Inicio"**: Inicio ahora muestra solo Información General y
+  Estadísticas; la tabla/kanban de proyectos (crear, ordenar, kanban/lista, columnas, log) se movió a su
+  propia vista dedicada en el sidebar, con resaltado activo entre ambas.
+- [x] **Menú rápido al pasar el mouse sobre "Proyectos"**: los 10 proyectos con actividad más reciente,
+  listados alfabéticamente; clic abre el proyecto directo.
+- [x] **Fix de alineación en la tabla de Proyectos**: el grid de encabezados tenía `gap:0` (texto de
+  columnas pegado); ahora hay separación real, encabezados alineados a la izquierda igual que los datos de
+  cada columna, y el badge de pendientes reserva su espacio (vacío si no aplica) para que todos los nombres
+  de proyecto arranquen en la misma posición.
+- [x] **Avances de Subcontratos** ("Avance" en el sidebar): nuevo dropdown para filtrar la lista por Todos
+  / Semana en Curso / Mes en Curso / Rango de fechas.
+- [x] **Desplegado a producción** en 4 commits (`7a090ba`, `75cc907`, `a629e22`, `b8422a9`) sobre
+  `agoldav/Siscon-web` → Vercel. Tag de respaldo `backup-pre-redesign-2026-07-27` creado y pusheado sobre
+  el commit previo al rediseño, por si hay que revertir.
+
+### Sesión 2026-07-27 (VUL-044 Fase A — projects/houses fuera del blob, implementación local)
+> Backend + frontend + SQL/migración. **Commits locales `3116bfa` (backend) y `759862f` (frontend);
+> sin push, sin migración real y sin deploy. VUL-044 NO se marca cerrada hasta completar el cutover
+> y la prueba en vivo.**
+- [x] Auditoría del trabajo parcial que había quedado al agotarse el contexto: se detectaron frontend
+  ausente, mezcla de ids text/número, PUT parcial que vaciaba `data`, cascada no atómica, migración
+  reejecutable desde un blob obsoleto, rollback falso y una prueba de concurrencia desactualizada.
+- [x] `projects`/`houses` tienen rutas dedicadas con política explícita, concurrencia optimista por fila,
+  parches jsonb seguros y `replace_data:true` para reemplazo completo intencional. `project_id` de una
+  casa queda inmutable.
+- [x] Borrado de proyecto + casas mediante RPC transaccional `soft_delete_project`; no responde éxito si
+  la operación no se completa. `schema_migrations` queda deny-by-default y solo para `service_role`.
+- [x] Normalización bidireccional: camelCase→snake_case al escribir y fila Postgres→modelo histórico al
+  leer. Los ids técnicos text vuelven a número seguro; `num` permanece string.
+- [x] Migración fail-closed: aborta si las tablas no están vacías, si ya existe el marcador o si encuentra
+  ids ajenos; permite recuperación explícita de una ejecución parcial, verifica ids/project_id exactos y
+  solo entonces registra el marcador.
+- [x] Rollback real: `restore-projects-houses-to-blob.js` reconstruye el blob desde las tablas antes de
+  revertir el frontend; dry-run por defecto y UPDATE condicionado a `settings.updated_at`.
+- [x] Frontend normalizado: carga `settings`/`projects`/`houses` en paralelo, reconstruye casas anidadas,
+  mantiene versión y snapshot por fila, sincroniza solo altas/cambios/borrados, crea proyectos antes de
+  casas y elimina proyectos mediante la cascada. `settings/1` deja de recibir `projects` después del
+  cutover; localStorage conserva la copia local. Fallback temporal si las tablas siguen vacías.
+- [x] Verificación local: sintaxis completa OK; backend 11 archivos / 312 aserciones en verde; frontend
+  6 archivos / 115 aserciones en verde. Se agregaron pruebas de comportamiento real para alta,
+  actualización y borrado normalizados.
+- [ ] **Pendiente para cerrar Fase A:** ejecutar SQL + dry-run, migración real, push/deploy escalonado y
+  prueba en vivo con dos usuarios. No ejecutar automáticamente.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1340,9 +1404,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     eliminado — ver Sección 9, sesión 2026-07-26).
   - `conversations`/`messages` (parte 1) y `pendingAuthRequests`/`notifications` (parte 1.5) ya salieron del
     blob a sus propias tablas — cerradas y verificadas en vivo, ver Sección 9 y Sección 11.2.
-  - **PENDIENTE (después, sin fecha):** normalizar el resto del blob (`projects`, `houses`, `transactions`,
-    etc.) en tablas reales con autorización por registro — reescritura grande que toca casi todo lo
-    Completado. **No empezar sin retomarlo explícitamente con el OWNER.**
+  - **Fase A (`projects`/`houses`):** implementada, probada y guardada en commits locales el 2026-07-27;
+    todavía sin migración, push ni deploy. No se considera cerrada hasta verificar el cutover en vivo
+    con dos usuarios.
+  - **PENDIENTE después de Fase A:** normalizar `transactions` y las demás colecciones que todavía viven
+    dentro de `projects.data`, además del resto de `settings/1`. Hacerlo por fases, no como reescritura única.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
