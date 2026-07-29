@@ -1436,11 +1436,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   sin residuos. Regresión local: backend 12 archivos / 346 aserciones y frontend 8 archivos /
   150 aserciones, todo en verde.
 
-### Sesión 2026-07-28 (VUL-044 Fase C — house_types, implementación previa al cutover)
-> Backend `95caa47` + frontend `0238e3b` + SQL/migración preparados y publicados en las ramas
-> `vul-044-phase-c-house-types`. **Todavía no desplegado ni migrado en producción:** esta sesión se
-> detuvo antes de integrar `main` o realizar cualquier escritura productiva para pedir autorización
-> explícita del OWNER.
+### Sesión 2026-07-28 (VUL-044 Fase C — house_types, implementación y cutover)
+> **Fase C cerrada y verificada en producción con autorización explícita del OWNER.** Backend
+> `16bbcb6` y frontend `82553b9` integrados en `main`; Vercel desplegado y Render verificado con el
+> identificador público `vul-044-phase-c-house-types`. Respaldo protegido conservado en el schema
+> `vul_044_backup_20260728_2340`.
 - [x] Inventario productivo de solo lectura: 3 proyectos, 4 tipos dentro de
   `projects.data.types` y 30 casas con `houses.data.typeId`; tabla `house_types` vacía, marcador
   ausente, cero ids faltantes/duplicados y cero referencias inválidas. Uno de los valores numéricos
@@ -1460,6 +1460,21 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   por defecto.
 - [x] Regresión completa: backend 13 archivos / 387 aserciones y frontend 9 archivos /
   171 aserciones, todo en verde. Ambas copias maestras de `SUPABASE_SCHEMA.sql` quedaron idénticas.
+- [x] Antes del corte se creó y verificó el respaldo protegido: 7 proyectos totales (3 activos),
+  30 casas, 37 transacciones, 0 tipos, 2 marcadores previos y 1 fila de settings. El schema queda
+  retenido para recuperación; acceso revocado a `public`/`anon`/`authenticated` y RLS forzado.
+- [x] La revisión previa al corte detectó que el `INSERT` del RPC tenía cruzadas las posiciones de
+  `categories` y `sort_order`. No se había migrado ningún dato. Se corrigió en `a69a8aa`, se añadió
+  una regresión que valida el orden columna/valor, se repitieron las 13 suites y se reinstaló el SQL
+  corregido (`SHA-256 38e5797c02b06250a4d56c75b3a92644f95a8a9af7fd6f6ffe9c03f974a20c54`).
+- [x] Cutover atómico completado: 4 filas activas en `house_types`, 30/30 casas con `type_id`, cero
+  `projects.data.types`, cero `houses.data.typeId`, cero referencias huérfanas o cruzadas y marcador
+  `vul-044-phase-c-house-types` con conteos 3/30/4. Comparación exacta posterior: cero payloads
+  distintos, inesperados o faltantes; cero casas o proyectos incorrectos. Payload aplicado:
+  `SHA-256 777823b1cef0fe5f506fdafbc0519b49f4757c65eb24aa7bf8279b5e632b81de`.
+- [x] Smoke test dentro de transacción confirmó alta con precisión extendida y borrado lógico; terminó
+  en `ROLLBACK` con 0 residuos y 4 tipos vivos. La aplicación desplegada mostró los dos tipos del
+  proyecto 116 en el orden histórico y conservó exactamente $37,594.79 gastado y $11,678.04 pendiente.
 
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
@@ -1526,12 +1541,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     `projects.data`. Un primer corte reveló redondeo de $0.01 por `numeric(14,2)`; se restauró
     atómicamente, se corrigió la precisión en `37e384f` y se repitió el corte preservando exactamente
     los totales históricos. Dos cargas independientes y un smoke test reversible quedaron en verde.
-  - **Fase C (`house_types` + `houses.type_id`) — IMPLEMENTADA Y VERIFICADA EN RAMAS, PENDIENTE
-    DE PRODUCCIÓN:** inventario y dry-run productivo de solo lectura aprobados (4 tipos, 30 referencias,
-    sin duplicados ni huérfanos); backend/frontend, cutover y rollback atómicos listos con
-    preservación de precisión y orden. Regresión: backend 387 aserciones y frontend 171 aserciones.
-    Ramas publicadas (`95caa47` backend, `0238e3b` frontend). Falta autorización explícita del
-    OWNER para integrar `main`, desplegar, crear el respaldo y ejecutar el cutover.
+  - **Fase C (`house_types` + `houses.type_id`) — ✅ CERRADA Y VERIFICADA EN PRODUCCIÓN
+    (2026-07-28):** backend `16bbcb6` y frontend `82553b9` en `main`; respaldo protegido
+    `vul_044_backup_20260728_2340` retenido. Cutover atómico completado con 4 tipos, 30/30 referencias,
+    cero fuentes legacy, cero huérfanos y payload exacto. Un defecto de orden entre `categories` y
+    `sort_order` fue detectado antes de escribir datos, corregido en `a69a8aa` y cubierto por regresión.
+    Smoke test reversible, orden histórico, precisión extendida y totales visibles quedaron en verde.
   - **PENDIENTE después de Fase C:** normalizar `docs`/`uploads`, `garantias` y las demás colecciones
     que todavía viven dentro de `projects.data`; después, catálogos/actividad del resto de
     `settings/1`. Hacerlo por fases, no como reescritura única.
@@ -1586,7 +1601,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > el OWNER 2026-07-25/26 (Sección 9). VUL-044 parte 1.5 (pendingAuthRequests/notifications fuera del blob) —
 > ✅ cerrada y desplegada, verificada en vivo por el OWNER 2026-07-26 tras corregir 5 bugs reales encontrados
 > en producción (Sección 9). VUL-044 Fase A (`projects`/`houses`) quedó cerrada y verificada el
-> 2026-07-27, y Fase B (`transactions`) quedó cerrada y verificada en producción el 2026-07-28.
+> 2026-07-27; las Fases B (`transactions`) y C (`house_types`/`houses.type_id`) quedaron cerradas y
+> verificadas en producción el 2026-07-28.
 > Sigue abierta la normalización de las demás colecciones que todavía comparten
 > `projects.data`/`settings/1`, sin fecha.
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
