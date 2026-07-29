@@ -1478,11 +1478,16 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Sesión 2026-07-29 (VUL-044 Fase D — docs/uploads, implementación previa al cutover)
 > **Implementación terminada y regresión local en verde; todavía NO desplegada ni migrada en
-> producción.** Backend `aa8e008` y frontend `80f8fc2` en la rama
-> `vul-044-phase-d-documents`. No se ejecutó SQL ni se escribió información productiva esta sesión.
+> producción.** Backend `6fa18df` y frontend `963866d` en la rama
+> `vul-044-phase-d-documents`. Solo se ejecutaron consultas productivas de lectura; no se aplicó SQL
+> de escritura ni se modificó información productiva.
 - [x] `docs[]` y `uploads[]` se modelan como una sola fila lógica en `documents` cuando comparten
-  `blobId`/id. `documents.data` conserva por separado los dos payloads históricos y sus posiciones,
-  de modo que la UI no cambia de forma y el rollback reconstruye ambos arreglos exactamente.
+  `blobId`/id. El inventario productivo reveló que la persistencia legacy eliminó `blobId` de
+  `uploads[]`; por eso también se recupera el vínculo por nombre exacto únicamente cuando existe un
+  solo doc y un solo upload con ese nombre dentro del proyecto. Los nombres ambiguos nunca se unen
+  por adivinación. `documents.data` conserva por separado los dos payloads históricos y sus
+  posiciones, de modo que la UI no cambia de forma y el rollback reconstruye ambos arreglos
+  exactamente.
 - [x] La URL `blob:` de sesión nunca se persiste. `pdfBase64` se conserva temporalmente para no romper
   apertura, anotaciones ni PDFs importados desde Outlook; mover el binario a R2 continúa como riesgo
   residual explícito y fase separada.
@@ -1496,11 +1501,19 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   tabla destino vacía, ids/relaciones exactos, comparación de las dos fuentes y `updated_at`, inserción,
   limpieza y marcador `vul-044-phase-d-documents` dentro de una sola RPC. Rollback
   `restore-documents-to-projects.js` es dry-run por defecto y usa otra RPC atómica.
-- [x] Regresión completa local: backend **14 archivos / 418 aserciones** y frontend
+- [x] Regresión completa local: backend **14 archivos / 419 aserciones** y frontend
   **10 archivos / 186 aserciones**, todo en verde; sintaxis del `<script>` completo OK.
-- [ ] **Cutover pendiente de autorización:** verificar inventario productivo de solo lectura y que
-  `documents` esté vacía; crear/verificar respaldo protegido; aplicar `migration-documents.sql`;
-  desplegar backend y confirmar build `vul-044-phase-d-documents`; ejecutar
+- [x] Preflight productivo de solo lectura: 3 proyectos activos; `documents` tiene 0 filas totales y
+  0 activas; marcador `vul-044-phase-d-documents` ausente; los tres proyectos todavía contienen
+  arreglos legacy. Inventario: 14 elementos en `docs[]`, 12 en `uploads[]`, 0 shapes inválidos,
+  0 llaves lógicas faltantes, 0 duplicados por llave, 0 URLs `blob:` persistidas y 10 payloads
+  `pdfBase64` (476,484 caracteres). Con la llave primaria legacy aparecen 26 filas lógicas
+  (22 + 4 por proyecto), 14 solo-doc y 12 solo-upload; este hallazgo motivó el fallback seguro por
+  nombre único descrito arriba. Los tres `updated_at` fuente coinciden en
+  `2026-07-29T03:51:37.072267+00:00`.
+- [ ] **Cutover productivo pendiente:** crear/verificar respaldo protegido; aplicar
+  `migration-documents.sql`; desplegar backend y confirmar build
+  `vul-044-phase-d-documents`; ejecutar
   `node migrate-documents.js --dry-run` y luego el corte; desplegar frontend; comparar payload/conteos
   y probar carga, alta, edición, apertura, anotaciones y borrado antes de marcar la fase cerrada.
 
