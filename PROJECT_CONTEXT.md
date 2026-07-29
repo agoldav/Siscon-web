@@ -1436,6 +1436,31 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   sin residuos. Regresión local: backend 12 archivos / 346 aserciones y frontend 8 archivos /
   150 aserciones, todo en verde.
 
+### Sesión 2026-07-28 (VUL-044 Fase C — house_types, implementación previa al cutover)
+> Backend `95caa47` + frontend `0238e3b` + SQL/migración preparados y publicados en las ramas
+> `vul-044-phase-c-house-types`. **Todavía no desplegado ni migrado en producción:** esta sesión se
+> detuvo antes de integrar `main` o realizar cualquier escritura productiva para pedir autorización
+> explícita del OWNER.
+- [x] Inventario productivo de solo lectura: 3 proyectos, 4 tipos dentro de
+  `projects.data.types` y 30 casas con `houses.data.typeId`; tabla `house_types` vacía, marcador
+  ausente, cero ids faltantes/duplicados y cero referencias inválidas. Uno de los valores numéricos
+  usa más de dos decimales, por lo que las columnas se dejan como `numeric` sin escala fija.
+- [x] Rutas dedicadas de `house_types` con política compartida histórica, concurrencia optimista por
+  fila, `project_id` inmutable y borrado transaccional que falla si una casa viva todavía usa el
+  tipo. El borrado de proyecto ahora incluye tipos en la misma cascada.
+- [x] Despliegue escalonado seguro: antes del cutover, un backend nuevo conserva `typeId` dentro de
+  `houses.data`; después del marcador exige una FK válida y rechaza referencias inexistentes. El
+  frontend mantiene fallback al arreglo legacy mientras la tabla esté vacía.
+- [x] Sincronización incremental: crea proyecto → tipo → casa para respetar FKs; al borrar limpia
+  primero `houses.type_id` y después elimina el tipo. `sort_order` preserva exactamente el orden del
+  arreglo histórico aunque todas las filas se inserten en una sola transacción.
+- [x] Cutover SQL atómico y fail-closed: inserta tipos, promueve las 30 referencias, limpia ambas
+  fuentes y registra el marcador o revierte todo. Verifica versiones y payload fuente exacto. El
+  rollback reconstruye `projects.data.types` y `houses.data.typeId` mediante otra RPC atómica; dry-run
+  por defecto.
+- [x] Regresión completa: backend 13 archivos / 387 aserciones y frontend 9 archivos /
+  171 aserciones, todo en verde. Ambas copias maestras de `SUPABASE_SCHEMA.sql` quedaron idénticas.
+
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
 > modelo de datos. El diff queda confinado al bloque CSS del panel y a `renderMetric()`.
@@ -1501,8 +1526,15 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     `projects.data`. Un primer corte reveló redondeo de $0.01 por `numeric(14,2)`; se restauró
     atómicamente, se corrigió la precisión en `37e384f` y se repitió el corte preservando exactamente
     los totales históricos. Dos cargas independientes y un smoke test reversible quedaron en verde.
-  - **PENDIENTE después de Fase B:** normalizar las demás colecciones que todavía viven dentro de
-    `projects.data`, además del resto de `settings/1`. Hacerlo por fases, no como reescritura única.
+  - **Fase C (`house_types` + `houses.type_id`) — IMPLEMENTADA Y VERIFICADA EN RAMAS, PENDIENTE
+    DE PRODUCCIÓN:** inventario y dry-run productivo de solo lectura aprobados (4 tipos, 30 referencias,
+    sin duplicados ni huérfanos); backend/frontend, cutover y rollback atómicos listos con
+    preservación de precisión y orden. Regresión: backend 387 aserciones y frontend 171 aserciones.
+    Ramas publicadas (`95caa47` backend, `0238e3b` frontend). Falta autorización explícita del
+    OWNER para integrar `main`, desplegar, crear el respaldo y ejecutar el cutover.
+  - **PENDIENTE después de Fase C:** normalizar `docs`/`uploads`, `garantias` y las demás colecciones
+    que todavía viven dentro de `projects.data`; después, catálogos/actividad del resto de
+    `settings/1`. Hacerlo por fases, no como reescritura única.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
