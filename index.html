@@ -1152,10 +1152,23 @@ function _documentSizeBytes(value){
 }
 function _documentGroups(project){
   const groups=new Map();
-  function add(collection,item,sortOrder){
+  const docs=Array.isArray(project.docs)?project.docs:[];
+  const uploads=Array.isArray(project.uploads)?project.uploads:[];
+  const docRowByKey=new Map();
+  const docsByName=new Map();
+  const uploadNameCount=new Map();
+  for(const doc of docs){
+    const name=typeof doc?.name==='string'?doc.name:'';
+    if(name){const matches=docsByName.get(name)||[];matches.push(doc);docsByName.set(name,matches);}
+  }
+  for(const upload of uploads){
+    const name=typeof upload?.name==='string'?upload.name:'';
+    if(name)uploadNameCount.set(name,(uploadNameCount.get(name)||0)+1);
+  }
+  function add(collection,item,sortOrder,forcedRowId){
     const key=_documentLogicalKey(item);
     if(!key)throw new Error(`Elemento sin blobId/id/name en ${collection} del proyecto ${project.id}`);
-    const id=_documentRowId(project.id,key);
+    const id=forcedRowId||_documentRowId(project.id,key);
     const group=groups.get(id)||{
       id,projectId:project.id,logicalKey:key,doc:null,upload:null,
       docSortOrder:null,uploadSortOrder:null,
@@ -1171,9 +1184,18 @@ function _documentGroups(project){
       group.docSortOrder=sortOrder;
     }
     groups.set(id,group);
+    if(collection==='docs')docRowByKey.set(key,id);
   }
-  (project.docs||[]).forEach((item,index)=>add('docs',item,index));
-  (project.uploads||[]).forEach((item,index)=>add('uploads',item,index));
+  docs.forEach((item,index)=>add('docs',item,index));
+  uploads.forEach((item,index)=>{
+    const ownKey=_documentLogicalKey(item);
+    let targetRowId=docRowByKey.get(ownKey);
+    const name=typeof item?.name==='string'?item.name:'';
+    if(!targetRowId&&name&&uploadNameCount.get(name)===1&&docsByName.get(name)?.length===1){
+      targetRowId=docRowByKey.get(_documentLogicalKey(docsByName.get(name)[0]));
+    }
+    add('uploads',item,index,targetRowId);
+  });
   return [...groups.values()];
 }
 function _documentCloudPayload(group){

@@ -19,7 +19,7 @@ function ok(name, cond, detail) {
 function projectWithDocument() {
   const doc = { id: 'meta-1', blobId: 'blob-1', name: 'Factura.pdf', category: 'Factura' };
   const upload = {
-    id: 'up-1', blobId: 'blob-1', name: 'Factura.pdf', type: 'PDF',
+    id: 'up-1', name: 'Factura.pdf', type: 'PDF',
     url: 'blob:https://app/efimero', pdfBase64: 'YWJj', notes: '',
   };
   return {
@@ -82,7 +82,7 @@ function environment(initialProjects) {
   const created = environment([createdData.project]);
   created.api._rememberProjectRow({ updated_at: 'p1' }, createdData.project);
   ok('sincronización termina OK', await created.api._syncNormalizedProjectsHouses());
-  ok('el par doc/upload crea una sola fila',
+  ok('el par por nombre único crea una sola fila aunque upload no tenga blobId',
     created.calls.length === 1 &&
     created.calls[0].method === 'POST' &&
     created.calls[0].url === '/api/db/documents');
