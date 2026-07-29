@@ -1044,8 +1044,12 @@ const _transactionVersions=new Map();
 const _transactionSnapshots=new Map();
 const _transactionProjectIds=new Map();
 const _transactionKinds=new Map();
+const _houseTypeVersions=new Map();
+const _houseTypeSnapshots=new Map();
+const _houseTypeProjectIds=new Map();
 let _normalizedProjectsLoaded=false;
 let _normalizedTransactionsLoaded=false;
+let _normalizedHouseTypesLoaded=false;
 const TXN_COLLECTION_TO_KIND={
   ocs:'oc',invClient:'factura_cliente',billVendor:'factura_proveedor',
   payments:'pago',creditNotes:'nota_credito',requis:'requisicion',
@@ -1077,9 +1081,24 @@ function _houseFromRow(row){
   const extra=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)?row.data:{};
   return {...extra,
     id:_restoreDbId(row.id),projectId:_restoreDbId(row.project_id),num:row.num||'',
+    typeId:row.type_id===null||row.type_id===undefined
+      ?(extra.typeId??null):_restoreDbId(row.type_id),
     status:row.status||'Sin iniciar',
     crewMemberIds:Array.isArray(row.crew_member_ids)?row.crew_member_ids:(extra.crewMemberIds||[]),
     log:Array.isArray(row.log)?row.log:(extra.log||[]),
+  };
+}
+function _houseTypeFromRow(row){
+  const extra=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)?row.data:{};
+  return {...extra,
+    id:_restoreDbId(row.id),projectId:_restoreDbId(row.project_id),
+    name:row.name||'',color:row.color||extra.color||'',
+    area:Number(row.area??extra.area??0),budget:Number(row.budget??extra.budget??0),
+    salePrice:Number(row.sale_price??extra.salePrice??0),
+    utilityPct:Number(row.utility_pct??extra.utilityPct??0),
+    margen:Number(row.margen??extra.margen??0),adminPct:Number(row.admin_pct??extra.adminPct??0),
+    notes:row.notes??extra.notes??'',
+    categories:Array.isArray(row.categories)?row.categories:(extra.categories||[]),
   };
 }
 function _transactionFromRow(row){
@@ -1112,6 +1131,7 @@ function _projectCloudPayload(project){
   const {houses,...rest}=project||{};
   const payload={...rest,uploads:(rest.uploads||[]).map(({blobId,url,...upload})=>upload)};
   if(_normalizedTransactionsLoaded)TXN_COLLECTION_KEYS.forEach(key=>delete payload[key]);
+  if(_normalizedHouseTypesLoaded)delete payload.types;
   return payload;
 }
 function _houseCloudPayload(house,projectId){
@@ -1126,6 +1146,10 @@ function _transactionCloudPayload(transaction,projectId,kind){
   }
   if(payload.currency!==undefined&&!['USD','CRC'].includes(payload.currency))delete payload.currency;
   return payload;
+}
+function _houseTypeCloudPayload(houseType,projectId,sortOrder=0){
+  const {projectId:_oldProjectId,...rest}=houseType||{};
+  return {...rest,projectId,sortOrder};
 }
 function _snapshot(value){return JSON.stringify(value);}
 function _rememberProjectRow(row,project){
@@ -1146,11 +1170,18 @@ function _rememberTransactionRow(row,transaction,projectId,kind){
   _transactionProjectIds.set(id,String(projectId));
   _transactionKinds.set(id,kind);
 }
+function _rememberHouseTypeRow(row,houseType,projectId,sortOrder=0){
+  const id=String(houseType.id);
+  _houseTypeVersions.set(id,row.updated_at||null);
+  _houseTypeSnapshots.set(id,_snapshot(_houseTypeCloudPayload(houseType,projectId,sortOrder)));
+  _houseTypeProjectIds.set(id,String(projectId));
+}
 function _clearNormalizedState(){
   _projectVersions.clear();_houseVersions.clear();_projectSnapshots.clear();
   _houseSnapshots.clear();_houseProjectIds.clear();
   _transactionVersions.clear();_transactionSnapshots.clear();
   _transactionProjectIds.clear();_transactionKinds.clear();
+  _houseTypeVersions.clear();_houseTypeSnapshots.clear();_houseTypeProjectIds.clear();
 }
 async function _dbRowRequest(method,path,body){
   const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
@@ -1241,7 +1272,20 @@ async function _syncNormalizedProjectsHouses(){
   if(!_normalizedProjectsLoaded)return true;
 
   const currentProjects=new Map(projects.map(project=>[String(project.id),project]));
+  const currentHouseTypes=new Map();
   const currentHouses=new Map();
+  if(_normalizedHouseTypesLoaded){
+    for(const project of projects){
+      for(const [sortOrder,houseType] of (project.types||[]).entries()){
+        const id=String(houseType.id);
+        if(currentHouseTypes.has(id)){
+          console.error('ID de tipo de vivienda duplicado; no se guardó:',id);
+          return false;
+        }
+        currentHouseTypes.set(id,{houseType,projectId:project.id,sortOrder});
+      }
+    }
+  }
   projects.forEach(project=>(project.houses||[]).forEach(house=>{
     currentHouses.set(String(house.id),{house,projectId:project.id});
   }));
@@ -1261,6 +1305,12 @@ async function _syncNormalizedProjectsHouses(){
       if(projectId===id){
         _transactionVersions.delete(transactionId);_transactionSnapshots.delete(transactionId);
         _transactionProjectIds.delete(transactionId);_transactionKinds.delete(transactionId);
+      }
+    }
+    for(const [typeId,projectId] of [..._houseTypeProjectIds.entries()]){
+      if(projectId===id){
+        _houseTypeVersions.delete(typeId);_houseTypeSnapshots.delete(typeId);
+        _houseTypeProjectIds.delete(typeId);
       }
     }
   }
@@ -1283,6 +1333,36 @@ async function _syncNormalizedProjectsHouses(){
       }
       if(!resp.ok){console.error('No se pudo actualizar proyecto',id,data);return false;}
       _rememberProjectRow(data,project);
+    }
+  }
+
+  // Los tipos nuevos/actualizados van antes de las casas: houses.type_id tiene FK
+  // y una casa puede empezar a usar un tipo creado en este mismo guardado.
+  if(_normalizedHouseTypesLoaded){
+    for(const [id,{houseType,projectId,sortOrder}] of currentHouseTypes){
+      const payload=_houseTypeCloudPayload(houseType,projectId,sortOrder);
+      const snap=_snapshot(payload);
+      if(!_houseTypeSnapshots.has(id)){
+        const {resp,data}=await _dbRowRequest('POST','/api/db/house_types',payload);
+        if(!resp.ok){console.error('No se pudo crear tipo de vivienda',id,data);return false;}
+        _rememberHouseTypeRow(data,houseType,projectId,sortOrder);
+      }else if(_houseTypeSnapshots.get(id)!==snap){
+        if(_houseTypeProjectIds.get(id)!==String(projectId)){
+          console.error('No se puede mover un tipo de vivienda entre proyectos:',id);
+          return false;
+        }
+        const body={...payload,replace_data:true,expected_updated_at:_houseTypeVersions.get(id)};
+        let {resp,data}=await _dbRowRequest('PUT',`/api/db/house_types/${encodeURIComponent(id)}`,body);
+        if(resp.status===409||resp.status===428){
+          data=await _handleRowConflict(
+            'este tipo de vivienda',id,payload,`/api/db/house_types/${encodeURIComponent(id)}`
+          );
+          if(!data)return false;
+          resp={ok:true};
+        }
+        if(!resp.ok){console.error('No se pudo actualizar tipo de vivienda',id,data);return false;}
+        _rememberHouseTypeRow(data,houseType,projectId,sortOrder);
+      }
     }
   }
 
@@ -1311,6 +1391,17 @@ async function _syncNormalizedProjectsHouses(){
       }
       if(!resp.ok){console.error('No se pudo actualizar casa',id,data);return false;}
       _rememberHouseRow(data,house,projectId);
+    }
+  }
+
+  // Un tipo se borra DESPUÉS de que las casas hayan limpiado su type_id. La RPC
+  // del backend rechaza el DELETE si todavía queda alguna referencia viva.
+  if(_normalizedHouseTypesLoaded){
+    for(const id of [..._houseTypeSnapshots.keys()]){
+      if(currentHouseTypes.has(id))continue;
+      const {resp,data}=await _dbRowRequest('DELETE',`/api/db/house_types/${encodeURIComponent(id)}`);
+      if(!resp.ok){console.error('No se pudo eliminar tipo de vivienda',id,data);return false;}
+      _houseTypeVersions.delete(id);_houseTypeSnapshots.delete(id);_houseTypeProjectIds.delete(id);
     }
   }
   return await _syncNormalizedTransactions();
@@ -1462,11 +1553,12 @@ async function loadDataFromAPI(){
   if(!_sbToken || !currentUser) return false;
   try{
     const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
-    const [resp,projectsResp,housesResp,transactionsResp]=await Promise.all([
+    const [resp,projectsResp,housesResp,transactionsResp,houseTypesResp]=await Promise.all([
       fetch(`${BACKEND_URL}/api/db/settings/1`,{headers}),
       fetch(`${BACKEND_URL}/api/db/projects`,{headers}),
       fetch(`${BACKEND_URL}/api/db/houses`,{headers}),
       fetch(`${BACKEND_URL}/api/db/transactions`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/house_types`,{headers}),
     ]);
     if(!resp.ok){ console.error('Error cargando desde API:', await resp.json()); return false; }
     const record=await resp.json();
@@ -1501,6 +1593,7 @@ async function loadDataFromAPI(){
           delete house.projectId;
         }
         _normalizedTransactionsLoaded=false;
+        _normalizedHouseTypesLoaded=false;
         if(transactionsResp.ok){
           const transactionData=await transactionsResp.json();
           const transactionRows=Array.isArray(transactionData.transactions)?transactionData.transactions:[];
@@ -1523,6 +1616,40 @@ async function loadDataFromAPI(){
             _normalizedTransactionsLoaded=true;
           }
         }
+        const hasLegacyTypes=rows.some(row=>{
+          const data=row&&row.data;
+          return data&&typeof data==='object'&&
+            Object.prototype.hasOwnProperty.call(data,'types');
+        });
+        if(houseTypesResp.ok){
+          const houseTypeData=await houseTypesResp.json();
+          const houseTypeRows=Array.isArray(houseTypeData.house_types)?houseTypeData.house_types:[];
+          if(houseTypeRows.length||!hasLegacyTypes){
+            for(const project of loaded)project.types=[];
+            for(const row of houseTypeRows){
+              const houseType=_houseTypeFromRow(row);
+              const project=byProject.get(String(houseType.projectId));
+              if(!project)throw new Error(
+                `Tipo ${houseType.id} referencia proyecto inexistente ${houseType.projectId}`
+              );
+              const sortOrder=Number(row.sort_order)||0;
+              project.types.push(houseType);
+              _rememberHouseTypeRow(row,houseType,project.id,sortOrder);
+              delete houseType.projectId;
+            }
+            for(const project of loaded){
+              const ids=new Set((project.types||[]).map(houseType=>String(houseType.id)));
+              for(const house of project.houses||[]){
+                if(house.typeId!==null&&house.typeId!==undefined&&!ids.has(String(house.typeId))){
+                  throw new Error(`Casa ${house.id} referencia tipo inexistente ${house.typeId}`);
+                }
+              }
+            }
+            _normalizedHouseTypesLoaded=true;
+          }
+        }else if(!hasLegacyTypes){
+          throw new Error('Backend sin ruta house_types después del cutover');
+        }
         projects=loaded;
         _normalizedProjectsLoaded=true;
         rows.forEach(row=>{
@@ -1534,6 +1661,7 @@ async function loadDataFromAPI(){
         projects=d.projects;
         _normalizedProjectsLoaded=false;
         _normalizedTransactionsLoaded=false;
+        _normalizedHouseTypesLoaded=false;
         _clearNormalizedState();
       }
     }else{
@@ -1541,6 +1669,7 @@ async function loadDataFromAPI(){
       if(d.projects)projects=d.projects;
       _normalizedProjectsLoaded=false;
       _normalizedTransactionsLoaded=false;
+      _normalizedHouseTypesLoaded=false;
       _clearNormalizedState();
     }
     _settingsSnapshot=_settingsCloudSnapshot(_settingsCloudData());
@@ -3524,6 +3653,7 @@ function saveType(){
   }
   curProj.lastActivity=Date.now();
   showCreate=false; typeEditId=null;
+  saveData();
   renderMetric(); renderBreadcrumb(); renderTypes();
 }
 
@@ -3713,6 +3843,7 @@ function deleteType(id){
   curProj.types=curProj.types.filter(t=>t.id!==id);
   curProj.houses.forEach(h=>{if(h.typeId===id)h.typeId=null;});
   showCreate=false; typeEditId=null;
+  saveData();
   renderBreadcrumb(); renderTypes();
 }
 
