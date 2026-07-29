@@ -1469,8 +1469,19 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     encontró y corrigió una escritura artificial de `settings/1` durante el login y una regresión que
     omitía el mensaje específico de aprobación en los nuevos conflictos por fila. La repetición final
     del flujo de aprobación fue aprobada por el OWNER.
-  - **PENDIENTE después de Fase A:** normalizar `transactions` y las demás colecciones que todavía viven
-    dentro de `projects.data`, además del resto de `settings/1`. Hacerlo por fases, no como reescritura única.
+  - **Fase B (`transactions`) — IMPLEMENTADA Y VERIFICADA EN RAMAS, AÚN ABIERTA:** se preparó la normalización de
+    `ocs`, `invClient`, `billVendor`, `payments`, `creditNotes` y `requis` hacia la tabla unificada
+    `transactions`, conservando los seis arreglos históricos en memoria para no cambiar lógica de negocio.
+    Incluye rutas dedicadas con concurrencia por fila, carga/sincronización incremental, cascada de borrado,
+    corte SQL atómico con marcador, pre-vuelo fail-closed, verificación exacta de payloads y rollback atómico.
+    Regresión local: backend 12 archivos / 345 aserciones y frontend 8 archivos / 150 aserciones, todo en
+    verde. El código quedó integrado sobre `origin/main` en ramas limpias `vul-044-phase-b`, sin incorporar
+    cambios locales ajenos. **No está desplegada ni migrada en producción:** faltan publicar/revisar las ramas,
+    autorización del OWNER, aplicar SQL, dry-run/cutover, desplegar backend/frontend y verificación multiusuario
+    en vivo.
+  - **PENDIENTE después de Fase B:** completar y verificar el cutover de `transactions`; después normalizar
+    las demás colecciones que todavía viven dentro de `projects.data`, además del resto de `settings/1`.
+    Hacerlo por fases, no como reescritura única.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el

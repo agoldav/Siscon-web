@@ -1040,7 +1040,20 @@ const _houseVersions=new Map();
 const _projectSnapshots=new Map();
 const _houseSnapshots=new Map();
 const _houseProjectIds=new Map();
+const _transactionVersions=new Map();
+const _transactionSnapshots=new Map();
+const _transactionProjectIds=new Map();
+const _transactionKinds=new Map();
 let _normalizedProjectsLoaded=false;
+let _normalizedTransactionsLoaded=false;
+const TXN_COLLECTION_TO_KIND={
+  ocs:'oc',invClient:'factura_cliente',billVendor:'factura_proveedor',
+  payments:'pago',creditNotes:'nota_credito',requis:'requisicion',
+};
+const TXN_KIND_TO_COLLECTION=Object.fromEntries(
+  Object.entries(TXN_COLLECTION_TO_KIND).map(([collection,kind])=>[kind,collection])
+);
+const TXN_COLLECTION_KEYS=Object.keys(TXN_COLLECTION_TO_KIND);
 
 function _restoreDbId(value){
   if(typeof value!=='string'||!/^\d+$/.test(value))return value;
@@ -1069,13 +1082,50 @@ function _houseFromRow(row){
     log:Array.isArray(row.log)?row.log:(extra.log||[]),
   };
 }
+function _transactionFromRow(row){
+  const extra=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)?row.data:{};
+  const transaction={...extra,
+    id:_restoreDbId(row.id),num:row.num??extra.num??'',party:row.party??extra.party??'',
+    invoiceNumber:row.invoice_number??extra.invoiceNumber??'',date:row.date??extra.date??'',
+    status:row.status??extra.status??'',currency:row.currency??extra.currency??'USD',
+    exchangeRate:Number(row.exchange_rate??extra.exchangeRate??0),
+    subtotalUSD:Number(row.subtotal_usd??extra.subtotalUSD??0),
+    totalUSD:Number(row.total_usd??extra.totalUSD??0),
+    totalCRC:Number(row.total_crc??extra.totalCRC??0),
+    lines:Array.isArray(row.lines)?row.lines:(Array.isArray(extra.lines)?extra.lines:[]),
+    linkedOcId:row.linked_oc_id??extra.linkedOcId??'',
+    linkedAdvanceId:row.linked_advance_id??extra.linkedAdvanceId??'',
+    qboId:row.qbo_id??extra.qboId??'',pdfStorageKey:row.pdf_storage_key??extra.pdfStorageKey??'',
+    pdfName:row.pdf_name??extra.pdfName??'',_pending:!!row.pending,
+  };
+  if(row.kind==='oc'&&extra.ocLines!==undefined){
+    transaction.lines=extra.ocLines;
+    delete transaction.ocLines;
+  }
+  return {
+    transaction,
+    projectId:_restoreDbId(row.project_id),
+    kind:row.kind,
+  };
+}
 function _projectCloudPayload(project){
   const {houses,...rest}=project||{};
-  return {...rest,uploads:(rest.uploads||[]).map(({blobId,url,...upload})=>upload)};
+  const payload={...rest,uploads:(rest.uploads||[]).map(({blobId,url,...upload})=>upload)};
+  if(_normalizedTransactionsLoaded)TXN_COLLECTION_KEYS.forEach(key=>delete payload[key]);
+  return payload;
 }
 function _houseCloudPayload(house,projectId){
   const {projectId:_oldProjectId,...rest}=house||{};
   return {...rest,projectId};
+}
+function _transactionCloudPayload(transaction,projectId,kind){
+  const payload={...(transaction||{}),projectId,kind};
+  if(payload.lines!==undefined&&!Array.isArray(payload.lines)){
+    payload.ocLines=payload.lines;
+    delete payload.lines;
+  }
+  if(payload.currency!==undefined&&!['USD','CRC'].includes(payload.currency))delete payload.currency;
+  return payload;
 }
 function _snapshot(value){return JSON.stringify(value);}
 function _rememberProjectRow(row,project){
@@ -1089,9 +1139,18 @@ function _rememberHouseRow(row,house,projectId){
   _houseSnapshots.set(id,_snapshot(_houseCloudPayload(house,projectId)));
   _houseProjectIds.set(id,String(projectId));
 }
+function _rememberTransactionRow(row,transaction,projectId,kind){
+  const id=String(transaction.id);
+  _transactionVersions.set(id,row.updated_at||null);
+  _transactionSnapshots.set(id,_snapshot(_transactionCloudPayload(transaction,projectId,kind)));
+  _transactionProjectIds.set(id,String(projectId));
+  _transactionKinds.set(id,kind);
+}
 function _clearNormalizedState(){
   _projectVersions.clear();_houseVersions.clear();_projectSnapshots.clear();
   _houseSnapshots.clear();_houseProjectIds.clear();
+  _transactionVersions.clear();_transactionSnapshots.clear();
+  _transactionProjectIds.clear();_transactionKinds.clear();
 }
 async function _dbRowRequest(method,path,body){
   const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
@@ -1127,6 +1186,57 @@ async function _handleRowConflict(label,id,payload,path){
   if(!resp.ok){console.error(`No se pudo forzar ${label} ${id}:`,data);return null;}
   return data;
 }
+async function _syncNormalizedTransactions(){
+  if(!_normalizedTransactionsLoaded)return true;
+
+  const currentTransactions=new Map();
+  for(const project of projects){
+    for(const collection of TXN_COLLECTION_KEYS){
+      const kind=TXN_COLLECTION_TO_KIND[collection];
+      for(const transaction of project[collection]||[]){
+        const id=String(transaction.id);
+        if(currentTransactions.has(id)){
+          console.error('ID de transacción duplicado; no se guardó:',id);
+          return false;
+        }
+        currentTransactions.set(id,{transaction,projectId:project.id,kind});
+      }
+    }
+  }
+
+  for(const id of [..._transactionSnapshots.keys()]){
+    if(currentTransactions.has(id))continue;
+    const {resp,data}=await _dbRowRequest('DELETE',`/api/db/transactions/${encodeURIComponent(id)}`);
+    if(!resp.ok){console.error('No se pudo eliminar transacción',id,data);return false;}
+    _transactionVersions.delete(id);_transactionSnapshots.delete(id);
+    _transactionProjectIds.delete(id);_transactionKinds.delete(id);
+  }
+
+  for(const [id,{transaction,projectId,kind}] of currentTransactions){
+    const payload=_transactionCloudPayload(transaction,projectId,kind);
+    const snap=_snapshot(payload);
+    if(!_transactionSnapshots.has(id)){
+      const {resp,data}=await _dbRowRequest('POST','/api/db/transactions',payload);
+      if(!resp.ok){console.error('No se pudo crear transacción',id,data);return false;}
+      _rememberTransactionRow(data,transaction,projectId,kind);
+    }else if(_transactionSnapshots.get(id)!==snap){
+      if(_transactionProjectIds.get(id)!==String(projectId)||_transactionKinds.get(id)!==kind){
+        console.error('No se puede mover una transacción existente de proyecto o tipo:',id);
+        return false;
+      }
+      const body={...payload,replace_data:true,expected_updated_at:_transactionVersions.get(id)};
+      let {resp,data}=await _dbRowRequest('PUT',`/api/db/transactions/${encodeURIComponent(id)}`,body);
+      if(resp.status===409||resp.status===428){
+        data=await _handleRowConflict('esta transacción',id,payload,`/api/db/transactions/${encodeURIComponent(id)}`);
+        if(!data)return false;
+        resp={ok:true};
+      }
+      if(!resp.ok){console.error('No se pudo actualizar transacción',id,data);return false;}
+      _rememberTransactionRow(data,transaction,projectId,kind);
+    }
+  }
+  return true;
+}
 async function _syncNormalizedProjectsHouses(){
   if(!_normalizedProjectsLoaded)return true;
 
@@ -1145,6 +1255,12 @@ async function _syncNormalizedProjectsHouses(){
     for(const [houseId,projectId] of [..._houseProjectIds.entries()]){
       if(projectId===id){
         _houseVersions.delete(houseId);_houseSnapshots.delete(houseId);_houseProjectIds.delete(houseId);
+      }
+    }
+    for(const [transactionId,projectId] of [..._transactionProjectIds.entries()]){
+      if(projectId===id){
+        _transactionVersions.delete(transactionId);_transactionSnapshots.delete(transactionId);
+        _transactionProjectIds.delete(transactionId);_transactionKinds.delete(transactionId);
       }
     }
   }
@@ -1197,7 +1313,7 @@ async function _syncNormalizedProjectsHouses(){
       _rememberHouseRow(data,house,projectId);
     }
   }
-  return true;
+  return await _syncNormalizedTransactions();
 }
 
 // VUL-033: control de concurrencia optimista sobre el blob settings/1.
@@ -1288,7 +1404,7 @@ function saveDataToAPI(forzar){
 async function _saveDataToAPICore(forzar){
   if(!_sbToken || !currentUser) return false;
   try{
-    // Primero persiste projects/houses por fila. Solo después actualiza SYS/activityLog.
+    // Primero persiste las filas normalizadas. Solo después actualiza SYS/activityLog.
     // Si todavía se está usando un backend anterior (fallback del loader), conserva el contrato
     // viejo y manda projects dentro del blob para no cortar el entorno durante el despliegue.
     if(_normalizedProjectsLoaded){
@@ -1299,7 +1415,7 @@ async function _saveDataToAPICore(forzar){
     const nextSettingsSnapshot=_settingsCloudSnapshot(settingsData);
     // Un saveData() sin cambios reales puede venir de login, polling o chequeos de estado. Las
     // filas normalizadas ya se sincronizaron arriba; omitir este PUT evita conflictos artificiales
-    // en settings/1 sin perder ninguna modificación de projects/houses.
+    // en settings/1 sin perder ninguna modificación de projects/houses/transacciones.
     if(!forzar&&_settingsSnapshot!==null&&nextSettingsSnapshot===_settingsSnapshot) return true;
     const body={data:settingsData};
     if(forzar) body.force=true; else body.expected_updated_at=_settingsVersion;
@@ -1346,10 +1462,11 @@ async function loadDataFromAPI(){
   if(!_sbToken || !currentUser) return false;
   try{
     const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
-    const [resp,projectsResp,housesResp]=await Promise.all([
+    const [resp,projectsResp,housesResp,transactionsResp]=await Promise.all([
       fetch(`${BACKEND_URL}/api/db/settings/1`,{headers}),
       fetch(`${BACKEND_URL}/api/db/projects`,{headers}),
       fetch(`${BACKEND_URL}/api/db/houses`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/transactions`,{headers}),
     ]);
     if(!resp.ok){ console.error('Error cargando desde API:', await resp.json()); return false; }
     const record=await resp.json();
@@ -1372,7 +1489,6 @@ async function loadDataFromAPI(){
         _clearNormalizedState();
         const loaded=rows.map(row=>{
           const project=_projectFromRow(row);project.houses=[];
-          _rememberProjectRow(row,project);
           return project;
         });
         const byProject=new Map(loaded.map(project=>[String(project.id),project]));
@@ -1384,18 +1500,47 @@ async function loadDataFromAPI(){
           _rememberHouseRow(row,house,project.id);
           delete house.projectId;
         }
+        _normalizedTransactionsLoaded=false;
+        if(transactionsResp.ok){
+          const transactionData=await transactionsResp.json();
+          const transactionRows=Array.isArray(transactionData.transactions)?transactionData.transactions:[];
+          const hasLegacyCollections=rows.some(row=>{
+            const data=row&&row.data;
+            return data&&typeof data==='object'&&
+              TXN_COLLECTION_KEYS.some(key=>Object.prototype.hasOwnProperty.call(data,key));
+          });
+          if(transactionRows.length||!hasLegacyCollections){
+            for(const project of loaded)TXN_COLLECTION_KEYS.forEach(key=>{project[key]=[];});
+            for(const row of transactionRows){
+              const {transaction,projectId,kind}=_transactionFromRow(row);
+              const collection=TXN_KIND_TO_COLLECTION[kind];
+              const project=byProject.get(String(projectId));
+              if(!collection)throw new Error(`Transacción ${transaction.id} tiene tipo desconocido ${kind}`);
+              if(!project)throw new Error(`Transacción ${transaction.id} referencia proyecto inexistente ${projectId}`);
+              project[collection].push(transaction);
+              _rememberTransactionRow(row,transaction,project.id,kind);
+            }
+            _normalizedTransactionsLoaded=true;
+          }
+        }
         projects=loaded;
         _normalizedProjectsLoaded=true;
+        rows.forEach(row=>{
+          const project=byProject.get(String(_restoreDbId(row.id)));
+          if(project)_rememberProjectRow(row,project);
+        });
       }else{
         console.warn('VUL-044 Fase A: tablas vacías; se mantiene temporalmente projects desde settings/1.');
         projects=d.projects;
         _normalizedProjectsLoaded=false;
+        _normalizedTransactionsLoaded=false;
         _clearNormalizedState();
       }
     }else{
       console.warn('VUL-044 Fase A: backend sin rutas projects/houses; usando settings/1 temporalmente.');
       if(d.projects)projects=d.projects;
       _normalizedProjectsLoaded=false;
+      _normalizedTransactionsLoaded=false;
       _clearNormalizedState();
     }
     _settingsSnapshot=_settingsCloudSnapshot(_settingsCloudData());
