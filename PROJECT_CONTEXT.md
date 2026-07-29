@@ -1476,6 +1476,34 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   en `ROLLBACK` con 0 residuos y 4 tipos vivos. La aplicación desplegada mostró los dos tipos del
   proyecto 116 en el orden histórico y conservó exactamente $37,594.79 gastado y $11,678.04 pendiente.
 
+### Sesión 2026-07-29 (VUL-044 Fase D — docs/uploads, implementación previa al cutover)
+> **Implementación terminada y regresión local en verde; todavía NO desplegada ni migrada en
+> producción.** Backend `aa8e008` y frontend `80f8fc2` en la rama
+> `vul-044-phase-d-documents`. No se ejecutó SQL ni se escribió información productiva esta sesión.
+- [x] `docs[]` y `uploads[]` se modelan como una sola fila lógica en `documents` cuando comparten
+  `blobId`/id. `documents.data` conserva por separado los dos payloads históricos y sus posiciones,
+  de modo que la UI no cambia de forma y el rollback reconstruye ambos arreglos exactamente.
+- [x] La URL `blob:` de sesión nunca se persiste. `pdfBase64` se conserva temporalmente para no romper
+  apertura, anotaciones ni PDFs importados desde Outlook; mover el binario a R2 continúa como riesgo
+  residual explícito y fase separada.
+- [x] Backend con rutas dedicadas `documents`, política compartida histórica, `project_id` y
+  `created_by` inmutables, validación de proyecto, concurrencia optimista por fila (`409/428`) y
+  soft-delete. La cascada atómica de proyecto ahora incluye documentos.
+- [x] Frontend con carga/fallback escalonado, reconstrucción ordenada de `project.docs/uploads`,
+  snapshots/versiones por documento, alta/edición/borrado incremental y eliminación de ambas
+  colecciones del payload de `projects` solamente después del cutover.
+- [x] Cutover preparado en `migration-documents.sql` + `migrate-documents.js`: preflight dry-run,
+  tabla destino vacía, ids/relaciones exactos, comparación de las dos fuentes y `updated_at`, inserción,
+  limpieza y marcador `vul-044-phase-d-documents` dentro de una sola RPC. Rollback
+  `restore-documents-to-projects.js` es dry-run por defecto y usa otra RPC atómica.
+- [x] Regresión completa local: backend **14 archivos / 418 aserciones** y frontend
+  **10 archivos / 186 aserciones**, todo en verde; sintaxis del `<script>` completo OK.
+- [ ] **Cutover pendiente de autorización:** verificar inventario productivo de solo lectura y que
+  `documents` esté vacía; crear/verificar respaldo protegido; aplicar `migration-documents.sql`;
+  desplegar backend y confirmar build `vul-044-phase-d-documents`; ejecutar
+  `node migrate-documents.js --dry-run` y luego el corte; desplegar frontend; comparar payload/conteos
+  y probar carga, alta, edición, apertura, anotaciones y borrado antes de marcar la fase cerrada.
+
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
 > modelo de datos. El diff queda confinado al bloque CSS del panel y a `renderMetric()`.
@@ -1521,10 +1549,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > resto del blob).
 
 - [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
-  - Después de Fase A, `projects` y `houses` ya tienen filas propias y dejaron `settings/1`. Todavía
-    quedan colecciones grandes —incluidas transacciones/OCs y otros datos dentro de `projects.data`,
-    además de ajustes/actividad en `settings/1`— cuyos cambios comparten versión por fila y pueden
-    chocar aunque afecten subcolecciones distintas.
+  - Después de las Fases A–C, `projects`, `houses`, transacciones y tipos ya tienen filas propias.
+    Todavía quedan otras colecciones dentro de `projects.data`, además de ajustes/actividad en
+    `settings/1`, cuyos cambios comparten versión por fila y pueden chocar aunque afecten
+    subcolecciones distintas.
   - `conversations`/`messages` (parte 1) y `pendingAuthRequests`/`notifications` (parte 1.5) ya salieron del
     blob a sus propias tablas — cerradas y verificadas en vivo, ver Sección 9 y Sección 11.2.
   - **Fase A (`projects`/`houses`) — ✅ CERRADA:** implementada, migrada, desplegada y verificada en
@@ -1547,8 +1575,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     cero fuentes legacy, cero huérfanos y payload exacto. Un defecto de orden entre `categories` y
     `sort_order` fue detectado antes de escribir datos, corregido en `a69a8aa` y cubierto por regresión.
     Smoke test reversible, orden histórico, precisión extendida y totales visibles quedaron en verde.
-  - **PENDIENTE después de Fase C:** normalizar `docs`/`uploads`, `garantias` y las demás colecciones
-    que todavía viven dentro de `projects.data`; después, catálogos/actividad del resto de
+  - **Fase D (`docs`/`uploads`) — 🟡 IMPLEMENTADA, PENDIENTE CUTOVER (2026-07-29):** backend
+    `aa8e008` y frontend `80f8fc2`; migración/rollback atómicos y regresión completa listos.
+    Todavía no está desplegada ni migrada en producción, por lo que NO se considera cerrada.
+  - **PENDIENTE después de Fase D:** completar su cutover productivo; luego normalizar `garantias`,
+    `bitacora`, `tasks`, `subAdvances` y `bodega`; después, catálogos/actividad del resto de
     `settings/1`. Hacerlo por fases, no como reescritura única.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
