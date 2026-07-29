@@ -1411,6 +1411,31 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   cargó el estado autoritativo guardado por el administrador, sin mostrar el diálogo genérico de
   recargar/sobrescribir. **Fase A (`projects`/`houses`) cerrada.**
 
+### Sesión 2026-07-28 (VUL-044 Fase B — transactions fuera del blob, implementación y cutover)
+> Backend + frontend + SQL/migración. **Backend `37e384f` y frontend `0fdd257` integrados en
+> `origin/main` y desplegados. Migración real completada en producción.** VUL-044 completa sigue
+> abierta porque aún quedan otras colecciones dentro de `projects.data` y `settings/1`.
+- [x] Se normalizaron `ocs`, `invClient`, `billVendor`, `payments`, `creditNotes` y `requis` hacia la
+  tabla unificada `transactions`, conservando los seis arreglos históricos en memoria para no cambiar
+  la lógica de negocio. Las rutas dedicadas usan concurrencia optimista por fila y la sincronización es
+  incremental.
+- [x] Antes del cutover se creó y verificó el respaldo protegido
+  `vul_044_backup_20260728_2255`. El dry-run encontró 3 proyectos y 37 transacciones: 11 OCs, 3 facturas
+  de cliente, 20 facturas de proveedor y 3 pagos; sin versiones faltantes, ids duplicados ni payloads
+  inválidos.
+- [x] El primer cutover detectó una variación visible de $0.01 causada por columnas
+  `numeric(14,2)`, que truncaban la precisión histórica usada por JavaScript. Se restauró de inmediato
+  y atómicamente desde el respaldo; los totales originales volvieron exactamente. La corrección cambia
+  `subtotal_usd`, `total_usd` y `total_crc` a `numeric` sin escala fija y agrega una regresión específica.
+- [x] Con la corrección desplegada se repitió el cutover: 37 filas activas, marcador
+  `vul-044-phase-b-transactions` en las 37, cero payloads distintos, cero filas inesperadas, cero
+  huérfanas y ningún arreglo transaccional restante en `projects.data`.
+- [x] Verificación en producción: dos cargas independientes de la aplicación mostraron exactamente
+  $37,594.79 gastado y $11,678.04 pendiente, sin errores ni warnings de consola. Un smoke test
+  transaccional confirmó inserción, actualización y borrado con alta precisión y terminó en `ROLLBACK`,
+  sin residuos. Regresión local: backend 12 archivos / 346 aserciones y frontend 8 archivos /
+  150 aserciones, todo en verde.
+
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
 > modelo de datos. El diff queda confinado al bloque CSS del panel y a `renderMetric()`.
@@ -1469,19 +1494,15 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     encontró y corrigió una escritura artificial de `settings/1` durante el login y una regresión que
     omitía el mensaje específico de aprobación en los nuevos conflictos por fila. La repetición final
     del flujo de aprobación fue aprobada por el OWNER.
-  - **Fase B (`transactions`) — IMPLEMENTADA Y VERIFICADA EN RAMAS, AÚN ABIERTA:** se preparó la normalización de
-    `ocs`, `invClient`, `billVendor`, `payments`, `creditNotes` y `requis` hacia la tabla unificada
-    `transactions`, conservando los seis arreglos históricos en memoria para no cambiar lógica de negocio.
-    Incluye rutas dedicadas con concurrencia por fila, carga/sincronización incremental, cascada de borrado,
-    corte SQL atómico con marcador, pre-vuelo fail-closed, verificación exacta de payloads y rollback atómico.
-    Regresión local: backend 12 archivos / 345 aserciones y frontend 8 archivos / 150 aserciones, todo en
-    verde. El código quedó integrado sobre `origin/main` en ramas limpias `vul-044-phase-b`, sin incorporar
-    cambios locales ajenos. **No está desplegada ni migrada en producción:** faltan publicar/revisar las ramas,
-    autorización del OWNER, aplicar SQL, dry-run/cutover, desplegar backend/frontend y verificación multiusuario
-    en vivo.
-  - **PENDIENTE después de Fase B:** completar y verificar el cutover de `transactions`; después normalizar
-    las demás colecciones que todavía viven dentro de `projects.data`, además del resto de `settings/1`.
-    Hacerlo por fases, no como reescritura única.
+  - **Fase B (`transactions`) — ✅ CERRADA Y VERIFICADA EN PRODUCCIÓN (2026-07-28):** backend/frontend
+    desplegados y cutover completado tras respaldo protegido y dry-run. Producción contiene 37
+    transacciones normalizadas (11 OCs, 3 facturas de cliente, 20 facturas de proveedor y 3 pagos);
+    cero payloads distintos, inesperados o huérfanos, y cero arreglos transaccionales residuales en
+    `projects.data`. Un primer corte reveló redondeo de $0.01 por `numeric(14,2)`; se restauró
+    atómicamente, se corrigió la precisión en `37e384f` y se repitió el corte preservando exactamente
+    los totales históricos. Dos cargas independientes y un smoke test reversible quedaron en verde.
+  - **PENDIENTE después de Fase B:** normalizar las demás colecciones que todavía viven dentro de
+    `projects.data`, además del resto de `settings/1`. Hacerlo por fases, no como reescritura única.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
@@ -1532,9 +1553,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > VUL-044 parte 1 (conversations/messages fuera del blob) — ✅ cerrada y desplegada, verificada en vivo por
 > el OWNER 2026-07-25/26 (Sección 9). VUL-044 parte 1.5 (pendingAuthRequests/notifications fuera del blob) —
 > ✅ cerrada y desplegada, verificada en vivo por el OWNER 2026-07-26 tras corregir 5 bugs reales encontrados
-> en producción (Sección 9). VUL-044 Fase A (`projects`/`houses`) también quedó cerrada y verificada
-> el 2026-07-27. Sigue abierta la normalización de `transactions` y las demás colecciones que todavía
-> comparten `projects.data`/`settings/1`, sin fecha.
+> en producción (Sección 9). VUL-044 Fase A (`projects`/`houses`) quedó cerrada y verificada el
+> 2026-07-27, y Fase B (`transactions`) quedó cerrada y verificada en producción el 2026-07-28.
+> Sigue abierta la normalización de las demás colecciones que todavía comparten
+> `projects.data`/`settings/1`, sin fecha.
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
