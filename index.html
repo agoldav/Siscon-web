@@ -1047,9 +1047,13 @@ const _transactionKinds=new Map();
 const _houseTypeVersions=new Map();
 const _houseTypeSnapshots=new Map();
 const _houseTypeProjectIds=new Map();
+const _documentVersions=new Map();
+const _documentSnapshots=new Map();
+const _documentProjectIds=new Map();
 let _normalizedProjectsLoaded=false;
 let _normalizedTransactionsLoaded=false;
 let _normalizedHouseTypesLoaded=false;
+let _normalizedDocumentsLoaded=false;
 const TXN_COLLECTION_TO_KIND={
   ocs:'oc',invClient:'factura_cliente',billVendor:'factura_proveedor',
   payments:'pago',creditNotes:'nota_credito',requis:'requisicion',
@@ -1127,11 +1131,83 @@ function _transactionFromRow(row){
     kind:row.kind,
   };
 }
+function _documentLogicalKey(item){
+  if(!item||typeof item!=='object'||Array.isArray(item))return '';
+  const value=item.blobId??item.id??item.name;
+  return value===undefined||value===null||value===''?'':String(value);
+}
+function _documentRowId(projectId,logicalKey){
+  const project=String(projectId);
+  return `doc:${project.length}:${project}:${String(logicalKey)}`;
+}
+function _documentSizeBytes(value){
+  if(typeof value==='number'&&Number.isFinite(value)&&value>=0)return Math.round(value);
+  if(typeof value!=='string')return null;
+  const match=value.trim().match(/^([\d.,]+)\s*(B|KB|MB|GB)?$/i);
+  if(!match)return null;
+  const amount=Number(match[1].replace(',','.'));
+  if(!Number.isFinite(amount)||amount<0)return null;
+  const multiplier={B:1,KB:1024,MB:1024**2,GB:1024**3}[(match[2]||'B').toUpperCase()];
+  return Math.round(amount*multiplier);
+}
+function _documentGroups(project){
+  const groups=new Map();
+  function add(collection,item,sortOrder){
+    const key=_documentLogicalKey(item);
+    if(!key)throw new Error(`Elemento sin blobId/id/name en ${collection} del proyecto ${project.id}`);
+    const id=_documentRowId(project.id,key);
+    const group=groups.get(id)||{
+      id,projectId:project.id,logicalKey:key,doc:null,upload:null,
+      docSortOrder:null,uploadSortOrder:null,
+    };
+    const field=collection==='docs'?'doc':'upload';
+    if(group[field])throw new Error(`Clave duplicada ${key} en ${collection} del proyecto ${project.id}`);
+    if(collection==='uploads'){
+      const {url,...persistent}=item;
+      group.upload={...persistent};
+      group.uploadSortOrder=sortOrder;
+    }else{
+      group.doc={...item};
+      group.docSortOrder=sortOrder;
+    }
+    groups.set(id,group);
+  }
+  (project.docs||[]).forEach((item,index)=>add('docs',item,index));
+  (project.uploads||[]).forEach((item,index)=>add('uploads',item,index));
+  return [...groups.values()];
+}
+function _documentCloudPayload(group){
+  const representative=group.upload||group.doc||{};
+  const sizeValue=representative.sizeBytes??representative.size_bytes??representative.size;
+  return {
+    id:group.id,projectId:group.projectId,name:String(representative.name||'documento'),
+    category:representative.category||representative.docType||null,
+    mime:representative.mime||representative.type||null,
+    sizeBytes:_documentSizeBytes(sizeValue),
+    storageKey:representative.storageKey??representative.storage_key??null,
+    data:{
+      logical_key:group.logicalKey,doc:group.doc,upload:group.upload,
+      doc_sort_order:group.docSortOrder,upload_sort_order:group.uploadSortOrder,
+    },
+  };
+}
+function _documentGroupFromRow(row){
+  const data=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)?row.data:{};
+  return {
+    id:String(row.id),projectId:_restoreDbId(row.project_id),
+    logicalKey:data.logical_key||String(row.id),
+    doc:data.doc&&typeof data.doc==='object'?{...data.doc}:null,
+    upload:data.upload&&typeof data.upload==='object'?{...data.upload}:null,
+    docSortOrder:Number.isInteger(data.doc_sort_order)?data.doc_sort_order:null,
+    uploadSortOrder:Number.isInteger(data.upload_sort_order)?data.upload_sort_order:null,
+  };
+}
 function _projectCloudPayload(project){
   const {houses,...rest}=project||{};
   const payload={...rest,uploads:(rest.uploads||[]).map(({blobId,url,...upload})=>upload)};
   if(_normalizedTransactionsLoaded)TXN_COLLECTION_KEYS.forEach(key=>delete payload[key]);
   if(_normalizedHouseTypesLoaded)delete payload.types;
+  if(_normalizedDocumentsLoaded){delete payload.docs;delete payload.uploads;}
   return payload;
 }
 function _houseCloudPayload(house,projectId){
@@ -1176,12 +1252,19 @@ function _rememberHouseTypeRow(row,houseType,projectId,sortOrder=0){
   _houseTypeSnapshots.set(id,_snapshot(_houseTypeCloudPayload(houseType,projectId,sortOrder)));
   _houseTypeProjectIds.set(id,String(projectId));
 }
+function _rememberDocumentRow(row,group){
+  const id=String(group.id);
+  _documentVersions.set(id,row.updated_at||null);
+  _documentSnapshots.set(id,_snapshot(_documentCloudPayload(group)));
+  _documentProjectIds.set(id,String(group.projectId));
+}
 function _clearNormalizedState(){
   _projectVersions.clear();_houseVersions.clear();_projectSnapshots.clear();
   _houseSnapshots.clear();_houseProjectIds.clear();
   _transactionVersions.clear();_transactionSnapshots.clear();
   _transactionProjectIds.clear();_transactionKinds.clear();
   _houseTypeVersions.clear();_houseTypeSnapshots.clear();_houseTypeProjectIds.clear();
+  _documentVersions.clear();_documentSnapshots.clear();_documentProjectIds.clear();
 }
 async function _dbRowRequest(method,path,body){
   const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
@@ -1268,6 +1351,59 @@ async function _syncNormalizedTransactions(){
   }
   return true;
 }
+async function _syncNormalizedDocuments(){
+  if(!_normalizedDocumentsLoaded)return true;
+
+  const currentDocuments=new Map();
+  try{
+    for(const project of projects){
+      for(const group of _documentGroups(project)){
+        if(currentDocuments.has(group.id)){
+          console.error('ID de documento duplicado; no se guardó:',group.id);
+          return false;
+        }
+        currentDocuments.set(group.id,group);
+      }
+    }
+  }catch(error){
+    console.error('No se pudieron preparar los documentos:',error);
+    return false;
+  }
+
+  for(const id of [..._documentSnapshots.keys()]){
+    if(currentDocuments.has(id))continue;
+    const {resp,data}=await _dbRowRequest('DELETE',`/api/db/documents/${encodeURIComponent(id)}`);
+    if(!resp.ok){console.error('No se pudo eliminar documento',id,data);return false;}
+    _documentVersions.delete(id);_documentSnapshots.delete(id);_documentProjectIds.delete(id);
+  }
+
+  for(const [id,group] of currentDocuments){
+    const payload=_documentCloudPayload(group);
+    const snap=_snapshot(payload);
+    if(!_documentSnapshots.has(id)){
+      const {resp,data}=await _dbRowRequest('POST','/api/db/documents',payload);
+      if(!resp.ok){console.error('No se pudo crear documento',id,data);return false;}
+      _rememberDocumentRow(data,group);
+    }else if(_documentSnapshots.get(id)!==snap){
+      if(_documentProjectIds.get(id)!==String(group.projectId)){
+        console.error('No se puede mover un documento entre proyectos:',id);
+        return false;
+      }
+      const body={...payload,replace_data:true,expected_updated_at:_documentVersions.get(id)};
+      let {resp,data}=await _dbRowRequest('PUT',`/api/db/documents/${encodeURIComponent(id)}`,body);
+      if(resp.status===409||resp.status===428){
+        data=await _handleRowConflict(
+          'este documento',id,payload,`/api/db/documents/${encodeURIComponent(id)}`
+        );
+        if(!data)return false;
+        resp={ok:true};
+      }
+      if(!resp.ok){console.error('No se pudo actualizar documento',id,data);return false;}
+      _rememberDocumentRow(data,group);
+    }
+  }
+  return true;
+}
 async function _syncNormalizedProjectsHouses(){
   if(!_normalizedProjectsLoaded)return true;
 
@@ -1311,6 +1447,12 @@ async function _syncNormalizedProjectsHouses(){
       if(projectId===id){
         _houseTypeVersions.delete(typeId);_houseTypeSnapshots.delete(typeId);
         _houseTypeProjectIds.delete(typeId);
+      }
+    }
+    for(const [documentId,projectId] of [..._documentProjectIds.entries()]){
+      if(projectId===id){
+        _documentVersions.delete(documentId);_documentSnapshots.delete(documentId);
+        _documentProjectIds.delete(documentId);
       }
     }
   }
@@ -1404,6 +1546,7 @@ async function _syncNormalizedProjectsHouses(){
       _houseTypeVersions.delete(id);_houseTypeSnapshots.delete(id);_houseTypeProjectIds.delete(id);
     }
   }
+  if(!await _syncNormalizedDocuments())return false;
   return await _syncNormalizedTransactions();
 }
 
@@ -1553,12 +1696,13 @@ async function loadDataFromAPI(){
   if(!_sbToken || !currentUser) return false;
   try{
     const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
-    const [resp,projectsResp,housesResp,transactionsResp,houseTypesResp]=await Promise.all([
+    const [resp,projectsResp,housesResp,transactionsResp,houseTypesResp,documentsResp]=await Promise.all([
       fetch(`${BACKEND_URL}/api/db/settings/1`,{headers}),
       fetch(`${BACKEND_URL}/api/db/projects`,{headers}),
       fetch(`${BACKEND_URL}/api/db/houses`,{headers}),
       fetch(`${BACKEND_URL}/api/db/transactions`,{headers}),
       fetch(`${BACKEND_URL}/api/db/house_types`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/documents`,{headers}),
     ]);
     if(!resp.ok){ console.error('Error cargando desde API:', await resp.json()); return false; }
     const record=await resp.json();
@@ -1594,6 +1738,7 @@ async function loadDataFromAPI(){
         }
         _normalizedTransactionsLoaded=false;
         _normalizedHouseTypesLoaded=false;
+        _normalizedDocumentsLoaded=false;
         if(transactionsResp.ok){
           const transactionData=await transactionsResp.json();
           const transactionRows=Array.isArray(transactionData.transactions)?transactionData.transactions:[];
@@ -1650,6 +1795,56 @@ async function loadDataFromAPI(){
         }else if(!hasLegacyTypes){
           throw new Error('Backend sin ruta house_types después del cutover');
         }
+        const hasLegacyDocuments=rows.some(row=>{
+          const data=row&&row.data;
+          return data&&typeof data==='object'&&(
+            Object.prototype.hasOwnProperty.call(data,'docs')||
+            Object.prototype.hasOwnProperty.call(data,'uploads')
+          );
+        });
+        if(documentsResp.ok){
+          const documentData=await documentsResp.json();
+          const documentRows=Array.isArray(documentData.documents)?documentData.documents:[];
+          if(documentRows.length||!hasLegacyDocuments){
+            const groupedByProject=new Map();
+            for(const project of loaded){
+              project.docs=[];project.uploads=[];
+              groupedByProject.set(String(project.id),{docs:[],uploads:[]});
+            }
+            for(const row of documentRows){
+              const group=_documentGroupFromRow(row);
+              const project=byProject.get(String(group.projectId));
+              const target=groupedByProject.get(String(group.projectId));
+              if(!project||!target)throw new Error(
+                `Documento ${group.id} referencia proyecto inexistente ${group.projectId}`
+              );
+              if(!group.doc&&!group.upload)throw new Error(
+                `Documento ${group.id} no contiene doc ni upload`
+              );
+              if(group.doc&&group.upload){
+                if(!group.upload.blobId&&group.doc.blobId)group.upload.blobId=group.doc.blobId;
+                if(!group.doc.blobId&&group.upload.blobId)group.doc.blobId=group.upload.blobId;
+              }
+              if(group.doc)target.docs.push({
+                value:group.doc,order:group.docSortOrder??Number.MAX_SAFE_INTEGER,rowId:group.id,
+              });
+              if(group.upload)target.uploads.push({
+                value:group.upload,order:group.uploadSortOrder??Number.MAX_SAFE_INTEGER,rowId:group.id,
+              });
+              _rememberDocumentRow(row,group);
+            }
+            for(const project of loaded){
+              const target=groupedByProject.get(String(project.id));
+              const ordered=items=>items.sort((a,b)=>a.order-b.order||a.rowId.localeCompare(b.rowId))
+                .map(item=>item.value);
+              project.docs=ordered(target.docs);
+              project.uploads=ordered(target.uploads);
+            }
+            _normalizedDocumentsLoaded=true;
+          }
+        }else if(!hasLegacyDocuments){
+          throw new Error('Backend sin ruta documents después del cutover');
+        }
         projects=loaded;
         _normalizedProjectsLoaded=true;
         rows.forEach(row=>{
@@ -1662,6 +1857,7 @@ async function loadDataFromAPI(){
         _normalizedProjectsLoaded=false;
         _normalizedTransactionsLoaded=false;
         _normalizedHouseTypesLoaded=false;
+        _normalizedDocumentsLoaded=false;
         _clearNormalizedState();
       }
     }else{
@@ -1670,6 +1866,7 @@ async function loadDataFromAPI(){
       _normalizedProjectsLoaded=false;
       _normalizedTransactionsLoaded=false;
       _normalizedHouseTypesLoaded=false;
+      _normalizedDocumentsLoaded=false;
       _clearNormalizedState();
     }
     _settingsSnapshot=_settingsCloudSnapshot(_settingsCloudData());
