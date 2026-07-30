@@ -1476,11 +1476,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   en `ROLLBACK` con 0 residuos y 4 tipos vivos. La aplicación desplegada mostró los dos tipos del
   proyecto 116 en el orden histórico y conservó exactamente $37,594.79 gastado y $11,678.04 pendiente.
 
-### Sesión 2026-07-29 (VUL-044 Fase D — docs/uploads, implementación previa al cutover)
-> **Implementación terminada y regresión local en verde; todavía NO desplegada ni migrada en
-> producción.** Backend `6fa18df` y frontend `963866d` en la rama
-> `vul-044-phase-d-documents`. Solo se ejecutaron consultas productivas de lectura; no se aplicó SQL
-> de escritura ni se modificó información productiva.
+### Sesión 2026-07-29 (VUL-044 Fase D — docs/uploads, implementación y cutover)
+> **Fase D desplegada y migrada en producción.** Backend `6fa18df` y frontend `4a643d0`
+> integrados en `main`; Render sirve el build `vul-044-phase-d-documents` y Vercel entrega el
+> lector normalizado. Respaldo protegido conservado en
+> `vul_044_backup_20260729_1635`.
 - [x] `docs[]` y `uploads[]` se modelan como una sola fila lógica en `documents` cuando comparten
   `blobId`/id. El inventario productivo reveló que la persistencia legacy eliminó `blobId` de
   `uploads[]`; por eso también se recupera el vínculo por nombre exacto únicamente cuando existe un
@@ -1511,11 +1511,30 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   (22 + 4 por proyecto), 14 solo-doc y 12 solo-upload; este hallazgo motivó el fallback seguro por
   nombre único descrito arriba. Los tres `updated_at` fuente coinciden en
   `2026-07-29T03:51:37.072267+00:00`.
-- [ ] **Cutover productivo pendiente:** crear/verificar respaldo protegido; aplicar
-  `migration-documents.sql`; desplegar backend y confirmar build
-  `vul-044-phase-d-documents`; ejecutar
-  `node migrate-documents.js --dry-run` y luego el corte; desplegar frontend; comparar payload/conteos
-  y probar carga, alta, edición, apertura, anotaciones y borrado antes de marcar la fase cerrada.
+- [x] Preflight adicional de nombres: 12 coincidencias exactas 1:1, 2 docs sin upload, 0 uploads sin
+  doc y 0 nombres ambiguos. El dry-run de `migrate-documents.js` confirmó 3 proyectos, 14 documentos
+  lógicos, 14 metadata, 12 uploads y 12 pares antes de permitir el corte.
+- [x] Respaldo productivo creado y verificado antes de migrar: 22 tablas protegidas, 7 proyectos
+  totales (3 activos), 30 casas, 37 transacciones, 4 tipos, 0 documentos, 3 marcadores y 1 settings;
+  cero grants a `public`/`anon`/`authenticated`. La primera copia incluyó `audit_log` (499 MB) y
+  superó temporalmente el límite del plan; se eliminó **solo esa copia** del schema de respaldo,
+  conservando intacto `public.audit_log` y todas las tablas necesarias para VUL-044. Supabase volvió
+  a `transaction_read_only=off` / `default_transaction_read_only=off` antes del corte.
+- [x] Cutover RPC atómico completado y autoverificado: marcador
+  `vul-044-phase-d-documents`, 3 proyectos y 14 documentos. Verificación independiente: 14 filas
+  totales/activas, 12 pares doc+upload, 2 solo-doc, 0 solo-upload, 0 huérfanos, 0 proyectos con
+  `docs/uploads` legacy, 0 URLs efímeras, 10 filas con `pdfBase64`; distribución exacta 12 + 2 por
+  proyecto y `marker.document_count=14`.
+- [x] Smoke SQL transaccional confirmó inserción, actualización y borrado y terminó en `ROLLBACK`:
+  0 residuos y 14 documentos activos. La clave secreta efímera creada exclusivamente para ejecutar
+  la migración fue eliminada al terminar y los artefactos temporales locales se borraron.
+- [x] Verificación en la aplicación: frontend normalizado presente en Vercel y en
+  `app.sisconcr.com`, carga autenticada sin errores/warnings de consola, totales financieros
+  conservados ($37,594.79 gastado / $11,678.04 pendiente) y 12 documentos visibles en Dor.
+- [ ] Verificación manual restante por política del navegador automatizado: abrir un PDF y comprobar
+  anotaciones desde una sesión humana. La acción `Ver PDF` fue bloqueada por la política segura del
+  navegador; no se intentó evadirla. Las rutas de alta/edición/borrado están cubiertas por regresión
+  local y el smoke transaccional.
 
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
