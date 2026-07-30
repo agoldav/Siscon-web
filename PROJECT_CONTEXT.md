@@ -1476,8 +1476,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   en `ROLLBACK` con 0 residuos y 4 tipos vivos. La aplicación desplegada mostró los dos tipos del
   proyecto 116 en el orden histórico y conservó exactamente $37,594.79 gastado y $11,678.04 pendiente.
 
-### Sesión 2026-07-29 (VUL-044 Fase D — docs/uploads, implementación y cutover)
-> **Fase D desplegada y migrada en producción.** Backend `6fa18df` y frontend `4a643d0`
+### Sesión 2026-07-29/30 (VUL-044 Fase D — docs/uploads, implementación, cutover y cierre)
+> **Fase D desplegada, migrada y verificada en producción.** Backend `6fa18df` y frontend `4a643d0`
 > integrados en `main`; Render sirve el build `vul-044-phase-d-documents` y Vercel entrega el
 > lector normalizado. Respaldo protegido conservado en
 > `vul_044_backup_20260729_1635`.
@@ -1531,10 +1531,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Verificación en la aplicación: frontend normalizado presente en Vercel y en
   `app.sisconcr.com`, carga autenticada sin errores/warnings de consola, totales financieros
   conservados ($37,594.79 gastado / $11,678.04 pendiente) y 12 documentos visibles en Dor.
-- [ ] Verificación manual restante por política del navegador automatizado: abrir un PDF y comprobar
-  anotaciones desde una sesión humana. La acción `Ver PDF` fue bloqueada por la política segura del
-  navegador; no se intentó evadirla. Las rutas de alta/edición/borrado están cubiertas por regresión
-  local y el smoke transaccional.
+- [x] Verificación manual completada por el OWNER el 2026-07-30: apertura de PDF y persistencia de
+  anotaciones aprobadas desde una sesión humana. La automatización no intentó evadir la política
+  segura del navegador que bloqueaba `Ver PDF`. Las rutas de alta/edición/borrado también quedaron
+  cubiertas por regresión local y el smoke transaccional. **Fase D cerrada.**
 
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
@@ -1607,12 +1607,16 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     cero fuentes legacy, cero huérfanos y payload exacto. Un defecto de orden entre `categories` y
     `sort_order` fue detectado antes de escribir datos, corregido en `a69a8aa` y cubierto por regresión.
     Smoke test reversible, orden histórico, precisión extendida y totales visibles quedaron en verde.
-  - **Fase D (`docs`/`uploads`) — 🟡 IMPLEMENTADA, PENDIENTE CUTOVER (2026-07-29):** backend
-    `aa8e008` y frontend `80f8fc2`; migración/rollback atómicos y regresión completa listos.
-    Todavía no está desplegada ni migrada en producción, por lo que NO se considera cerrada.
-  - **PENDIENTE después de Fase D:** completar su cutover productivo; luego normalizar `garantias`,
-    `bitacora`, `tasks`, `subAdvances` y `bodega`; después, catálogos/actividad del resto de
-    `settings/1`. Hacerlo por fases, no como reescritura única.
+  - **Fase D (`docs`/`uploads`) — ✅ CERRADA Y VERIFICADA EN PRODUCCIÓN (2026-07-30):** backend
+    `6fa18df` y frontend `4a643d0` en `main`; respaldo protegido
+    `vul_044_backup_20260729_1635` retenido. Cutover atómico completado con 14 documentos:
+    12 pares doc+upload, 2 solo-doc, 0 solo-upload, 0 huérfanos, 0 arreglos legacy y 0 URLs `blob:`.
+    Smoke reversible y carga autenticada quedaron en verde; el OWNER confirmó manualmente la
+    apertura de PDF y la persistencia de anotaciones.
+  - **SIGUIENTE FASE:** normalizar `garantias`, `bitacora`, `tasks`, `subAdvances` y `bodega`;
+    después, catálogos/actividad del resto de `settings/1`. Hacerlo por fases, no como reescritura
+    única. Antes de crear otro respaldo completo, definir retención/archivo de `audit_log` (499 MB)
+    para no volver a superar el límite del plan de Supabase.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
