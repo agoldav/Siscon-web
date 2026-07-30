@@ -1536,6 +1536,36 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   segura del navegador que bloqueaba `Ver PDF`. Las rutas de alta/edición/borrado también quedaron
   cubiertas por regresión local y el smoke transaccional. **Fase D cerrada.**
 
+### Sesión 2026-07-30 (VUL-044 Fase E — colecciones operativas, implementación y preflight)
+> **Código y migraciones preparados y probados; todavía NO desplegados ni ejecutados en producción.**
+> Antes del cutover hace falta resolver el crecimiento de `audit_log`, crear un respaldo y repetir
+> las verificaciones de solo lectura.
+- [x] Inventario productivo de solo lectura: 3 proyectos activos; las cinco fuentes legacy son
+  arreglos válidos, sin ids faltantes ni duplicados. Hay únicamente 2 elementos, ambos en
+  `garantias` (proyectos 116 y Prueba); `bitacora`, `tasks`, `subAdvances` y `bodega` están vacíos.
+  Las tablas destino también están vacías y todavía no existe el marcador
+  `vul-044-phase-e-project-collections`.
+- [x] Backend preparado con rutas dedicadas para `garantias`, `bitacora`, `tasks`, `sub_advances`
+  y `bodega`: proyecto/id inmutables, validación de proyecto vivo, concurrencia optimista por fila,
+  soft-delete, auditoría y autorización compartida histórica. Importación, exportación y cascada
+  de proyecto incluyen ahora `bodega`.
+- [x] Frontend preparado con carga/fallback escalonado, reconstrucción por `sort_order`,
+  snapshots/versiones por elemento y sincronización incremental de altas, cambios y bajas. Las
+  cinco colecciones solo se eliminan del payload de `projects` después de detectar el cutover.
+- [x] Cutover atómico preparado en `migration-project-collections.sql` y
+  `migrate-project-collections.js`: valida fuente, destinos vacíos, ids, relaciones, payload exacto
+  y `updated_at`; inserta y limpia las cinco llaves dentro de una RPC y registra el conteo. Rollback
+  dry-run por defecto en `restore-project-collections-to-projects.js`.
+- [x] Regresión completa local: backend **16 archivos / 444 aserciones** y frontend
+  **11 archivos / 204 aserciones**, todo en verde; sintaxis del `<script>` completo OK.
+- [x] Diagnóstico preciso del límite de Supabase: la base ocupa 540,224,659 bytes y `audit_log`
+  523,468,800 bytes con solo 1,260 filas. El trigger histórico copió el blob completo de
+  `settings/1` en cada UPDATE: 893 eventos suman 494,369,804 bytes de payload; 756 contienen
+  snapshots no nulos sobredimensionados. Se preparó `migration-audit-log-retention.sql` para
+  limitar nuevos payloads a 16 KiB, compactar históricos en lotes únicamente mediante una llamada
+  explícita y permitir retención por fecha sin ejecutarla automáticamente. Compactar los snapshots
+  históricos y hacer `VACUUM FULL` siguen pendientes de autorización específica del OWNER.
+
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
 > modelo de datos. El diff queda confinado al bloque CSS del panel y a `renderMetric()`.
@@ -1581,7 +1611,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > resto del blob).
 
 - [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
-  - Después de las Fases A–C, `projects`, `houses`, transacciones y tipos ya tienen filas propias.
+  - Después de las Fases A–D, `projects`, `houses`, transacciones, tipos y documentos ya tienen filas propias.
     Todavía quedan otras colecciones dentro de `projects.data`, además de ajustes/actividad en
     `settings/1`, cuyos cambios comparten versión por fila y pueden chocar aunque afecten
     subcolecciones distintas.
@@ -1613,10 +1643,13 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     12 pares doc+upload, 2 solo-doc, 0 solo-upload, 0 huérfanos, 0 arreglos legacy y 0 URLs `blob:`.
     Smoke reversible y carga autenticada quedaron en verde; el OWNER confirmó manualmente la
     apertura de PDF y la persistencia de anotaciones.
-  - **SIGUIENTE FASE:** normalizar `garantias`, `bitacora`, `tasks`, `subAdvances` y `bodega`;
-    después, catálogos/actividad del resto de `settings/1`. Hacerlo por fases, no como reescritura
-    única. Antes de crear otro respaldo completo, definir retención/archivo de `audit_log` (499 MB)
-    para no volver a superar el límite del plan de Supabase.
+  - **Fase E (`garantias`, `bitacora`, `tasks`, `subAdvances`, `bodega`) — IMPLEMENTADA LOCALMENTE,
+    PENDIENTE DE CUTOVER:** código, migración/rollback y pruebas están listos. El preflight halló
+    únicamente 2 garantías y cero elementos en las otras cuatro colecciones.
+  - **SIGUIENTE PASO OPERATIVO:** instalar el límite preventivo de `audit_log`, compactar sus
+    snapshots históricos sobredimensionados con autorización explícita, recuperar espacio y crear
+    el respaldo previo al cutover de Fase E. Después quedan catálogos/actividad del resto de
+    `settings/1`. Mantener el trabajo por fases, no como una reescritura única.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el

@@ -1050,10 +1050,14 @@ const _houseTypeProjectIds=new Map();
 const _documentVersions=new Map();
 const _documentSnapshots=new Map();
 const _documentProjectIds=new Map();
+const _projectItemVersions=new Map();
+const _projectItemSnapshots=new Map();
+const _projectItemProjectIds=new Map();
 let _normalizedProjectsLoaded=false;
 let _normalizedTransactionsLoaded=false;
 let _normalizedHouseTypesLoaded=false;
 let _normalizedDocumentsLoaded=false;
+let _normalizedProjectCollectionsLoaded=false;
 const TXN_COLLECTION_TO_KIND={
   ocs:'oc',invClient:'factura_cliente',billVendor:'factura_proveedor',
   payments:'pago',creditNotes:'nota_credito',requis:'requisicion',
@@ -1062,6 +1066,14 @@ const TXN_KIND_TO_COLLECTION=Object.fromEntries(
   Object.entries(TXN_COLLECTION_TO_KIND).map(([collection,kind])=>[kind,collection])
 );
 const TXN_COLLECTION_KEYS=Object.keys(TXN_COLLECTION_TO_KIND);
+const PROJECT_COLLECTION_TO_TABLE={
+  garantias:'garantias',bitacora:'bitacora',tasks:'tasks',
+  subAdvances:'sub_advances',bodega:'bodega',
+};
+const PROJECT_TABLE_TO_COLLECTION=Object.fromEntries(
+  Object.entries(PROJECT_COLLECTION_TO_TABLE).map(([collection,table])=>[table,collection])
+);
+const PROJECT_COLLECTION_KEYS=Object.keys(PROJECT_COLLECTION_TO_TABLE);
 
 function _restoreDbId(value){
   if(typeof value!=='string'||!/^\d+$/.test(value))return value;
@@ -1224,12 +1236,29 @@ function _documentGroupFromRow(row){
     uploadSortOrder:Number.isInteger(data.upload_sort_order)?data.upload_sort_order:null,
   };
 }
+function _projectItemKey(table,id){return `${table}:${String(id)}`;}
+function _projectCollectionCloudPayload(item,projectId,sortOrder=0){
+  return {
+    id:String(item.id),projectId,sortOrder,
+    data:JSON.parse(JSON.stringify(item)),
+  };
+}
+function _projectCollectionFromRow(table,row){
+  const item=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)
+    ?JSON.parse(JSON.stringify(row.data)):{};
+  if(item.id===undefined||item.id===null||item.id==='')item.id=_restoreDbId(row.id);
+  return {
+    item,table,projectId:_restoreDbId(row.project_id),
+    sortOrder:Number.isInteger(row.sort_order)?row.sort_order:0,
+  };
+}
 function _projectCloudPayload(project){
   const {houses,...rest}=project||{};
   const payload={...rest,uploads:(rest.uploads||[]).map(({blobId,url,...upload})=>upload)};
   if(_normalizedTransactionsLoaded)TXN_COLLECTION_KEYS.forEach(key=>delete payload[key]);
   if(_normalizedHouseTypesLoaded)delete payload.types;
   if(_normalizedDocumentsLoaded){delete payload.docs;delete payload.uploads;}
+  if(_normalizedProjectCollectionsLoaded)PROJECT_COLLECTION_KEYS.forEach(key=>delete payload[key]);
   return payload;
 }
 function _houseCloudPayload(house,projectId){
@@ -1280,6 +1309,12 @@ function _rememberDocumentRow(row,group){
   _documentSnapshots.set(id,_snapshot(_documentCloudPayload(group)));
   _documentProjectIds.set(id,String(group.projectId));
 }
+function _rememberProjectCollectionRow(row,table,item,projectId,sortOrder=0){
+  const key=_projectItemKey(table,item.id);
+  _projectItemVersions.set(key,row.updated_at||null);
+  _projectItemSnapshots.set(key,_snapshot(_projectCollectionCloudPayload(item,projectId,sortOrder)));
+  _projectItemProjectIds.set(key,String(projectId));
+}
 function _clearNormalizedState(){
   _projectVersions.clear();_houseVersions.clear();_projectSnapshots.clear();
   _houseSnapshots.clear();_houseProjectIds.clear();
@@ -1287,6 +1322,7 @@ function _clearNormalizedState(){
   _transactionProjectIds.clear();_transactionKinds.clear();
   _houseTypeVersions.clear();_houseTypeSnapshots.clear();_houseTypeProjectIds.clear();
   _documentVersions.clear();_documentSnapshots.clear();_documentProjectIds.clear();
+  _projectItemVersions.clear();_projectItemSnapshots.clear();_projectItemProjectIds.clear();
 }
 async function _dbRowRequest(method,path,body){
   const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
@@ -1426,6 +1462,66 @@ async function _syncNormalizedDocuments(){
   }
   return true;
 }
+async function _syncNormalizedProjectCollections(){
+  if(!_normalizedProjectCollectionsLoaded)return true;
+
+  const currentItems=new Map();
+  for(const project of projects){
+    for(const collection of PROJECT_COLLECTION_KEYS){
+      const table=PROJECT_COLLECTION_TO_TABLE[collection];
+      for(const [sortOrder,item] of (project[collection]||[]).entries()){
+        if(!item||item.id===undefined||item.id===null||item.id===''){
+          console.error(`Elemento sin id en ${collection}; no se guardó.`);
+          return false;
+        }
+        const key=_projectItemKey(table,item.id);
+        if(currentItems.has(key)){
+          console.error(`ID duplicado en ${collection}; no se guardó:`,item.id);
+          return false;
+        }
+        currentItems.set(key,{table,item,projectId:project.id,sortOrder});
+      }
+    }
+  }
+
+  for(const key of [..._projectItemSnapshots.keys()]){
+    if(currentItems.has(key))continue;
+    const split=key.indexOf(':');
+    const table=key.slice(0,split);
+    const id=key.slice(split+1);
+    const {resp,data}=await _dbRowRequest('DELETE',`/api/db/${table}/${encodeURIComponent(id)}`);
+    if(!resp.ok){console.error('No se pudo eliminar elemento de proyecto',key,data);return false;}
+    _projectItemVersions.delete(key);_projectItemSnapshots.delete(key);_projectItemProjectIds.delete(key);
+  }
+
+  for(const [key,{table,item,projectId,sortOrder}] of currentItems){
+    const payload=_projectCollectionCloudPayload(item,projectId,sortOrder);
+    const snap=_snapshot(payload);
+    const id=String(item.id);
+    if(!_projectItemSnapshots.has(key)){
+      const {resp,data}=await _dbRowRequest('POST',`/api/db/${table}`,payload);
+      if(!resp.ok){console.error('No se pudo crear elemento de proyecto',key,data);return false;}
+      _rememberProjectCollectionRow(data,table,item,projectId,sortOrder);
+    }else if(_projectItemSnapshots.get(key)!==snap){
+      if(_projectItemProjectIds.get(key)!==String(projectId)){
+        console.error('No se puede mover un elemento entre proyectos:',key);
+        return false;
+      }
+      const body={...payload,replace_data:true,expected_updated_at:_projectItemVersions.get(key)};
+      let {resp,data}=await _dbRowRequest('PUT',`/api/db/${table}/${encodeURIComponent(id)}`,body);
+      if(resp.status===409||resp.status===428){
+        data=await _handleRowConflict(
+          'este elemento',id,payload,`/api/db/${table}/${encodeURIComponent(id)}`
+        );
+        if(!data)return false;
+        resp={ok:true};
+      }
+      if(!resp.ok){console.error('No se pudo actualizar elemento de proyecto',key,data);return false;}
+      _rememberProjectCollectionRow(data,table,item,projectId,sortOrder);
+    }
+  }
+  return true;
+}
 async function _syncNormalizedProjectsHouses(){
   if(!_normalizedProjectsLoaded)return true;
 
@@ -1475,6 +1571,12 @@ async function _syncNormalizedProjectsHouses(){
       if(projectId===id){
         _documentVersions.delete(documentId);_documentSnapshots.delete(documentId);
         _documentProjectIds.delete(documentId);
+      }
+    }
+    for(const [itemKey,projectId] of [..._projectItemProjectIds.entries()]){
+      if(projectId===id){
+        _projectItemVersions.delete(itemKey);_projectItemSnapshots.delete(itemKey);
+        _projectItemProjectIds.delete(itemKey);
       }
     }
   }
@@ -1568,6 +1670,7 @@ async function _syncNormalizedProjectsHouses(){
       _houseTypeVersions.delete(id);_houseTypeSnapshots.delete(id);_houseTypeProjectIds.delete(id);
     }
   }
+  if(!await _syncNormalizedProjectCollections())return false;
   if(!await _syncNormalizedDocuments())return false;
   return await _syncNormalizedTransactions();
 }
@@ -1718,13 +1821,21 @@ async function loadDataFromAPI(){
   if(!_sbToken || !currentUser) return false;
   try{
     const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
-    const [resp,projectsResp,housesResp,transactionsResp,houseTypesResp,documentsResp]=await Promise.all([
+    const [
+      resp,projectsResp,housesResp,transactionsResp,houseTypesResp,documentsResp,
+      garantiasResp,bitacoraResp,tasksResp,subAdvancesResp,bodegaResp,
+    ]=await Promise.all([
       fetch(`${BACKEND_URL}/api/db/settings/1`,{headers}),
       fetch(`${BACKEND_URL}/api/db/projects`,{headers}),
       fetch(`${BACKEND_URL}/api/db/houses`,{headers}),
       fetch(`${BACKEND_URL}/api/db/transactions`,{headers}),
       fetch(`${BACKEND_URL}/api/db/house_types`,{headers}),
       fetch(`${BACKEND_URL}/api/db/documents`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/garantias`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/bitacora`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/tasks`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/sub_advances`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/bodega`,{headers}),
     ]);
     if(!resp.ok){ console.error('Error cargando desde API:', await resp.json()); return false; }
     const record=await resp.json();
@@ -1761,6 +1872,7 @@ async function loadDataFromAPI(){
         _normalizedTransactionsLoaded=false;
         _normalizedHouseTypesLoaded=false;
         _normalizedDocumentsLoaded=false;
+        _normalizedProjectCollectionsLoaded=false;
         if(transactionsResp.ok){
           const transactionData=await transactionsResp.json();
           const transactionRows=Array.isArray(transactionData.transactions)?transactionData.transactions:[];
@@ -1867,6 +1979,53 @@ async function loadDataFromAPI(){
         }else if(!hasLegacyDocuments){
           throw new Error('Backend sin ruta documents después del cutover');
         }
+        const phaseEResponses={
+          garantias:garantiasResp,bitacora:bitacoraResp,tasks:tasksResp,
+          sub_advances:subAdvancesResp,bodega:bodegaResp,
+        };
+        const hasLegacyProjectCollections=rows.some(row=>{
+          const data=row&&row.data;
+          return data&&typeof data==='object'&&PROJECT_COLLECTION_KEYS.some(
+            key=>Object.prototype.hasOwnProperty.call(data,key)
+          );
+        });
+        if(Object.values(phaseEResponses).every(response=>response.ok)){
+          const phaseERows={};
+          for(const [table,response] of Object.entries(phaseEResponses)){
+            const responseData=await response.json();
+            phaseERows[table]=Array.isArray(responseData[table])?responseData[table]:[];
+          }
+          const totalPhaseERows=Object.values(phaseERows).reduce((sum,tableRows)=>sum+tableRows.length,0);
+          if(totalPhaseERows||!hasLegacyProjectCollections){
+            for(const project of loaded)PROJECT_COLLECTION_KEYS.forEach(key=>{project[key]=[];});
+            for(const [table,tableRows] of Object.entries(phaseERows)){
+              const collection=PROJECT_TABLE_TO_COLLECTION[table];
+              for(const row of tableRows){
+                const converted=_projectCollectionFromRow(table,row);
+                const project=byProject.get(String(converted.projectId));
+                if(!project)throw new Error(
+                  `${table}/${row.id} referencia proyecto inexistente ${converted.projectId}`
+                );
+                project[collection].push({
+                  item:converted.item,sortOrder:converted.sortOrder,rowId:String(row.id),
+                });
+                _rememberProjectCollectionRow(
+                  row,table,converted.item,project.id,converted.sortOrder
+                );
+              }
+            }
+            for(const project of loaded){
+              for(const collection of PROJECT_COLLECTION_KEYS){
+                project[collection]=project[collection]
+                  .sort((a,b)=>a.sortOrder-b.sortOrder||a.rowId.localeCompare(b.rowId))
+                  .map(entry=>entry.item);
+              }
+            }
+            _normalizedProjectCollectionsLoaded=true;
+          }
+        }else if(!hasLegacyProjectCollections){
+          throw new Error('Backend sin rutas de colecciones de proyecto después del cutover');
+        }
         projects=loaded;
         _normalizedProjectsLoaded=true;
         rows.forEach(row=>{
@@ -1880,6 +2039,7 @@ async function loadDataFromAPI(){
         _normalizedTransactionsLoaded=false;
         _normalizedHouseTypesLoaded=false;
         _normalizedDocumentsLoaded=false;
+        _normalizedProjectCollectionsLoaded=false;
         _clearNormalizedState();
       }
     }else{
@@ -1889,6 +2049,7 @@ async function loadDataFromAPI(){
       _normalizedTransactionsLoaded=false;
       _normalizedHouseTypesLoaded=false;
       _normalizedDocumentsLoaded=false;
+      _normalizedProjectCollectionsLoaded=false;
       _clearNormalizedState();
     }
     _settingsSnapshot=_settingsCloudSnapshot(_settingsCloudData());
