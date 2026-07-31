@@ -1055,6 +1055,7 @@ const _projectItemSnapshots=new Map();
 const _projectItemProjectIds=new Map();
 const _activitySnapshots=new Map();
 const _activitySortOrders=new Map();
+let _activityRowIds=new WeakMap();
 let _normalizedProjectsLoaded=false;
 let _normalizedTransactionsLoaded=false;
 let _normalizedHouseTypesLoaded=false;
@@ -1261,9 +1262,9 @@ function _activityFromRow(row){
   if(event.id===undefined||event.id===null||event.id==='')event.id=row.id;
   return event;
 }
-function _activityCloudPayload(event,sortOrder){
+function _activityCloudPayload(event,sortOrder,rowId=event.id){
   return {
-    id:String(event.id),
+    id:String(rowId),
     sortOrder,
     data:JSON.parse(JSON.stringify(event)),
   };
@@ -1332,12 +1333,14 @@ function _rememberProjectCollectionRow(row,table,item,projectId,sortOrder=0){
   _projectItemProjectIds.set(key,String(projectId));
 }
 function _rememberActivityRow(row,event){
-  const id=String(event.id);
-  _activitySnapshots.set(id,_snapshot(event));
-  _activitySortOrders.set(id,Number(row.sort_order??row.sortOrder??0));
+  const rowId=String(row.id);
+  _activityRowIds.set(event,rowId);
+  _activitySnapshots.set(rowId,_snapshot(event));
+  _activitySortOrders.set(rowId,Number(row.sort_order??row.sortOrder??0));
 }
 function _clearNormalizedActivityState(){
   _activitySnapshots.clear();_activitySortOrders.clear();
+  _activityRowIds=new WeakMap();
   _normalizedActivityLoaded=false;
 }
 function _clearNormalizedState(){
@@ -1436,36 +1439,36 @@ async function _syncNormalizedTransactions(){
 }
 async function _syncNormalizedActivity(){
   if(!_normalizedActivityLoaded)return true;
-  const current=new Map();
+  const currentRows=new Set();
   for(const event of activityLog){
     if(!event||event.id===undefined||event.id===null||event.id===''){
       console.error('Evento de actividad sin id; no se guardó.');
       return false;
     }
-    const id=String(event.id);
-    if(current.has(id)){
-      console.error('ID de actividad duplicado; no se guardó:',id);
+    const historicalId=String(event.id);
+    const knownRowId=_activityRowIds.get(event);
+    const rowId=knownRowId||historicalId;
+    if(currentRows.has(rowId)){
+      console.error('Identidad de fila de actividad duplicada; no se guardó:',rowId);
       return false;
     }
-    current.set(id,event);
-  }
-  for(const [id,event] of current){
+    currentRows.add(rowId);
     const snap=_snapshot(event);
-    if(!_activitySnapshots.has(id)){
+    if(!knownRowId){
       // Negativo + ascendente: un evento nuevo siempre queda antes que el
       // historial migrado (0..N) y los más recientes quedan primero.
       const sortOrder=-(Date.now()*1000+Math.floor(Math.random()*1000));
-      const payload=_activityCloudPayload(event,sortOrder);
+      const payload=_activityCloudPayload(event,sortOrder,rowId);
       const {resp,data}=await _dbRowRequest('POST','/api/db/activity_entries',payload);
       if(resp.status===409&&data&&data.existing&&
          _snapshot(data.existing.data)===snap){
         _rememberActivityRow(data.existing,event);
         continue;
       }
-      if(!resp.ok){console.error('No se pudo crear evento de actividad',id,data);return false;}
+      if(!resp.ok){console.error('No se pudo crear evento de actividad',historicalId,data);return false;}
       _rememberActivityRow(data,event);
-    }else if(_activitySnapshots.get(id)!==snap){
-      console.error('Un evento de actividad ya registrado es inmutable:',id);
+    }else if(_activitySnapshots.get(rowId)!==snap){
+      console.error('Un evento de actividad ya registrado es inmutable:',historicalId);
       return false;
     }
   }

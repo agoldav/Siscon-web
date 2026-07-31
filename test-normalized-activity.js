@@ -26,6 +26,7 @@ function environment(initial) {
   const factory = new Function('activityLog', 'calls', `
     const _activitySnapshots=new Map();
     const _activitySortOrders=new Map();
+    let _activityRowIds=new WeakMap();
     let _normalizedActivityLoaded=true;
     function _snapshot(value){return JSON.stringify(value);}
     async function _dbRowRequest(method,path,body){
@@ -69,6 +70,16 @@ function environment(initial) {
   oldEvent.action = 'Manipulado';
   ok('rechaza modificar un evento ya registrado', !(await env.api.sync()));
   ok('no emite PUT ni DELETE', env.calls.every(call => call.method === 'POST'));
+
+  console.log('\nIds históricos duplicados:');
+  const dupA = { id: 7, action: 'Primero' };
+  const dupB = { id: 7, action: 'Segundo' };
+  const duplicates = environment([dupA, dupB]);
+  duplicates.api.remember({ id: 'legacy-activity:0:7', sort_order: 0, data: dupA }, dupA);
+  duplicates.api.remember({ id: 'legacy-activity:1:7', sort_order: 1, data: dupB }, dupB);
+  ok('dos eventos con el mismo data.id conservan identidades de fila distintas',
+    await duplicates.api.sync());
+  ok('el historial migrado duplicado no genera escrituras nuevas', duplicates.calls.length === 0);
 
   console.log('\nLoader y settings:');
   ok('loader pide la tabla dedicada',
