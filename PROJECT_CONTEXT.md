@@ -1653,6 +1653,30 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   actividad **18/18**, colecciones de proyecto **21/21** y seis suites HTTP reales aprobadas fuera
   del sandbox. **Fase G cerrada.**
 
+### Sesión 2026-07-31 (VUL-044 Fase H — catálogos globales, cutover y cierre final)
+> **Fase H y VUL-044 completa cerradas y verificadas en producción.** Backend `fb52db8` y frontend
+> `4688e3a`, integrados en `main`; Render sirve `vul-044-phase-h-global-catalogs` y Vercel sirve el
+> lector/escritor normalizado.
+- [x] Preflight productivo: 0 cotizaciones, 0 documentos sin clasificar, destinos 0/0, marcador
+  ausente y residuos legacy exactos de 15 `notifications`, 19 `pendingAuthRequests` y 0
+  `conversations`. `settings/1` ocupaba 4,595 bytes.
+- [x] Respaldo protegido `vul_044_backup_20260731_phase_h` retenido junto con copias de ambos
+  destinos y los 7 marcadores previos. La copia exacta de `settings/1` tiene RLS/FORCE RLS;
+  `anon` y `authenticated` no pueden leerla y `service_role` conserva acceso.
+- [x] Esquema, rutas dedicadas y frontend desplegados en el orden seguro. Ambas tablas tienen
+  `sort_order`, RLS/FORCE RLS, 0 políticas directas y acceso únicamente mediante el backend.
+- [x] Cutover atómico registrado como `vul-044-phase-h-global-catalogs`: conteos 0/0, 34 residuos
+  preservados exactamente en el marcador y las cinco llaves retiradas de `SYS`. El payload de
+  `settings/1` bajó de 4,595 a 1,420 bytes y coincide exactamente con el respaldo menos esas llaves.
+- [x] Smoke reversible del trigger: una pestaña antigua simulada no pudo reintroducir ninguna de
+  las cinco llaves; el `ROLLBACK` conservó los datos y el marcador.
+- [x] Verificación funcional en dos sesiones independientes: una creó una cotización normalizada,
+  la segunda la cargó y eliminó; `Sin clasificar` cargó vacío, ambas consolas quedaron sin errores
+  y la fila de prueba fue retirada. Estado final exacto: tablas 0/0, marcador único, respaldo
+  retenido y 0 llaves legacy.
+- [x] Regresión completa en verde: frontend **13/13 archivos** y backend **19/19 archivos**.
+  **VUL-044 cerrada.**
+
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
 > modelo de datos. El diff queda confinado al bloque CSS del panel y a `renderMetric()`.
@@ -1690,64 +1714,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
 
-### 🔴 Seguridad — hallazgos ABIERTOS de la revisión externa #2 (2026-07-24)
-> Verificados contra el código real. Lo cerrado esta sesión (VUL-032..042, 045) se movió a Completado
-> con fecha 2026-07-25. VUL-044 parte 1 y parte 1.5 (Mensajes y pendingAuthRequests/notifications fuera del
-> blob) se cerraron y verificaron en vivo el 2026-07-25/26 — ver Sección 9. **VUL-043 (rotación de secretos)
-> se completó el 2026-07-26** — ver Sección 9. Solo queda abierta la mitad grande de VUL-044 (normalizar el
-> resto del blob).
-
-- [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
-  - Después de las Fases A–G, `projects`, `houses`, transacciones, tipos, documentos, las cinco
-    colecciones operativas, la actividad y la subcontratación global ya tienen filas propias. En
-    `settings/1` queda `SYS`, principalmente ajustes, catálogos globales vacíos y residuos legacy
-    que todavía comparten versión por fila.
-  - `conversations`/`messages` (parte 1) y `pendingAuthRequests`/`notifications` (parte 1.5) ya salieron del
-    blob a sus propias tablas — cerradas y verificadas en vivo, ver Sección 9 y Sección 11.2.
-  - **Fase A (`projects`/`houses`) — ✅ CERRADA:** implementada, migrada, desplegada y verificada en
-    vivo con dos usuarios el 2026-07-27. Conteos exactos
-    en producción: 3 proyectos y 30 casas; sin ids faltantes/inesperados ni relaciones incorrectas;
-    marcador de migración registrado y frontend normalizado publicado. La primera prueba multiusuario
-    encontró y corrigió una escritura artificial de `settings/1` durante el login y una regresión que
-    omitía el mensaje específico de aprobación en los nuevos conflictos por fila. La repetición final
-    del flujo de aprobación fue aprobada por el OWNER.
-  - **Fase B (`transactions`) — ✅ CERRADA Y VERIFICADA EN PRODUCCIÓN (2026-07-28):** backend/frontend
-    desplegados y cutover completado tras respaldo protegido y dry-run. Producción contiene 37
-    transacciones normalizadas (11 OCs, 3 facturas de cliente, 20 facturas de proveedor y 3 pagos);
-    cero payloads distintos, inesperados o huérfanos, y cero arreglos transaccionales residuales en
-    `projects.data`. Un primer corte reveló redondeo de $0.01 por `numeric(14,2)`; se restauró
-    atómicamente, se corrigió la precisión en `37e384f` y se repitió el corte preservando exactamente
-    los totales históricos. Dos cargas independientes y un smoke test reversible quedaron en verde.
-  - **Fase C (`house_types` + `houses.type_id`) — ✅ CERRADA Y VERIFICADA EN PRODUCCIÓN
-    (2026-07-28):** backend `16bbcb6` y frontend `82553b9` en `main`; respaldo protegido
-    `vul_044_backup_20260728_2340` retenido. Cutover atómico completado con 4 tipos, 30/30 referencias,
-    cero fuentes legacy, cero huérfanos y payload exacto. Un defecto de orden entre `categories` y
-    `sort_order` fue detectado antes de escribir datos, corregido en `a69a8aa` y cubierto por regresión.
-    Smoke test reversible, orden histórico, precisión extendida y totales visibles quedaron en verde.
-  - **Fase D (`docs`/`uploads`) — ✅ CERRADA Y VERIFICADA EN PRODUCCIÓN (2026-07-30):** backend
-    `6fa18df` y frontend `4a643d0` en `main`; respaldo protegido
-    `vul_044_backup_20260729_1635` retenido. Cutover atómico completado con 14 documentos:
-    12 pares doc+upload, 2 solo-doc, 0 solo-upload, 0 huérfanos, 0 arreglos legacy y 0 URLs `blob:`.
-    Smoke reversible y carga autenticada quedaron en verde; el OWNER confirmó manualmente la
-    apertura de PDF y la persistencia de anotaciones.
-  - **Fase E (`garantias`, `bitacora`, `tasks`, `subAdvances`, `bodega`) — ✅ CERRADA Y VERIFICADA
-    EN PRODUCCIÓN (2026-07-30):** backend `22c99e8` y frontend `b16f3e0` en `main`; respaldo
-    `vul_044_backup_20260730_phase_e` retenido. Cutover atómico con 2 garantías exactas, 0 elementos
-    en las otras cuatro tablas, 0 fuentes legacy y smoke reversible en verde. Antes del corte se
-    corrigió `audit_log`: 1,260 eventos conservados, 498 payloads compactados, 0 grandes restantes
-    y base reducida de 540.2 MB a 23.9 MB.
-  - **Fase F (`activityLog` → `activity_entries`) — ✅ CERRADA Y VERIFICADA EN PRODUCCIÓN
-    (2026-07-30):** 330 eventos preservados exactamente, incluidas 12 colisiones de ids históricos;
-    respaldo `vul_044_backup_20260730_phase_f`, marcador, RLS/FORCE RLS, protección de pestañas
-    antiguas y carga visible “Historial — Sistema (330)” en verde.
-  - **Fase H (`cotizaciones`/`unclassified` + residuos legacy) — IMPLEMENTACIÓN LOCAL LISTA
-    (2026-07-31), PENDIENTE DE PRODUCCIÓN:** rutas dedicadas con versión por fila, orden estable,
-    autorización y auditoría; lector/escritor incremental con fallback y marcador explícito;
-    migración/cutover/rollback atómicos, trigger contra pestañas antiguas y respaldo de ambas tablas.
-    El corte retirará también los residuos ya no consumidos: 15 `notifications`, 19
-    `pendingAuthRequests` y 0 `conversations`. Regresión local completa en verde: frontend 13/13
-    archivos y backend 19/19 archivos. **No cerrar VUL-044 todavía:** faltan SQL, respaldo protegido,
-    dry-run, despliegues, cutover y verificación multiusuario en producción.
+### ✅ Seguridad — revisión externa #2 cerrada
+> VUL-032..045 aplicables están cerradas y documentadas en la Sección 9. VUL-044 terminó el
+> 2026-07-31 con la Fase H desplegada, migrada y verificada en producción. No queda ningún hallazgo
+> de seguridad aplicable abierto de esa revisión.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
@@ -1787,10 +1757,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ## 11. 🔒 Vulnerabilidades de Seguridad
 
-> ⚠️ **Estado (2026-07-24+, tras la revisión externa #2): NO todo está cerrado.** La afirmación anterior de que
-> "todas las vulnerabilidades están cerradas" era **incorrecta** y una revisión independiente lo demostró.
-> Cerradas de verdad: VUL-001..013, 016..020, 023..027, 029..036, 039 y **043**. **Ya no queda ninguna CRÍTICA
-> ni ALTA abierta.** Abierta: solo la mitad pendiente de VUL-044 (normalizar el resto del blob, ver Sección 10).
+> ✅ **Estado (2026-07-31, tras la revisión externa #2): no queda ninguna vulnerabilidad aplicable abierta.**
+> Cerradas: VUL-001..013, 016..020, 023..045; VUL-014/015 siguen clasificadas como no aplicables por
+> arquitectura y VUL-021/022 permanecen superadas por Cloudflare Access.
 > VUL-045 cerrada 2026-07-25 (alta directa de usuarios).
 > **VUL-043 cerrada 2026-07-26** — rotados `SISCON_TOKEN`, `ANTHROPIC_API_KEY`, `MS_CLIENT_SECRET` y revocada
 > la anon key de Supabase (vía "Disable JWT-based API keys", sin regenerar el JWT secret); el `client_secret`
@@ -1798,11 +1767,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > VUL-044 parte 1 (conversations/messages fuera del blob) — ✅ cerrada y desplegada, verificada en vivo por
 > el OWNER 2026-07-25/26 (Sección 9). VUL-044 parte 1.5 (pendingAuthRequests/notifications fuera del blob) —
 > ✅ cerrada y desplegada, verificada en vivo por el OWNER 2026-07-26 tras corregir 5 bugs reales encontrados
-> en producción (Sección 9). Las Fases A–G quedaron cerradas y verificadas entre el 2026-07-27 y
-> 2026-07-31: proyectos/casas, transacciones, tipos, documentos, colecciones operativas, actividad y
-> subcontratación global ya tienen filas propias. La Fase H de catálogos globales y limpieza de
-> residuos de `SYS` está implementada y probada localmente desde el 2026-07-31, pero VUL-044 sigue
-> abierta hasta completar el respaldo, despliegue, cutover y verificación multiusuario en producción.
+> en producción (Sección 9). Las Fases A–H quedaron cerradas y verificadas entre el 2026-07-27 y
+> 2026-07-31; el blob compartido ya no contiene colecciones operativas ni residuos legacy.
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
@@ -1812,7 +1778,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > independiente ni pruebas. A partir de ahora: una VUL solo se marca cerrada con **prueba automatizada** que
 > falle si se reintroduce, o con verificación en vivo documentada.
 >
-> **Auditoría externa completada (2026-07-23):** análisis completo de arquitectura y seguridad realizado. Estas vulnerabilidades se corregirán en 4 días según el plan de fases.
+> **Auditoría externa completada (2026-07-23):** análisis completo de arquitectura y seguridad realizado. Las vulnerabilidades aplicables quedaron corregidas al terminar la Fase H el 2026-07-31.
 >
 > **Nota de arquitectura (actualizada 2026-07-23):** el plan de corrección adopta **Cloudflare Access como IdP único**
 > (Microsoft Entra ID / Outlook 365) y **validación del JWT de Access en el backend** (ver Sección 12). Esto cambia
@@ -1822,7 +1788,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > localStorage, ni sesiones propias que revocar — la identidad y el MFA los provee Microsoft, y la revocación es
 > central). El faseo de abajo se mantiene; las *acciones* reflejan este enfoque.
 
-### 11.1 Vulnerabilidades Pendientes (Estado actual)
+### 11.1 Matriz de vulnerabilidades (cerradas o no aplicables)
 
 #### FASE 1 — Contención rápida (✅ Completada 2026-07-24)
 > Vulnerabilidades críticas de ejecución remota y datos expuestos
