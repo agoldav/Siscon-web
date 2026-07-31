@@ -62,7 +62,9 @@ function buildEnvironment() {
     SYS,
     activityLog,
     _normalizedProjectsLoaded: true,
+    _normalizedActivityLoaded: false,
     _syncNormalizedProjectsHouses: async () => true,
+    _syncNormalizedActivity: async () => true,
     confirm: () => { throw new Error('No debe abrirse un conflicto en esta prueba'); },
     console,
   };

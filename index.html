@@ -1053,11 +1053,14 @@ const _documentProjectIds=new Map();
 const _projectItemVersions=new Map();
 const _projectItemSnapshots=new Map();
 const _projectItemProjectIds=new Map();
+const _activitySnapshots=new Map();
+const _activitySortOrders=new Map();
 let _normalizedProjectsLoaded=false;
 let _normalizedTransactionsLoaded=false;
 let _normalizedHouseTypesLoaded=false;
 let _normalizedDocumentsLoaded=false;
 let _normalizedProjectCollectionsLoaded=false;
+let _normalizedActivityLoaded=false;
 const TXN_COLLECTION_TO_KIND={
   ocs:'oc',invClient:'factura_cliente',billVendor:'factura_proveedor',
   payments:'pago',creditNotes:'nota_credito',requis:'requisicion',
@@ -1252,6 +1255,19 @@ function _projectCollectionFromRow(table,row){
     sortOrder:Number.isInteger(row.sort_order)?row.sort_order:0,
   };
 }
+function _activityFromRow(row){
+  const event=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)
+    ?JSON.parse(JSON.stringify(row.data)):{};
+  if(event.id===undefined||event.id===null||event.id==='')event.id=row.id;
+  return event;
+}
+function _activityCloudPayload(event,sortOrder){
+  return {
+    id:String(event.id),
+    sortOrder,
+    data:JSON.parse(JSON.stringify(event)),
+  };
+}
 function _projectCloudPayload(project){
   const {houses,...rest}=project||{};
   const payload={...rest,uploads:(rest.uploads||[]).map(({blobId,url,...upload})=>upload)};
@@ -1314,6 +1330,15 @@ function _rememberProjectCollectionRow(row,table,item,projectId,sortOrder=0){
   _projectItemVersions.set(key,row.updated_at||null);
   _projectItemSnapshots.set(key,_snapshot(_projectCollectionCloudPayload(item,projectId,sortOrder)));
   _projectItemProjectIds.set(key,String(projectId));
+}
+function _rememberActivityRow(row,event){
+  const id=String(event.id);
+  _activitySnapshots.set(id,_snapshot(event));
+  _activitySortOrders.set(id,Number(row.sort_order??row.sortOrder??0));
+}
+function _clearNormalizedActivityState(){
+  _activitySnapshots.clear();_activitySortOrders.clear();
+  _normalizedActivityLoaded=false;
 }
 function _clearNormalizedState(){
   _projectVersions.clear();_houseVersions.clear();_projectSnapshots.clear();
@@ -1405,6 +1430,43 @@ async function _syncNormalizedTransactions(){
       }
       if(!resp.ok){console.error('No se pudo actualizar transacción',id,data);return false;}
       _rememberTransactionRow(data,transaction,projectId,kind);
+    }
+  }
+  return true;
+}
+async function _syncNormalizedActivity(){
+  if(!_normalizedActivityLoaded)return true;
+  const current=new Map();
+  for(const event of activityLog){
+    if(!event||event.id===undefined||event.id===null||event.id===''){
+      console.error('Evento de actividad sin id; no se guardó.');
+      return false;
+    }
+    const id=String(event.id);
+    if(current.has(id)){
+      console.error('ID de actividad duplicado; no se guardó:',id);
+      return false;
+    }
+    current.set(id,event);
+  }
+  for(const [id,event] of current){
+    const snap=_snapshot(event);
+    if(!_activitySnapshots.has(id)){
+      // Negativo + ascendente: un evento nuevo siempre queda antes que el
+      // historial migrado (0..N) y los más recientes quedan primero.
+      const sortOrder=-(Date.now()*1000+Math.floor(Math.random()*1000));
+      const payload=_activityCloudPayload(event,sortOrder);
+      const {resp,data}=await _dbRowRequest('POST','/api/db/activity_entries',payload);
+      if(resp.status===409&&data&&data.existing&&
+         _snapshot(data.existing.data)===snap){
+        _rememberActivityRow(data.existing,event);
+        continue;
+      }
+      if(!resp.ok){console.error('No se pudo crear evento de actividad',id,data);return false;}
+      _rememberActivityRow(data,event);
+    }else if(_activitySnapshots.get(id)!==snap){
+      console.error('Un evento de actividad ya registrado es inmutable:',id);
+      return false;
     }
   }
   return true;
@@ -1688,7 +1750,8 @@ let _conflictDialogOpen=false;
 let _versionWarned=false;
 
 function _settingsCloudData(){
-  const data={SYS,activityLog};
+  const data={SYS};
+  if(!_normalizedActivityLoaded)data.activityLog=activityLog;
   // Compatibilidad temporal con un backend anterior al cutover normalizado.
   if(!_normalizedProjectsLoaded){
     data.projects=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
@@ -1770,6 +1833,7 @@ async function _saveDataToAPICore(forzar){
       const rowsOk=await _syncNormalizedProjectsHouses();
       if(!rowsOk)return false;
     }
+    if(!await _syncNormalizedActivity())return false;
     const settingsData=_settingsCloudData();
     const nextSettingsSnapshot=_settingsCloudSnapshot(settingsData);
     // Un saveData() sin cambios reales puede venir de login, polling o chequeos de estado. Las
@@ -1823,7 +1887,7 @@ async function loadDataFromAPI(){
     const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
     const [
       resp,projectsResp,housesResp,transactionsResp,houseTypesResp,documentsResp,
-      garantiasResp,bitacoraResp,tasksResp,subAdvancesResp,bodegaResp,
+      garantiasResp,bitacoraResp,tasksResp,subAdvancesResp,bodegaResp,activityResp,
     ]=await Promise.all([
       fetch(`${BACKEND_URL}/api/db/settings/1`,{headers}),
       fetch(`${BACKEND_URL}/api/db/projects`,{headers}),
@@ -1836,6 +1900,7 @@ async function loadDataFromAPI(){
       fetch(`${BACKEND_URL}/api/db/tasks`,{headers}),
       fetch(`${BACKEND_URL}/api/db/sub_advances`,{headers}),
       fetch(`${BACKEND_URL}/api/db/bodega`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/activity_entries`,{headers}),
     ]);
     if(!resp.ok){ console.error('Error cargando desde API:', await resp.json()); return false; }
     const record=await resp.json();
@@ -1844,7 +1909,27 @@ async function loadDataFromAPI(){
     if(record.data && typeof record.data==='string') record.data=JSON.parse(record.data);
     const d=record.data||{};
     if(d.SYS) applyDefaults(d.SYS);
-    if(d.activityLog) activityLog=d.activityLog;
+    _clearNormalizedActivityState();
+    const hasLegacyActivity=Array.isArray(d.activityLog);
+    if(activityResp.ok){
+      const activityData=await activityResp.json();
+      const activityRows=Array.isArray(activityData.activity_entries)
+        ?activityData.activity_entries:[];
+      if(activityRows.length||!hasLegacyActivity){
+        activityLog=activityRows.map(row=>{
+          const event=_activityFromRow(row);
+          _rememberActivityRow(row,event);
+          return event;
+        });
+        _normalizedActivityLoaded=true;
+      }else{
+        activityLog=d.activityLog;
+      }
+    }else if(hasLegacyActivity){
+      activityLog=d.activityLog;
+    }else{
+      throw new Error('Backend sin ruta activity_entries después del cutover');
+    }
 
     if(projectsResp.ok&&housesResp.ok){
       const projectData=await projectsResp.json();
@@ -2188,8 +2273,11 @@ function logAction(action, type, context, before, after){
   // usuarios y provocaba un conflicto apenas una segunda persona iniciaba sesión.
   if(action==='Inicio de sesión'||action==='Inicio de sesión (Cloudflare Access)'||
      action==='Invitación aceptada'||action==='Cierre de sesión') return;
+  const now=Date.now();
+  const entropy=(globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function')
+    ?globalThis.crypto.randomUUID():Math.random().toString(36).slice(2);
   activityLog.unshift({
-    id: Date.now(),
+    id: `act-${now}-${entropy}`,
     action, type, context,
     before: before ? JSON.stringify(before).slice(0,200) : null,
     after: after ? JSON.stringify(after).slice(0,200) : null,

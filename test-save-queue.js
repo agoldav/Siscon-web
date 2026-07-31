@@ -65,7 +65,9 @@ function construirEntorno({ latenciaMs = 30 } = {}) {
     SYS,
     activityLog: [],
     _normalizedProjectsLoaded: false,
+    _normalizedActivityLoaded: false,
     _syncNormalizedProjectsHouses: async () => true,
+    _syncNormalizedActivity: async () => true,
     confirm: () => { throw new Error('confirm() no debería llamarse en esta prueba (no hay 409 real)'); },
     console,
   };
