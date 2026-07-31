@@ -1623,6 +1623,36 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   reintroducir `activityLog`; el `ROLLBACK` dejó 330 filas y un marcador. Carga autenticada en
   `app.sisconcr.com` sin errores/warnings y “Historial — Sistema (330)” visible. **Fase F cerrada.**
 
+### Sesión 2026-07-31 (VUL-044 Fase G — subcontratación global, cutover y cierre)
+> **Fase G cerrada y verificada en producción.** Backend `49f9436` y frontend `59df294`,
+> integrados en `main`. Render identifica el build `vul-044-phase-g-subcontracting`; Vercel sirve
+> el lector/escritor normalizado y el corte productivo quedó registrado.
+- [x] Inventario productivo limitado a subcontratación global: **1 subcontratista** y **4 anticipos**
+  en `SYS.subcontractors`/`SYS.subAdvanceRecords`. Las tres referencias históricas de cuadrilla
+  contienen únicamente el sentinel permitido `__unknown__`; `sub_advances`, de alcance por proyecto,
+  es otra colección y no fue modificada.
+- [x] Nueva tabla `subcontractor_advances`, `sort_order` explícito en `subcontractors`, RLS y FORCE
+  RLS deny-by-default, 0 políticas directas y rutas CRUD dedicadas con concurrencia optimista,
+  validación de referencias y borrados protegidos.
+- [x] Frontend con carga/fallback escalonado, versiones y snapshots por fila, y sincronización
+  ordenada: subcontratistas → proyectos/casas/transacciones → anticipos → borrados. Después del
+  cutover, `settings/1` ya no recibe ninguna de las dos colecciones.
+- [x] Cutover/rollback atómicos y trigger contra pestañas antiguas. El ensayo completo dentro de
+  `BEGIN`/`ROLLBACK` detectó antes de producción que dos `TRUNCATE` separados violaban la FK; se
+  corrigió a un truncado conjunto y el ensayo posterior pasó con reconstrucción exacta.
+- [x] Respaldo protegido `vul_044_backup_20260731_phase_g` retenido: versión exacta de
+  `settings/1`, 5,681 bytes, 1 subcontratista y 4 anticipos. RLS/FORCE RLS activos, 0 políticas,
+  acceso revocado a `public`/`anon`/`authenticated` y lectura conservada para `service_role`.
+- [x] Cutover productivo completado con marcador `vul-044-phase-g-subcontracting`: 1
+  subcontratista y 4 anticipos activos, reconstrucción exacta de ambas fuentes y ausencia de
+  `SYS.subcontractors`/`SYS.subAdvanceRecords` en `settings/1`.
+- [x] Integridad post-corte: 0 referencias faltantes a subcontratistas, proyectos o casas; 0
+  referencias reales de cuadrilla rotas. El trigger antiguo se probó de forma reversible, dejó
+  ambas llaves fuera del blob y el `ROLLBACK` no alteró los datos.
+- [x] Regresión completa en verde: Fase G **19/19**, políticas **46/46**, esquema **10/10**,
+  actividad **18/18**, colecciones de proyecto **21/21** y seis suites HTTP reales aprobadas fuera
+  del sandbox. **Fase G cerrada.**
+
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
 > modelo de datos. El diff queda confinado al bloque CSS del panel y a `renderMetric()`.
@@ -1668,9 +1698,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > resto del blob).
 
 - [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
-  - Después de las Fases A–F, `projects`, `houses`, transacciones, tipos, documentos, las cinco
-    colecciones operativas y la actividad ya tienen filas propias. En `settings/1` queda `SYS`,
-    principalmente ajustes y catálogos globales que todavía comparten versión por fila.
+  - Después de las Fases A–G, `projects`, `houses`, transacciones, tipos, documentos, las cinco
+    colecciones operativas, la actividad y la subcontratación global ya tienen filas propias. En
+    `settings/1` queda `SYS`, principalmente ajustes, catálogos globales vacíos y residuos legacy
+    que todavía comparten versión por fila.
   - `conversations`/`messages` (parte 1) y `pendingAuthRequests`/`notifications` (parte 1.5) ya salieron del
     blob a sus propias tablas — cerradas y verificadas en vivo, ver Sección 9 y Sección 11.2.
   - **Fase A (`projects`/`houses`) — ✅ CERRADA:** implementada, migrada, desplegada y verificada en
@@ -1709,8 +1740,13 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     (2026-07-30):** 330 eventos preservados exactamente, incluidas 12 colisiones de ids históricos;
     respaldo `vul_044_backup_20260730_phase_f`, marcador, RLS/FORCE RLS, protección de pestañas
     antiguas y carga visible “Historial — Sistema (330)” en verde.
-  - **SIGUIENTE FASE:** normalizar catálogos globales y limpiar residuos de `SYS` con preflight
-    propio. Mantener el trabajo por fases, no como una reescritura única.
+  - **Fase G (`subcontractors` + `subAdvanceRecords`) — ✅ CERRADA Y VERIFICADA EN PRODUCCIÓN
+    (2026-07-31):** 1 subcontratista y 4 anticipos preservados exactamente; respaldo
+    `vul_044_backup_20260731_phase_g`, marcador, RLS/FORCE RLS, protección de pestañas antiguas,
+    0 referencias rotas y ambas llaves eliminadas de `settings/1`.
+  - **SIGUIENTE FASE:** retirar con preflight propio los catálogos globales vacíos `cotizaciones`
+    y `unclassified`, y limpiar residuos legacy ya no consumidos: 15 `notifications`, 19
+    `pendingAuthRequests` y 0 `conversations`. Mantener el trabajo por fases.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
