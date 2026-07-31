@@ -1537,8 +1537,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   cubiertas por regresión local y el smoke transaccional. **Fase D cerrada.**
 
 ### Sesión 2026-07-30 (VUL-044 Fase E — colecciones operativas, implementación y preflight)
-> **Código y migraciones preparados y probados; todavía NO desplegados ni ejecutados en producción.**
-> Antes del cutover hace falta resolver el crecimiento de `audit_log`, crear un respaldo y repetir
+> **Backend `22c99e8` integrado en `main`; esquema/RPC instalados en producción sin ejecutar el
+> cutover. Frontend todavía no integrado al escribir esta nota.** Antes del corte hace falta
+> compactar `audit_log` con autorización explícita, recuperar espacio, crear un respaldo y repetir
 > las verificaciones de solo lectura.
 - [x] Inventario productivo de solo lectura: 3 proyectos activos; las cinco fuentes legacy son
   arreglos válidos, sin ids faltantes ni duplicados. Hay únicamente 2 elementos, ambos en
@@ -1561,10 +1562,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Diagnóstico preciso del límite de Supabase: la base ocupa 540,224,659 bytes y `audit_log`
   523,468,800 bytes con solo 1,260 filas. El trigger histórico copió el blob completo de
   `settings/1` en cada UPDATE: 893 eventos suman 494,369,804 bytes de payload; 756 contienen
-  snapshots no nulos sobredimensionados. Se preparó `migration-audit-log-retention.sql` para
-  limitar nuevos payloads a 16 KiB, compactar históricos en lotes únicamente mediante una llamada
-  explícita y permitir retención por fecha sin ejecutarla automáticamente. Compactar los snapshots
-  históricos y hacer `VACUUM FULL` siguen pendientes de autorización específica del OWNER.
+  snapshots no nulos y 498 superan el nuevo límite. `migration-audit-log-retention.sql` ya quedó
+  instalada: el trigger limita nuevos payloads a 16 KiB; la compactación histórica por lotes y la
+  retención por fecha solo existen como llamadas explícitas y no se ejecutaron. Compactar esas 498
+  filas y hacer `VACUUM FULL` siguen pendientes de autorización específica del OWNER.
+- [x] Esquema de Fase E instalado y verificado sin cutover: `bodega`, contador de migración y RPCs
+  existen; las cinco tablas destino suman 0 filas y el marcador sigue ausente.
 
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
