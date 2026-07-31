@@ -1536,11 +1536,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   segura del navegador que bloqueaba `Ver PDF`. Las rutas de alta/edición/borrado también quedaron
   cubiertas por regresión local y el smoke transaccional. **Fase D cerrada.**
 
-### Sesión 2026-07-30 (VUL-044 Fase E — colecciones operativas, implementación y preflight)
-> **Backend `22c99e8` integrado en `main`; esquema/RPC instalados en producción sin ejecutar el
-> cutover. Frontend todavía no integrado al escribir esta nota.** Antes del corte hace falta
-> compactar `audit_log` con autorización explícita, recuperar espacio, crear un respaldo y repetir
-> las verificaciones de solo lectura.
+### Sesión 2026-07-30 (VUL-044 Fase E — colecciones operativas, implementación, cutover y cierre)
+> **Fase E desplegada, migrada y verificada en producción.** Backend `22c99e8` y frontend
+> `b16f3e0` integrados en `main`; respaldo protegido
+> `vul_044_backup_20260730_phase_e` retenido. El cutover atómico normalizó las dos garantías
+> existentes y dejó listas las otras cuatro colecciones para escrituras futuras.
 - [x] Inventario productivo de solo lectura: 3 proyectos activos; las cinco fuentes legacy son
   arreglos válidos, sin ids faltantes ni duplicados. Hay únicamente 2 elementos, ambos en
   `garantias` (proyectos 116 y Prueba); `bitacora`, `tasks`, `subAdvances` y `bodega` están vacíos.
@@ -1563,11 +1563,28 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   523,468,800 bytes con solo 1,260 filas. El trigger histórico copió el blob completo de
   `settings/1` en cada UPDATE: 893 eventos suman 494,369,804 bytes de payload; 756 contienen
   snapshots no nulos y 498 superan el nuevo límite. `migration-audit-log-retention.sql` ya quedó
-  instalada: el trigger limita nuevos payloads a 16 KiB; la compactación histórica por lotes y la
-  retención por fecha solo existen como llamadas explícitas y no se ejecutaron. Compactar esas 498
-  filas y hacer `VACUUM FULL` siguen pendientes de autorización específica del OWNER.
+  instalada: el trigger limita nuevos payloads a 16 KiB y la retención por fecha continúa siendo
+  exclusivamente manual. Con autorización explícita del OWNER se compactaron solo los `before/after`
+  de esas 498 filas, conservando los 1,260 eventos y sus metadatos; quedaron 0 payloads grandes.
+  `VACUUM FULL` redujo `audit_log` de 523,591,680 a 7,012,352 bytes y la base completa de
+  540,224,659 a 23,891,091 bytes.
 - [x] Esquema de Fase E instalado y verificado sin cutover: `bodega`, contador de migración y RPCs
   existen; las cinco tablas destino suman 0 filas y el marcador sigue ausente.
+- [x] Respaldo productivo `vul_044_backup_20260730_phase_e`: 23 tablas y 223 filas copiadas dentro
+  de una transacción `REPEATABLE READ`, 0 diferencias de conteo, 0 grants a
+  `public`/`anon`/`authenticated` y `audit_log` excluido deliberadamente. Tamaño: 1,654,784 bytes.
+- [x] Preflight final contra el respaldo: 3 proyectos activos, 2 garantías, 0 elementos en
+  `bitacora`/`tasks`/`subAdvances`/`bodega`, 0 fuentes o items inválidos, 0 ids faltantes/duplicados,
+  0 cambios posteriores al respaldo, destinos vacíos y marcador ausente.
+- [x] Cutover ejecutado bajo `REPEATABLE READ`: marcador
+  `vul-044-phase-e-project-collections`, 3 proyectos y 2 elementos. Verificación independiente:
+  ids `gar-1784763254857` y `gar-1785285073197`, proyecto/orden/payload exactos, 0 filas
+  faltantes/inesperadas, 0 diferencias en `projects.data`, 0 llaves legacy y 0 grants inseguros.
+- [x] Smoke SQL de alta/edición/borrado sobre las cinco tablas terminó en `ROLLBACK`: 0 residuos,
+  2 garantías activas y 0 elementos activos en las otras cuatro tablas.
+- [x] Verificación en `app.sisconcr.com`: carga autenticada sin errores/warnings, 1 garantía visible
+  en 116 y 1 en Prueba; totales financieros conservados ($37,594.79 gastado /
+  $11,678.04 pendiente). **Fase E cerrada.**
 
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
@@ -1614,10 +1631,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > resto del blob).
 
 - [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
-  - Después de las Fases A–D, `projects`, `houses`, transacciones, tipos y documentos ya tienen filas propias.
-    Todavía quedan otras colecciones dentro de `projects.data`, además de ajustes/actividad en
-    `settings/1`, cuyos cambios comparten versión por fila y pueden chocar aunque afecten
-    subcolecciones distintas.
+  - Después de las Fases A–E, `projects`, `houses`, transacciones, tipos, documentos y las cinco
+    colecciones operativas ya tienen filas propias. Quedan ajustes/actividad en `settings/1`, cuyos
+    cambios todavía comparten versión por fila aunque afecten subcolecciones distintas.
   - `conversations`/`messages` (parte 1) y `pendingAuthRequests`/`notifications` (parte 1.5) ya salieron del
     blob a sus propias tablas — cerradas y verificadas en vivo, ver Sección 9 y Sección 11.2.
   - **Fase A (`projects`/`houses`) — ✅ CERRADA:** implementada, migrada, desplegada y verificada en
@@ -1646,13 +1662,14 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     12 pares doc+upload, 2 solo-doc, 0 solo-upload, 0 huérfanos, 0 arreglos legacy y 0 URLs `blob:`.
     Smoke reversible y carga autenticada quedaron en verde; el OWNER confirmó manualmente la
     apertura de PDF y la persistencia de anotaciones.
-  - **Fase E (`garantias`, `bitacora`, `tasks`, `subAdvances`, `bodega`) — IMPLEMENTADA LOCALMENTE,
-    PENDIENTE DE CUTOVER:** código, migración/rollback y pruebas están listos. El preflight halló
-    únicamente 2 garantías y cero elementos en las otras cuatro colecciones.
-  - **SIGUIENTE PASO OPERATIVO:** instalar el límite preventivo de `audit_log`, compactar sus
-    snapshots históricos sobredimensionados con autorización explícita, recuperar espacio y crear
-    el respaldo previo al cutover de Fase E. Después quedan catálogos/actividad del resto de
-    `settings/1`. Mantener el trabajo por fases, no como una reescritura única.
+  - **Fase E (`garantias`, `bitacora`, `tasks`, `subAdvances`, `bodega`) — ✅ CERRADA Y VERIFICADA
+    EN PRODUCCIÓN (2026-07-30):** backend `22c99e8` y frontend `b16f3e0` en `main`; respaldo
+    `vul_044_backup_20260730_phase_e` retenido. Cutover atómico con 2 garantías exactas, 0 elementos
+    en las otras cuatro tablas, 0 fuentes legacy y smoke reversible en verde. Antes del corte se
+    corrigió `audit_log`: 1,260 eventos conservados, 498 payloads compactados, 0 grandes restantes
+    y base reducida de 540.2 MB a 23.9 MB.
+  - **SIGUIENTE FASE:** normalizar catálogos/actividad del resto de `settings/1`. Mantener el trabajo
+    por fases, no como una reescritura única.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
@@ -1703,11 +1720,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > VUL-044 parte 1 (conversations/messages fuera del blob) — ✅ cerrada y desplegada, verificada en vivo por
 > el OWNER 2026-07-25/26 (Sección 9). VUL-044 parte 1.5 (pendingAuthRequests/notifications fuera del blob) —
 > ✅ cerrada y desplegada, verificada en vivo por el OWNER 2026-07-26 tras corregir 5 bugs reales encontrados
-> en producción (Sección 9). VUL-044 Fase A (`projects`/`houses`) quedó cerrada y verificada el
-> 2026-07-27; las Fases B (`transactions`) y C (`house_types`/`houses.type_id`) quedaron cerradas y
-> verificadas en producción el 2026-07-28.
-> Sigue abierta la normalización de las demás colecciones que todavía comparten
-> `projects.data`/`settings/1`, sin fecha.
+> en producción (Sección 9). Las Fases A–E quedaron cerradas y verificadas entre el 2026-07-27 y
+> 2026-07-30: proyectos/casas, transacciones, tipos, documentos y colecciones operativas ya tienen
+> filas propias. Sigue abierta únicamente la normalización de catálogos/actividad de `settings/1`,
+> sin fecha.
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
