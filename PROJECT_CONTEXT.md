@@ -1586,6 +1586,43 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   en 116 y 1 en Prueba; totales financieros conservados ($37,594.79 gastado /
   $11,678.04 pendiente). **Fase E cerrada.**
 
+### Sesión 2026-07-30 (VUL-044 Fase F — actividad, cutover y cierre)
+> **Fase F cerrada y verificada en producción.** Backend `88a906d`, `7b9947a` y `9daedb7`;
+> frontend `36ac57e` y `8083565`, todos integrados en `main`. Vercel sirve el lector normalizado,
+> Render identifica el build `vul-044-phase-f-activity` y el corte productivo quedó registrado.
+- [x] Inventario productivo de solo lectura: `settings/1` contiene únicamente `SYS` y
+  `activityLog`; el historial tiene **330 eventos**, 104,854 bytes físicos y objetos con las diez
+  llaves históricas (`id`, acción/tipo/contexto, before/after, usuario/fecha y proyecto).
+- [x] El dry-run detectó **318 ids históricos distintos para 330 eventos** (12 colisiones causadas
+  por el antiguo `Date.now()`). Se corrigió antes del corte: cada fila usa una PK técnica estable
+  `legacy-activity:{orden}:{id}`, mientras `data.id` y el JSON histórico se preservan exactamente.
+- [x] La fase se limitó deliberadamente a actividad. Los catálogos globales se mantienen para una
+  fase posterior: 1 `subcontractor`, 4 `subAdvanceRecords`, 0 `cotizaciones` y 0 `unclassified`;
+  además se detectaron residuos ya no consumidos de `notifications`, `pendingAuthRequests` y
+  `conversations` dentro de `SYS`, que se limpiarán con preflight propio.
+- [x] Nueva tabla append-only `activity_entries`: una fila por evento, orden histórico explícito,
+  RLS deny-by-default, auditoría y acceso de lectura/alta para cualquier cuenta autenticada; no
+  existen rutas PUT/DELETE para reescribir el historial.
+- [x] Frontend con carga/fallback escalonado, snapshots inmutables e inserción incremental. Después
+  del cutover, registrar una acción ya no ejecutará un PUT de `settings/1`; ids nuevos incluyen
+  entropía y un reintento de POST puede resolverse sin duplicar.
+- [x] Cutover/rollback atómicos en `migration-activity.sql`; el corte exige destino vacío, marcador
+  ausente, PKs técnicas únicas, orden/payload exactos y `settings.updated_at` sin cambios. Un trigger
+  protege contra pestañas antiguas que intenten reintroducir `activityLog` después del marcador. El
+  rollback reconstruye todos los eventos —incluidos los nuevos— antes de vaciar la tabla.
+- [x] Respaldo protegido `vul_044_backup_20260730_phase_f` retenido: copia completa de `settings`,
+  marcadores, tabla destino previa y fuente exacta de 330 eventos/104,854 bytes. `public`, `anon` y
+  `authenticated` no tienen acceso; `service_role` conserva lectura.
+- [x] Cutover productivo completado con marcador `vul-044-phase-f-activity`: 330 filas activas,
+  330 PKs técnicas, 318 ids históricos y 0 diferencias contra el JSON respaldado. `activityLog`
+  desapareció de `settings/1` y su payload bajó a 5,681 bytes; RLS y FORCE RLS siguen activos,
+  con 0 políticas directas.
+- [x] Regresión completa: frontend **12 archivos** y backend **17 archivos**, todo en verde; las
+  pruebas del backend que levantan servidor real también pasaron fuera del sandbox.
+- [x] Smoke reversible del trigger: una escritura simulada desde pestaña antigua no pudo
+  reintroducir `activityLog`; el `ROLLBACK` dejó 330 filas y un marcador. Carga autenticada en
+  `app.sisconcr.com` sin errores/warnings y “Historial — Sistema (330)” visible. **Fase F cerrada.**
+
 ### Sesión 2026-07-28 (rediseño del panel métrico del proyecto)
 > Frontend únicamente (`siscon-web/index.html`). Sin cambios de lógica de negocio, de cálculo ni de
 > modelo de datos. El diff queda confinado al bloque CSS del panel y a `renderMetric()`.
@@ -1631,9 +1668,9 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > resto del blob).
 
 - [~] **VUL-044 | Modelo de datos: blob único compartido** (ARQUITECTÓNICA)
-  - Después de las Fases A–E, `projects`, `houses`, transacciones, tipos, documentos y las cinco
-    colecciones operativas ya tienen filas propias. Quedan ajustes/actividad en `settings/1`, cuyos
-    cambios todavía comparten versión por fila aunque afecten subcolecciones distintas.
+  - Después de las Fases A–F, `projects`, `houses`, transacciones, tipos, documentos, las cinco
+    colecciones operativas y la actividad ya tienen filas propias. En `settings/1` queda `SYS`,
+    principalmente ajustes y catálogos globales que todavía comparten versión por fila.
   - `conversations`/`messages` (parte 1) y `pendingAuthRequests`/`notifications` (parte 1.5) ya salieron del
     blob a sus propias tablas — cerradas y verificadas en vivo, ver Sección 9 y Sección 11.2.
   - **Fase A (`projects`/`houses`) — ✅ CERRADA:** implementada, migrada, desplegada y verificada en
@@ -1668,8 +1705,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     en las otras cuatro tablas, 0 fuentes legacy y smoke reversible en verde. Antes del corte se
     corrigió `audit_log`: 1,260 eventos conservados, 498 payloads compactados, 0 grandes restantes
     y base reducida de 540.2 MB a 23.9 MB.
-  - **SIGUIENTE FASE:** normalizar catálogos/actividad del resto de `settings/1`. Mantener el trabajo
-    por fases, no como una reescritura única.
+  - **Fase F (`activityLog` → `activity_entries`) — ✅ CERRADA Y VERIFICADA EN PRODUCCIÓN
+    (2026-07-30):** 330 eventos preservados exactamente, incluidas 12 colisiones de ids históricos;
+    respaldo `vul_044_backup_20260730_phase_f`, marcador, RLS/FORCE RLS, protección de pestañas
+    antiguas y carga visible “Historial — Sistema (330)” en verde.
+  - **SIGUIENTE FASE:** normalizar catálogos globales y limpiar residuos de `SYS` con preflight
+    propio. Mantener el trabajo por fases, no como una reescritura única.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
@@ -1720,10 +1761,10 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > VUL-044 parte 1 (conversations/messages fuera del blob) — ✅ cerrada y desplegada, verificada en vivo por
 > el OWNER 2026-07-25/26 (Sección 9). VUL-044 parte 1.5 (pendingAuthRequests/notifications fuera del blob) —
 > ✅ cerrada y desplegada, verificada en vivo por el OWNER 2026-07-26 tras corregir 5 bugs reales encontrados
-> en producción (Sección 9). Las Fases A–E quedaron cerradas y verificadas entre el 2026-07-27 y
-> 2026-07-30: proyectos/casas, transacciones, tipos, documentos y colecciones operativas ya tienen
-> filas propias. Sigue abierta únicamente la normalización de catálogos/actividad de `settings/1`,
-> sin fecha.
+> en producción (Sección 9). Las Fases A–F quedaron cerradas y verificadas entre el 2026-07-27 y
+> 2026-07-30: proyectos/casas, transacciones, tipos, documentos, colecciones operativas y actividad
+> ya tienen filas propias. Sigue abierta únicamente la normalización de catálogos globales y la
+> limpieza de residuos de `SYS`, sin fecha.
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
