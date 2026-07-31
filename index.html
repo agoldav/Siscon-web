@@ -1060,6 +1060,8 @@ const _subcontractorVersions=new Map();
 const _subcontractorSnapshots=new Map();
 const _subcontractorAdvanceVersions=new Map();
 const _subcontractorAdvanceSnapshots=new Map();
+const _globalCatalogVersions=new Map();
+const _globalCatalogSnapshots=new Map();
 let _normalizedProjectsLoaded=false;
 let _normalizedTransactionsLoaded=false;
 let _normalizedHouseTypesLoaded=false;
@@ -1067,6 +1069,7 @@ let _normalizedDocumentsLoaded=false;
 let _normalizedProjectCollectionsLoaded=false;
 let _normalizedActivityLoaded=false;
 let _normalizedSubcontractingLoaded=false;
+let _normalizedGlobalCatalogsLoaded=false;
 const TXN_COLLECTION_TO_KIND={
   ocs:'oc',invClient:'factura_cliente',billVendor:'factura_proveedor',
   payments:'pago',creditNotes:'nota_credito',requis:'requisicion',
@@ -1083,6 +1086,7 @@ const PROJECT_TABLE_TO_COLLECTION=Object.fromEntries(
   Object.entries(PROJECT_COLLECTION_TO_TABLE).map(([collection,table])=>[table,collection])
 );
 const PROJECT_COLLECTION_KEYS=Object.keys(PROJECT_COLLECTION_TO_TABLE);
+const GLOBAL_CATALOG_TO_SYS={cotizaciones:'cotizaciones',unclassified_items:'unclassified'};
 
 function _restoreDbId(value){
   if(typeof value!=='string'||!/^\d+$/.test(value))return value;
@@ -1291,6 +1295,16 @@ function _subcontractorAdvanceFromRow(row){
 function _globalSubcontractingCloudPayload(item,sortOrder=0){
   return {id:String(item.id),sortOrder,data:JSON.parse(JSON.stringify(item))};
 }
+function _globalCatalogFromRow(row){
+  const item=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)
+    ?JSON.parse(JSON.stringify(row.data)):{};
+  if(item.id===undefined||item.id===null||item.id==='')item.id=_restoreDbId(row.id);
+  if(item.status===undefined&&row.status!==undefined&&row.status!==null)item.status=row.status;
+  return item;
+}
+function _globalCatalogCloudPayload(item,sortOrder=0){
+  return {id:String(item.id),sortOrder,data:JSON.parse(JSON.stringify(item))};
+}
 function _projectCloudPayload(project){
   const {houses,...rest}=project||{};
   const payload={...rest,uploads:(rest.uploads||[]).map(({blobId,url,...upload})=>upload)};
@@ -1370,6 +1384,12 @@ function _rememberSubcontractorAdvanceRow(row,item,sortOrder=0){
   _subcontractorAdvanceVersions.set(id,row.updated_at||null);
   _subcontractorAdvanceSnapshots.set(id,_snapshot(_globalSubcontractingCloudPayload(item,sortOrder)));
 }
+function _globalCatalogKey(table,id){return `${table}:${String(id)}`;}
+function _rememberGlobalCatalogRow(row,table,item,sortOrder=0){
+  const key=_globalCatalogKey(table,item.id);
+  _globalCatalogVersions.set(key,row.updated_at||null);
+  _globalCatalogSnapshots.set(key,_snapshot(_globalCatalogCloudPayload(item,sortOrder)));
+}
 function _clearNormalizedActivityState(){
   _activitySnapshots.clear();_activitySortOrders.clear();
   _activityRowIds=new WeakMap();
@@ -1379,6 +1399,10 @@ function _clearNormalizedSubcontractingState(){
   _subcontractorVersions.clear();_subcontractorSnapshots.clear();
   _subcontractorAdvanceVersions.clear();_subcontractorAdvanceSnapshots.clear();
   _normalizedSubcontractingLoaded=false;
+}
+function _clearNormalizedGlobalCatalogState(){
+  _globalCatalogVersions.clear();_globalCatalogSnapshots.clear();
+  _normalizedGlobalCatalogsLoaded=false;
 }
 function _clearNormalizedState(){
   _projectVersions.clear();_houseVersions.clear();_projectSnapshots.clear();
@@ -1612,6 +1636,60 @@ async function _syncDeletedSubcontractors(){
     const {resp,data}=await _dbRowRequest('DELETE',`/api/db/subcontractors/${encodeURIComponent(id)}`);
     if(!resp.ok){console.error('No se pudo eliminar subcontratista',id,data);return false;}
     _subcontractorVersions.delete(id);_subcontractorSnapshots.delete(id);
+  }
+  return true;
+}
+async function _syncNormalizedGlobalCatalogs(){
+  if(!_normalizedGlobalCatalogsLoaded)return true;
+  const current=new Map();
+  for(const [table,sysKey] of Object.entries(GLOBAL_CATALOG_TO_SYS)){
+    for(const [sortOrder,item] of (SYS[sysKey]||[]).entries()){
+      if(!item||item.id===undefined||item.id===null||item.id===''){
+        console.error(`Elemento sin id en ${sysKey}; no se guardó.`);
+        return false;
+      }
+      const key=_globalCatalogKey(table,item.id);
+      if(current.has(key)){
+        console.error(`ID duplicado en ${sysKey}; no se guardó:`,item.id);
+        return false;
+      }
+      current.set(key,{table,item,sortOrder});
+    }
+  }
+  // Proyectos/transacciones se sincronizan antes que esta función. Así, asignar
+  // un documento a un proyecto nunca elimina la fila fuente antes de crear el destino.
+  for(const key of [..._globalCatalogSnapshots.keys()]){
+    if(current.has(key))continue;
+    const split=key.indexOf(':');
+    const table=key.slice(0,split);const id=key.slice(split+1);
+    const {resp,data}=await _dbRowRequest('DELETE',`/api/db/${table}/${encodeURIComponent(id)}`);
+    if(!resp.ok){console.error('No se pudo eliminar elemento global',key,data);return false;}
+    _globalCatalogVersions.delete(key);_globalCatalogSnapshots.delete(key);
+  }
+  for(const [key,{table,item,sortOrder}] of current){
+    const payload=_globalCatalogCloudPayload(item,sortOrder);
+    const snap=_snapshot(payload);
+    const id=String(item.id);
+    if(!_globalCatalogSnapshots.has(key)){
+      const {resp,data}=await _dbRowRequest('POST',`/api/db/${table}`,payload);
+      if(!resp.ok){console.error('No se pudo crear elemento global',key,data);return false;}
+      _rememberGlobalCatalogRow(data,table,item,sortOrder);
+    }else if(_globalCatalogSnapshots.get(key)!==snap){
+      const body={
+        ...payload,replace_data:true,expected_updated_at:_globalCatalogVersions.get(key),
+      };
+      let {resp,data}=await _dbRowRequest('PUT',`/api/db/${table}/${encodeURIComponent(id)}`,body);
+      if(resp.status===409||resp.status===428){
+        data=await _handleRowConflict(
+          table==='cotizaciones'?'esta cotización':'este documento sin clasificar',
+          id,payload,`/api/db/${table}/${encodeURIComponent(id)}`
+        );
+        if(!data)return false;
+        resp={ok:true};
+      }
+      if(!resp.ok){console.error('No se pudo actualizar elemento global',key,data);return false;}
+      _rememberGlobalCatalogRow(data,table,item,sortOrder);
+    }
   }
   return true;
 }
@@ -1899,6 +1977,13 @@ function _settingsCloudData(){
     delete cloudSYS.subcontractors;
     delete cloudSYS.subAdvanceRecords;
   }
+  if(_normalizedGlobalCatalogsLoaded){
+    delete cloudSYS.cotizaciones;
+    delete cloudSYS.unclassified;
+    delete cloudSYS.notifications;
+    delete cloudSYS.pendingAuthRequests;
+    delete cloudSYS.conversations;
+  }
   const data={SYS:cloudSYS};
   if(!_normalizedActivityLoaded)data.activityLog=activityLog;
   // Compatibilidad temporal con un backend anterior al cutover normalizado.
@@ -1986,6 +2071,7 @@ async function _saveDataToAPICore(forzar){
     if(!await _syncNormalizedSubcontractorAdvances())return false;
     if(!await _syncDeletedSubcontractors())return false;
     if(!await _syncNormalizedActivity())return false;
+    if(!await _syncNormalizedGlobalCatalogs())return false;
     const settingsData=_settingsCloudData();
     const nextSettingsSnapshot=_settingsCloudSnapshot(settingsData);
     // Un saveData() sin cambios reales puede venir de login, polling o chequeos de estado. Las
@@ -2040,7 +2126,7 @@ async function loadDataFromAPI(){
     const [
       resp,projectsResp,housesResp,transactionsResp,houseTypesResp,documentsResp,
       garantiasResp,bitacoraResp,tasksResp,subAdvancesResp,bodegaResp,activityResp,
-      subcontractorsResp,subcontractorAdvancesResp,
+      subcontractorsResp,subcontractorAdvancesResp,cotizacionesResp,unclassifiedResp,
     ]=await Promise.all([
       fetch(`${BACKEND_URL}/api/db/settings/1`,{headers}),
       fetch(`${BACKEND_URL}/api/db/projects`,{headers}),
@@ -2056,6 +2142,8 @@ async function loadDataFromAPI(){
       fetch(`${BACKEND_URL}/api/db/activity_entries`,{headers}),
       fetch(`${BACKEND_URL}/api/db/subcontractors`,{headers}),
       fetch(`${BACKEND_URL}/api/db/subcontractor_advances`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/cotizaciones`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/unclassified_items`,{headers}),
     ]);
     if(!resp.ok){ console.error('Error cargando desde API:', await resp.json()); return false; }
     const record=await resp.json();
@@ -2066,6 +2154,14 @@ async function loadDataFromAPI(){
     const legacySYS=d.SYS&&typeof d.SYS==='object'&&!Array.isArray(d.SYS)?d.SYS:{};
     const hasLegacySubcontractors=Array.isArray(legacySYS.subcontractors);
     const hasLegacySubcontractorAdvances=Array.isArray(legacySYS.subAdvanceRecords);
+    const hasLegacyCotizaciones=Object.prototype.hasOwnProperty.call(legacySYS,'cotizaciones');
+    const hasLegacyUnclassified=Object.prototype.hasOwnProperty.call(legacySYS,'unclassified');
+    if(hasLegacyCotizaciones&&!Array.isArray(legacySYS.cotizaciones)){
+      throw new Error('settings/1 contiene cotizaciones con formato inválido');
+    }
+    if(hasLegacyUnclassified&&!Array.isArray(legacySYS.unclassified)){
+      throw new Error('settings/1 contiene unclassified con formato inválido');
+    }
     if(hasLegacySubcontractors!==hasLegacySubcontractorAdvances){
       throw new Error('settings/1 contiene solo una de las dos fuentes de subcontratación');
     }
@@ -2096,6 +2192,38 @@ async function loadDataFromAPI(){
       }
     }else if(!hasLegacySubcontractors&&!hasLegacySubcontractorAdvances){
       throw new Error('Backend sin rutas de subcontratación después del cutover');
+    }
+    _clearNormalizedGlobalCatalogState();
+    if(cotizacionesResp.ok&&unclassifiedResp.ok){
+      const cotizacionesData=await cotizacionesResp.json();
+      const unclassifiedData=await unclassifiedResp.json();
+      const migrationApplied=cotizacionesData.migration_applied===true&&
+        unclassifiedData.migration_applied===true;
+      if((cotizacionesData.migration_applied===true)!==(unclassifiedData.migration_applied===true)){
+        throw new Error('Las rutas de catálogos no coinciden sobre el estado del cutover');
+      }
+      if(migrationApplied){
+        const catalogRows={
+          cotizaciones:Array.isArray(cotizacionesData.cotizaciones)?cotizacionesData.cotizaciones:[],
+          unclassified_items:Array.isArray(unclassifiedData.unclassified_items)
+            ?unclassifiedData.unclassified_items:[],
+        };
+        for(const [table,rows] of Object.entries(catalogRows)){
+          const sysKey=GLOBAL_CATALOG_TO_SYS[table];
+          SYS[sysKey]=rows.map((row,index)=>{
+            const item=_globalCatalogFromRow(row);
+            const sortOrder=Number.isInteger(row.sort_order)?row.sort_order:index;
+            _rememberGlobalCatalogRow(row,table,item,sortOrder);
+            return {item,sortOrder,rowId:String(row.id)};
+          }).sort((a,b)=>a.sortOrder-b.sortOrder||a.rowId.localeCompare(b.rowId))
+            .map(entry=>entry.item);
+        }
+        _normalizedGlobalCatalogsLoaded=true;
+      }else if(!hasLegacyCotizaciones&&!hasLegacyUnclassified){
+        throw new Error('Catálogos sin marcador de cutover ni fuente legacy; carga abortada');
+      }
+    }else if(!hasLegacyCotizaciones&&!hasLegacyUnclassified){
+      throw new Error('Backend sin rutas de catálogos globales después del cutover');
     }
     _clearNormalizedActivityState();
     const hasLegacyActivity=Array.isArray(d.activityLog);

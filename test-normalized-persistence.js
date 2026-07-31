@@ -40,7 +40,7 @@ console.log('\nSincronización incremental:');
 ok('save core sincroniza filas antes de settings',
   /const rowsOk=await _syncNormalizedProjectsHouses\(\)[\s\S]{0,350}const settingsData=_settingsCloudData\(\)/.test(html));
 ok('en modo normalizado settings ya no recibe projects',
-  /function _settingsCloudData\(\)[\s\S]{0,250}if\(!_normalizedProjectsLoaded\)\{[\s\S]{0,180}data\.projects=/.test(html));
+  /function _settingsCloudData\(\)[\s\S]{0,700}if\(!_normalizedProjectsLoaded\)\{[\s\S]{0,180}data\.projects=/.test(html));
 ok('proyectos nuevos usan POST',
   /_dbRowRequest\('POST','\/api\/db\/projects',payload\)/.test(html));
 ok('proyectos modificados mandan versión y replace_data',

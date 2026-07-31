@@ -1740,13 +1740,14 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
     (2026-07-30):** 330 eventos preservados exactamente, incluidas 12 colisiones de ids históricos;
     respaldo `vul_044_backup_20260730_phase_f`, marcador, RLS/FORCE RLS, protección de pestañas
     antiguas y carga visible “Historial — Sistema (330)” en verde.
-  - **Fase G (`subcontractors` + `subAdvanceRecords`) — ✅ CERRADA Y VERIFICADA EN PRODUCCIÓN
-    (2026-07-31):** 1 subcontratista y 4 anticipos preservados exactamente; respaldo
-    `vul_044_backup_20260731_phase_g`, marcador, RLS/FORCE RLS, protección de pestañas antiguas,
-    0 referencias rotas y ambas llaves eliminadas de `settings/1`.
-  - **SIGUIENTE FASE:** retirar con preflight propio los catálogos globales vacíos `cotizaciones`
-    y `unclassified`, y limpiar residuos legacy ya no consumidos: 15 `notifications`, 19
-    `pendingAuthRequests` y 0 `conversations`. Mantener el trabajo por fases.
+  - **Fase H (`cotizaciones`/`unclassified` + residuos legacy) — IMPLEMENTACIÓN LOCAL LISTA
+    (2026-07-31), PENDIENTE DE PRODUCCIÓN:** rutas dedicadas con versión por fila, orden estable,
+    autorización y auditoría; lector/escritor incremental con fallback y marcador explícito;
+    migración/cutover/rollback atómicos, trigger contra pestañas antiguas y respaldo de ambas tablas.
+    El corte retirará también los residuos ya no consumidos: 15 `notifications`, 19
+    `pendingAuthRequests` y 0 `conversations`. Regresión local completa en verde: frontend 13/13
+    archivos y backend 19/19 archivos. **No cerrar VUL-044 todavía:** faltan SQL, respaldo protegido,
+    dry-run, despliegues, cutover y verificación multiusuario en producción.
 
 > **Riesgo residual documentado (sin acción de código):** el scope `com.intuit.quickbooks.accounting` de
 > QuickBooks **no es de solo lectura** — Intuit no ofrece uno que lo sea. Hoy QB es de solo lectura porque el
@@ -1797,10 +1798,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > VUL-044 parte 1 (conversations/messages fuera del blob) — ✅ cerrada y desplegada, verificada en vivo por
 > el OWNER 2026-07-25/26 (Sección 9). VUL-044 parte 1.5 (pendingAuthRequests/notifications fuera del blob) —
 > ✅ cerrada y desplegada, verificada en vivo por el OWNER 2026-07-26 tras corregir 5 bugs reales encontrados
-> en producción (Sección 9). Las Fases A–F quedaron cerradas y verificadas entre el 2026-07-27 y
-> 2026-07-30: proyectos/casas, transacciones, tipos, documentos, colecciones operativas y actividad
-> ya tienen filas propias. Sigue abierta únicamente la normalización de catálogos globales y la
-> limpieza de residuos de `SYS`, sin fecha.
+> en producción (Sección 9). Las Fases A–G quedaron cerradas y verificadas entre el 2026-07-27 y
+> 2026-07-31: proyectos/casas, transacciones, tipos, documentos, colecciones operativas, actividad y
+> subcontratación global ya tienen filas propias. La Fase H de catálogos globales y limpieza de
+> residuos de `SYS` está implementada y probada localmente desde el 2026-07-31, pero VUL-044 sigue
+> abierta hasta completar el respaldo, despliegue, cutover y verificación multiusuario en producción.
 > VUL-037/038/040/041/042 cerradas 2026-07-24+.
 > VUL-014/015 se mantienen como "no aplican por arquitectura": esa conclusión depende de que el backend sea buen
 > guardián, y con VUL-035 cerrada (política por tabla y rol en el CRUD) vuelve a sostenerse.
