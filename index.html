@@ -1056,12 +1056,17 @@ const _projectItemProjectIds=new Map();
 const _activitySnapshots=new Map();
 const _activitySortOrders=new Map();
 let _activityRowIds=new WeakMap();
+const _subcontractorVersions=new Map();
+const _subcontractorSnapshots=new Map();
+const _subcontractorAdvanceVersions=new Map();
+const _subcontractorAdvanceSnapshots=new Map();
 let _normalizedProjectsLoaded=false;
 let _normalizedTransactionsLoaded=false;
 let _normalizedHouseTypesLoaded=false;
 let _normalizedDocumentsLoaded=false;
 let _normalizedProjectCollectionsLoaded=false;
 let _normalizedActivityLoaded=false;
+let _normalizedSubcontractingLoaded=false;
 const TXN_COLLECTION_TO_KIND={
   ocs:'oc',invClient:'factura_cliente',billVendor:'factura_proveedor',
   payments:'pago',creditNotes:'nota_credito',requis:'requisicion',
@@ -1269,6 +1274,23 @@ function _activityCloudPayload(event,sortOrder,rowId=event.id){
     data:JSON.parse(JSON.stringify(event)),
   };
 }
+function _subcontractorFromRow(row){
+  const item=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)
+    ?JSON.parse(JSON.stringify(row.data)):{};
+  if(item.id===undefined||item.id===null||item.id==='')item.id=_restoreDbId(row.id);
+  if(item.name===undefined)item.name=row.name||'';
+  if(!Array.isArray(item.crew))item.crew=Array.isArray(row.crew)?row.crew:[];
+  return item;
+}
+function _subcontractorAdvanceFromRow(row){
+  const item=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)
+    ?JSON.parse(JSON.stringify(row.data)):{};
+  if(item.id===undefined||item.id===null||item.id==='')item.id=_restoreDbId(row.id);
+  return item;
+}
+function _globalSubcontractingCloudPayload(item,sortOrder=0){
+  return {id:String(item.id),sortOrder,data:JSON.parse(JSON.stringify(item))};
+}
 function _projectCloudPayload(project){
   const {houses,...rest}=project||{};
   const payload={...rest,uploads:(rest.uploads||[]).map(({blobId,url,...upload})=>upload)};
@@ -1338,10 +1360,25 @@ function _rememberActivityRow(row,event){
   _activitySnapshots.set(rowId,_snapshot(event));
   _activitySortOrders.set(rowId,Number(row.sort_order??row.sortOrder??0));
 }
+function _rememberSubcontractorRow(row,item,sortOrder=0){
+  const id=String(item.id);
+  _subcontractorVersions.set(id,row.updated_at||null);
+  _subcontractorSnapshots.set(id,_snapshot(_globalSubcontractingCloudPayload(item,sortOrder)));
+}
+function _rememberSubcontractorAdvanceRow(row,item,sortOrder=0){
+  const id=String(item.id);
+  _subcontractorAdvanceVersions.set(id,row.updated_at||null);
+  _subcontractorAdvanceSnapshots.set(id,_snapshot(_globalSubcontractingCloudPayload(item,sortOrder)));
+}
 function _clearNormalizedActivityState(){
   _activitySnapshots.clear();_activitySortOrders.clear();
   _activityRowIds=new WeakMap();
   _normalizedActivityLoaded=false;
+}
+function _clearNormalizedSubcontractingState(){
+  _subcontractorVersions.clear();_subcontractorSnapshots.clear();
+  _subcontractorAdvanceVersions.clear();_subcontractorAdvanceSnapshots.clear();
+  _normalizedSubcontractingLoaded=false;
 }
 function _clearNormalizedState(){
   _projectVersions.clear();_houseVersions.clear();_projectSnapshots.clear();
@@ -1471,6 +1508,110 @@ async function _syncNormalizedActivity(){
       console.error('Un evento de actividad ya registrado es inmutable:',historicalId);
       return false;
     }
+  }
+  return true;
+}
+async function _syncNormalizedSubcontractorUpserts(){
+  if(!_normalizedSubcontractingLoaded)return true;
+  const current=new Map();
+  for(const [sortOrder,item] of (SYS.subcontractors||[]).entries()){
+    if(!item||item.id===undefined||item.id===null||item.id===''){
+      console.error('Subcontratista sin id; no se guardó.');
+      return false;
+    }
+    const id=String(item.id);
+    if(current.has(id)){
+      console.error('ID de subcontratista duplicado; no se guardó:',id);
+      return false;
+    }
+    current.set(id,{item,sortOrder});
+  }
+  for(const [id,{item,sortOrder}] of current){
+    const payload=_globalSubcontractingCloudPayload(item,sortOrder);
+    const snap=_snapshot(payload);
+    if(!_subcontractorSnapshots.has(id)){
+      const {resp,data}=await _dbRowRequest('POST','/api/db/subcontractors',payload);
+      if(!resp.ok){console.error('No se pudo crear subcontratista',id,data);return false;}
+      _rememberSubcontractorRow(data,item,sortOrder);
+    }else if(_subcontractorSnapshots.get(id)!==snap){
+      const body={...payload,replace_data:true,expected_updated_at:_subcontractorVersions.get(id)};
+      let {resp,data}=await _dbRowRequest('PUT',`/api/db/subcontractors/${encodeURIComponent(id)}`,body);
+      if(resp.status===409||resp.status===428){
+        data=await _handleRowConflict(
+          'este subcontratista',id,payload,`/api/db/subcontractors/${encodeURIComponent(id)}`
+        );
+        if(!data)return false;
+        resp={ok:true};
+      }
+      if(!resp.ok){console.error('No se pudo actualizar subcontratista',id,data);return false;}
+      _rememberSubcontractorRow(data,item,sortOrder);
+    }
+  }
+  return true;
+}
+async function _syncNormalizedSubcontractorAdvances(){
+  if(!_normalizedSubcontractingLoaded)return true;
+  const current=new Map();
+  for(const [sortOrder,item] of (SYS.subAdvanceRecords||[]).entries()){
+    if(!item||item.id===undefined||item.id===null||item.id===''){
+      console.error('Avance global sin id; no se guardó.');
+      return false;
+    }
+    const id=String(item.id);
+    if(current.has(id)){
+      console.error('ID de avance global duplicado; no se guardó:',id);
+      return false;
+    }
+    current.set(id,{item,sortOrder});
+  }
+  // Las transacciones/casas ya fueron sincronizadas por el llamador. Así, un
+  // avance deja de estar "en uso" antes de intentar borrarlo.
+  for(const id of [..._subcontractorAdvanceSnapshots.keys()]){
+    if(current.has(id))continue;
+    const {resp,data}=await _dbRowRequest(
+      'DELETE',`/api/db/subcontractor_advances/${encodeURIComponent(id)}`
+    );
+    if(!resp.ok){console.error('No se pudo eliminar avance global',id,data);return false;}
+    _subcontractorAdvanceVersions.delete(id);_subcontractorAdvanceSnapshots.delete(id);
+  }
+  for(const [id,{item,sortOrder}] of current){
+    const payload=_globalSubcontractingCloudPayload(item,sortOrder);
+    const snap=_snapshot(payload);
+    if(!_subcontractorAdvanceSnapshots.has(id)){
+      const {resp,data}=await _dbRowRequest('POST','/api/db/subcontractor_advances',payload);
+      if(!resp.ok){console.error('No se pudo crear avance global',id,data);return false;}
+      _rememberSubcontractorAdvanceRow(data,item,sortOrder);
+    }else if(_subcontractorAdvanceSnapshots.get(id)!==snap){
+      const body={
+        ...payload,replace_data:true,
+        expected_updated_at:_subcontractorAdvanceVersions.get(id),
+      };
+      let {resp,data}=await _dbRowRequest(
+        'PUT',`/api/db/subcontractor_advances/${encodeURIComponent(id)}`,body
+      );
+      if(resp.status===409||resp.status===428){
+        data=await _handleRowConflict(
+          'este avance global',id,payload,
+          `/api/db/subcontractor_advances/${encodeURIComponent(id)}`
+        );
+        if(!data)return false;
+        resp={ok:true};
+      }
+      if(!resp.ok){console.error('No se pudo actualizar avance global',id,data);return false;}
+      _rememberSubcontractorAdvanceRow(data,item,sortOrder);
+    }
+  }
+  return true;
+}
+async function _syncDeletedSubcontractors(){
+  if(!_normalizedSubcontractingLoaded)return true;
+  const current=new Set((SYS.subcontractors||[]).map(item=>String(item.id)));
+  // Va al final: casas y avances deben haber limpiado sus referencias primero.
+  for(const id of [..._subcontractorSnapshots.keys()]){
+    if(current.has(id))continue;
+    const {resp,data}=await _dbRowRequest('DELETE',`/api/db/subcontractors/${encodeURIComponent(id)}`);
+    if(!resp.ok){console.error('No se pudo eliminar subcontratista',id,data);return false;}
+    _subcontractorVersions.delete(id);_subcontractorSnapshots.delete(id);
   }
   return true;
 }
@@ -1753,7 +1894,12 @@ let _conflictDialogOpen=false;
 let _versionWarned=false;
 
 function _settingsCloudData(){
-  const data={SYS};
+  const cloudSYS=JSON.parse(JSON.stringify(SYS||{}));
+  if(_normalizedSubcontractingLoaded){
+    delete cloudSYS.subcontractors;
+    delete cloudSYS.subAdvanceRecords;
+  }
+  const data={SYS:cloudSYS};
   if(!_normalizedActivityLoaded)data.activityLog=activityLog;
   // Compatibilidad temporal con un backend anterior al cutover normalizado.
   if(!_normalizedProjectsLoaded){
@@ -1832,10 +1978,13 @@ async function _saveDataToAPICore(forzar){
     // Primero persiste las filas normalizadas. Solo después actualiza SYS/activityLog.
     // Si todavía se está usando un backend anterior (fallback del loader), conserva el contrato
     // viejo y manda projects dentro del blob para no cortar el entorno durante el despliegue.
+    if(!await _syncNormalizedSubcontractorUpserts())return false;
     if(_normalizedProjectsLoaded){
       const rowsOk=await _syncNormalizedProjectsHouses();
       if(!rowsOk)return false;
     }
+    if(!await _syncNormalizedSubcontractorAdvances())return false;
+    if(!await _syncDeletedSubcontractors())return false;
     if(!await _syncNormalizedActivity())return false;
     const settingsData=_settingsCloudData();
     const nextSettingsSnapshot=_settingsCloudSnapshot(settingsData);
@@ -1891,6 +2040,7 @@ async function loadDataFromAPI(){
     const [
       resp,projectsResp,housesResp,transactionsResp,houseTypesResp,documentsResp,
       garantiasResp,bitacoraResp,tasksResp,subAdvancesResp,bodegaResp,activityResp,
+      subcontractorsResp,subcontractorAdvancesResp,
     ]=await Promise.all([
       fetch(`${BACKEND_URL}/api/db/settings/1`,{headers}),
       fetch(`${BACKEND_URL}/api/db/projects`,{headers}),
@@ -1904,6 +2054,8 @@ async function loadDataFromAPI(){
       fetch(`${BACKEND_URL}/api/db/sub_advances`,{headers}),
       fetch(`${BACKEND_URL}/api/db/bodega`,{headers}),
       fetch(`${BACKEND_URL}/api/db/activity_entries`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/subcontractors`,{headers}),
+      fetch(`${BACKEND_URL}/api/db/subcontractor_advances`,{headers}),
     ]);
     if(!resp.ok){ console.error('Error cargando desde API:', await resp.json()); return false; }
     const record=await resp.json();
@@ -1911,7 +2063,40 @@ async function loadDataFromAPI(){
     if(_settingsVersion) _versionWarned=false;  // se recuperó la sincronía: volver a avisar si se pierde
     if(record.data && typeof record.data==='string') record.data=JSON.parse(record.data);
     const d=record.data||{};
+    const legacySYS=d.SYS&&typeof d.SYS==='object'&&!Array.isArray(d.SYS)?d.SYS:{};
+    const hasLegacySubcontractors=Array.isArray(legacySYS.subcontractors);
+    const hasLegacySubcontractorAdvances=Array.isArray(legacySYS.subAdvanceRecords);
+    if(hasLegacySubcontractors!==hasLegacySubcontractorAdvances){
+      throw new Error('settings/1 contiene solo una de las dos fuentes de subcontratación');
+    }
     if(d.SYS) applyDefaults(d.SYS);
+    _clearNormalizedSubcontractingState();
+    if(subcontractorsResp.ok&&subcontractorAdvancesResp.ok){
+      const subcontractorData=await subcontractorsResp.json();
+      const advanceData=await subcontractorAdvancesResp.json();
+      const subcontractorRows=Array.isArray(subcontractorData.subcontractors)
+        ?subcontractorData.subcontractors:[];
+      const advanceRows=Array.isArray(advanceData.subcontractor_advances)
+        ?advanceData.subcontractor_advances:[];
+      if(subcontractorRows.length||advanceRows.length||
+         (!hasLegacySubcontractors&&!hasLegacySubcontractorAdvances)){
+        SYS.subcontractors=subcontractorRows.map((row,index)=>{
+          const item=_subcontractorFromRow(row);
+          _rememberSubcontractorRow(row,item,Number.isInteger(row.sort_order)?row.sort_order:index);
+          return {item,sortOrder:Number.isInteger(row.sort_order)?row.sort_order:index,rowId:String(row.id)};
+        }).sort((a,b)=>a.sortOrder-b.sortOrder||a.rowId.localeCompare(b.rowId)).map(entry=>entry.item);
+        SYS.subAdvanceRecords=advanceRows.map((row,index)=>{
+          const item=_subcontractorAdvanceFromRow(row);
+          _rememberSubcontractorAdvanceRow(
+            row,item,Number.isInteger(row.sort_order)?row.sort_order:index
+          );
+          return {item,sortOrder:Number.isInteger(row.sort_order)?row.sort_order:index,rowId:String(row.id)};
+        }).sort((a,b)=>a.sortOrder-b.sortOrder||a.rowId.localeCompare(b.rowId)).map(entry=>entry.item);
+        _normalizedSubcontractingLoaded=true;
+      }
+    }else if(!hasLegacySubcontractors&&!hasLegacySubcontractorAdvances){
+      throw new Error('Backend sin rutas de subcontratación después del cutover');
+    }
     _clearNormalizedActivityState();
     const hasLegacyActivity=Array.isArray(d.activityLog);
     if(activityResp.ok){
@@ -2173,6 +2358,7 @@ function applyDefaults(sys){
   if(!SYS.theme)SYS.theme='dark';
   if(!SYS.casasCols)SYS.casasCols=null;
   if(!SYS.subcontractors)SYS.subcontractors=[];
+  if(!SYS.subAdvanceRecords)SYS.subAdvanceRecords=[];
   if(SYS.googleMapsKey===undefined)SYS.googleMapsKey='AIzaSyCFKPbq02rnkIAe3cnzSeS7ztSoVP8TuTA';
   if(!SYS.stats)SYS.stats={open:true,scope:'todos',time:'todo',from:'',to:'',showGastado:false,showPendiente:false,cashWindow:'1m',cashProjects:null,unbilledProjects:null};
   if(!SYS.cotizaciones)SYS.cotizaciones=[];
