@@ -1789,12 +1789,22 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 ### Sesión 2026-08-01 (moneda, costo e IVA de Bills QBO multiproyecto)
 > Cambio solicitado y autorizado sobre la sincronización QBO completada. Se mantiene estrictamente QuickBooks → Siscon y no se agregó ninguna ruta de escritura hacia Intuit.
 - [x] Se normaliza `ExchangeRate` de QBO para colones: QBO entrega USD/CRC (por ejemplo `0.002197802`) y Siscon guarda CRC/USD (aprox. `455`). La factura CRC por ₡56,500 pasa a aproximadamente **$124.18**, no a millones de dólares. La misma normalización se aplica a Bills, Invoices y pagos.
-- [x] El costo real de cada proyecto usa, para Bills QBO, exclusivamente el subtotal de sus líneas asignadas al proyecto más el IVA QBO distribuido entre esas líneas. El IVA usa primero las tasas de compra (`PurchaseTaxRateList`) y el total tributario autoritativo del Bill.
+- [x] El costo real de cada proyecto usa, para Bills QBO, exclusivamente el subtotal neto de sus líneas asignadas al proyecto. El IVA queda visible como dato informativo, pero no se suma al costo, para homologar la métrica de costo de QuickBooks.
 - [x] Un Bill con líneas para varios proyectos se conserva como una sola factura lógica y aparece una vez en cada proyecto involucrado. Cada copia muestra la factura completa; las líneas ajenas quedan atenuadas en gris con la nota `Proyecto: "nombre"` y no suman al costo del proyecto visible.
 - [x] Los `BillPayment` se ligan a todas las copias de la factura multiproyecto y se reparten proporcionalmente por el costo de líneas+IVA de cada proyecto. El match Outlook↔QBO reconoce esas copias como una factura lógica, adjunta el PDF a todas y conserva las líneas/asignaciones locales cuando el Bill pertenece a un solo proyecto.
 - [x] Migración idempotente: el siguiente **QB ↻** reconstruye las copias multiproyecto anteriores como parte del lote base ya tramitado y sin exigir casas. Los documentos posteriores continúan exigiendo asignación por casa.
 - [x] Pruebas: backend completo en verde; QBO backend **26/26**; frontend transaccional **26/26**, proyectos **22/22**, deduplicación **16/16**, conexión **9/9** y persistencia transaccional **18/18**. La suite frontend conserva únicamente el fallo preexistente de `test-login-concurrency.js` (11/12).
 - [x] Publicado en `main`: backend `49750b2` y frontend `e6cf55d`; Vercel reportó despliegue exitoso y `/health` del backend responde `200`. La resincronización real queda pendiente porque, tras renovar Cloudflare Access, la app solicitó nuevamente el login interno de Siscon.
+
+### Sesión 2026-08-01 (costo neto multiproyecto y COGS de Recibos de venta QBO)
+> Cambio solicitado y aprobado expresamente sobre el mapeo y costo QBO ya completados. La integración continúa estrictamente QuickBooks → Siscon; todas las rutas nuevas son GET y no existe escritura hacia Intuit.
+- [x] Las tarjetas, etiquetas y detalle de Bills multiproyecto muestran **Total $costo-del-proyecto de $total-del-documento**. La factura completa aparece en cada proyecto involucrado; las líneas ajenas quedan en gris, muestran `Proyecto: "nombre"` y no aportan al costo del proyecto visible.
+- [x] **Costo Real** ahora suma el subtotal neto asignado al proyecto, sin IVA, igual que la métrica de costo de QuickBooks. El desglose separa Bills netos y costo FIFO de inventario para que se pueda auditar que no se está sumando la factura completa.
+- [x] Se incorporan los `SalesReceipt`/Recibos de venta ligados a proyectos como movimientos de proveedor **Recibo QBO**. Aunque el valor de venta sea $0, Siscon obtiene por lectura el COGS autoritativo de `GeneralLedgerDetail`, usa `InventoryValuationDetail` como respaldo y distribuye exactamente ese costo FIFO entre las líneas; nunca usa el precio de venta como costo.
+- [x] Los recibos y Bills con líneas de varios proyectos conservan el documento completo en cada proyecto y solo contabilizan las líneas activas. La primera importación queda tramitada y sin casas; documentos nuevos conservan la política de asignación por casa.
+- [x] El catálogo gratuito de proyectos también reconoce `Customer.IsProject`, además de `Job`, para clasificar transacciones de la experiencia moderna de QuickBooks Projects.
+- [x] El OAuth QBO dejó de depender de `/tmp`: `realmId`, nombre de compañía y `refresh_token` se guardan cifrados con AES-256-GCM dentro de la configuración persistente, nunca se devuelven al navegador y sobreviven a despliegues. El reinicio total sigue eliminando expresamente estas credenciales para exigir reconexión manual.
+- [x] Publicado en `main`: backend `36c69d3` y `7f0413d`; frontend `435a8ca` y `05c83b7`. `/health` responde `200`. Suite backend completa y pruebas QBO frontend en verde; continúa únicamente el fallo preexistente documentado de `test-login-concurrency.js`.
 
 ## 10. ⏳ Pendiente
 
@@ -1820,12 +1830,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
-- [ ] **Ejecutar y validar la resincronización QBO corregida:** iniciar sesión en producción y pulsar una vez el único botón **QB ↻**. Confirmar asignación por proyecto, Bills multiproyecto con líneas ajenas en gris, conversión CRC, costo de líneas+IVA y pagos ligados; las facturas del lote base deben quedar sin casas y tramitadas.
+- [ ] **Reconectar una vez y validar la resincronización QBO corregida:** el despliegue anterior perdió el token que todavía vivía en `/tmp`; desde Ajustes, conectar manualmente la compañía deseada y luego pulsar una vez **QB ↻**. Confirmar asignación por proyecto, Bills multiproyecto con líneas ajenas en gris, conversión CRC, costo neto sin IVA, pagos ligados y COGS de Recibos de venta; el lote base debe quedar sin casas y tramitado. La nueva bóveda cifrada conservará esta reconexión en despliegues posteriores.
 - [ ] **Carga posterior de casas desde Excel:** el usuario entregará por proyecto las listas de tipos de casa y sus líneas de materiales, más la lista de números de casa y tipo correspondiente. Importarlas automáticamente solo cuando entregue cada archivo e instrucciones.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
 ### Infraestructura / Producción
-- [ ] Persistencia de tokens en base de datos Supabase (no en `/tmp`)
+- [x] Persistencia cifrada de tokens QBO en Supabase (no en `/tmp`) — implementada y desplegada el 2026-08-01; el vault nunca se expone al frontend y el reinicio total lo elimina.
 - [ ] Seguridad: API keys siempre vía backend, nunca expuestas en el navegador
 - [x] Habilitar RLS correctamente en Supabase — deny-by-default verificado + `FORCE` en las 21 tablas (VUL-016, 2026-07-24). Las políticas por-rol/usuario (VUL-014/015) se reclasificaron como *no aplican por arquitectura* (service_role ignora RLS + el frontend no accede directo); ver Sección 11.
 
