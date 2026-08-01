@@ -3122,8 +3122,7 @@ function saveSettings(){
   closeModal();
 }
 async function qboTestConnection(){
-  // Save first so credentials are in SYS
-  if(!backendUrl()){ alert('Configura primero la URL del Backend en Ajustes.'); return; }
+  // Plan B usa '' como base válida para llamar /api/* en el mismo origen.
   showToast('Verificando conexión QBO…');
   const d=await qboStatus(); saveData();
   if(d.connected){
