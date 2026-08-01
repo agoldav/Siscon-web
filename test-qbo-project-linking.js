@@ -89,7 +89,7 @@ ok('facturas de proveedor reciben el catálogo y pueden moverse al proyecto QBO'
   /function qboSyncVendorBills\(qboBills,projectCatalog,options\)[\s\S]{0,7000}qboMoveRecord\([^)]*'billVendor'\)/.test(html));
 ok('Bills multiproyecto se dividen por línea conservando una copia completa por proyecto',
   /function qboBillProjectSlices/.test(html) && /qboProjectActive:activeIndexes\.has\(index\)/.test(html) &&
-  /Factura multiproyecto/.test(html));
+  /Documento multiproyecto/.test(html) && /esta línea no suma/.test(html));
 ok('facturas a clientes usan referencias estables QBO y no aproximan por nombre de cliente',
   /const projectResolution=qboResolveProject\(qi,qboProjects\)/.test(html) &&
   !/const cln=clientName\.toLowerCase\(\)\.trim\(\)/.test(html));

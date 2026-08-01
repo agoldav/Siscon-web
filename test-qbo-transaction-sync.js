@@ -33,7 +33,9 @@ vm.runInContext([
   'qboTextKey', 'qboVendorKey', 'qboBillAmount', 'qboBillMatch', 'qboFindBestBillMatch', 'qboBillAsRecord',
   'qboAppExchangeRate', 'qboAmountToUSD', 'qboLineSourceAmount', 'qboTaxCodePct', 'qboBillLineTaxAmounts',
   'qboResolveBillLineProject', 'qboBillProjectSlices', 'qboBillLinesForSlice',
-  'qboApplyBillMatch', 'qboApplyBillSlice', 'qboSyncVendorBills', 'qboPaymentAllocations', 'qboSyncPayments',
+  'qboApplyBillMatch', 'qboApplyBillSlice', 'qboSyncVendorBills',
+  'qboSalesReceiptProjectSlices', 'qboSalesReceiptLinesForSlice', 'qboApplySalesReceiptSlice', 'qboSyncSalesReceipts',
+  'qboPaymentAllocations', 'qboSyncPayments', 'projSpent', 'projSpentBreakdown',
 ].map(extractFunction).join('\n'), sandbox);
 
 let pass = 0, fail = 0;
@@ -114,9 +116,32 @@ ok('un Bill multiproyecto se replica una vez en cada proyecto involucrado',
   multiSync.imported===2 && multiA && multiB && multiA.id!==multiB.id);
 ok('cada copia conserva la factura completa y activa solo las líneas de su proyecto',
   multiA.lines.length===2 && multiB.lines.length===2 && multiA.lines.filter(l=>l.qboProjectActive).length===1 && multiB.lines.filter(l=>l.qboProjectActive).length===1);
-ok('el costo por proyecto suma su línea y su IVA sin duplicar el total documental',
+ok('el costo por proyecto conserva neto e IVA separados sin duplicar el total documental',
+  Math.abs(multiA.qboProjectSubtotalUSD-100)<0.001 && Math.abs(multiB.qboProjectSubtotalUSD-200)<0.001 &&
   Math.abs(multiA.qboProjectTotalUSD-113)<0.001 && Math.abs(multiB.qboProjectTotalUSD-226)<0.001 &&
-  Math.abs(multiA.qboProjectTotalUSD+multiB.qboProjectTotalUSD-339)<0.001);
+  Math.abs(multiA.qboProjectTotalUSD+multiB.qboProjectTotalUSD-339)<0.001 &&
+  Math.abs(multiA.qboDocumentSubtotalUSD-300)<0.001 && Math.abs(multiA.qboDocumentTotalUSD-339)<0.001);
+ok('Costo Real usa el neto sin IVA de cada slice QBO',
+  Math.abs(sandbox.projSpent({billVendor:[multiA,multiB]})-300)<0.001);
+
+console.log('\nRecibos de venta y COGS FIFO:');
+const receipt={id:'SR1',docNumber:'RV-1',txnDate:'2026-08-01',currency:'USD',exchangeRate:1,total:0,cogsTotal:90,
+  cogsSource:'GeneralLedgerDetail',customer:{id:'P10',name:'Condominio Roble'},project:{id:'P10',name:'Condominio Roble'},
+  lines:[{id:'SRL1',item:{id:'I1',name:'Vidrio'},description:'Vidrio',quantity:2,fifoCost:60},
+    {id:'SRL2',item:{id:'I2',name:'Marco'},description:'Marco',quantity:1,fifoCost:30}]};
+const receiptFirst=sandbox.qboSyncSalesReceipts([receipt],catalog,{initialImport:true});
+const receiptLocal=project.billVendor.find(b=>b.qboEntity==='SalesReceipt'&&b.qboId==='SR1');
+ok('un SalesReceipt de valor cero se importa como gasto por su COGS exacto',
+  receiptFirst.imported===1 && receiptLocal && receiptLocal.qboSalesAmountUSD===0 && receiptLocal.qboProjectSubtotalUSD===90 && receiptLocal.ivaUSD===0);
+ok('el recibo queda en el proyecto, tramitado y con sus costos FIFO por línea',
+  receiptLocal.qboProjectId==='P10' && receiptLocal.qboInitialImportProcessed===true && receiptLocal.houseAssignmentRequired===false &&
+  Math.abs(receiptLocal.lines.reduce((sum,line)=>sum+line.qboCostUSD,0)-90)<0.001);
+const receiptSecond=sandbox.qboSyncSalesReceipts([receipt],catalog,{initialImport:true});
+ok('repetir el sync de recibos no duplica el gasto',
+  receiptSecond.imported===0 && project.billVendor.filter(b=>b.qboEntity==='SalesReceipt'&&b.qboId==='SR1').length===1);
+const receiptWithoutReport=sandbox.qboSyncSalesReceipts([{...receipt,cogsTotal:0,cogsSource:'unavailable'}],catalog,{initialImport:true});
+ok('un fallo temporal del reporte no borra un COGS previamente verificado',
+  receiptWithoutReport.unresolvedCost===1 && project.billVendor.includes(receiptLocal));
 
 project.billVendor.push({ id: 'LOCAL1', num: 'FP-LOCAL', invoiceNumber: 'LOCAL-9', party: 'Otro', date: '2026-08-01', totalUSD: 25, currencyBill: 'USD' });
 sandbox.qboSyncVendorBills([qboBill], catalog);
@@ -153,6 +178,9 @@ ok('solo el botón global ejecuta la sincronización completa',
 ok('el frontend consume Payment y BillPayment sin publicar a QBO',
   /qboRead\('\/api\/qbo\/payments'\)/.test(html) && /snapshot\.payments/.test(html) && /snapshot\.billPayments/.test(html) &&
   !/app\.post\('\/api\/qbo\/transactions'/.test(html));
+ok('el frontend consume SalesReceipt y COGS solo por GET',
+  /qboRead\('\/api\/qbo\/inventory-costs'\)/.test(html) && /snapshot\.salesReceipts/.test(html) &&
+  /qboSyncSalesReceipts\(snapshot\.salesReceipts/.test(html) && !/fetch\([^)]*inventory-costs[^)]*POST/.test(html));
 ok('el botón global reemplaza todos los catálogos QBO y confirma sus cantidades',
   /SYS\.qbo\.vendorCache=nextVendors;SYS\.qbo\.customerCache=nextCustomers/.test(html) &&
   /SYS\.qbo\.itemCache=nextItems/.test(html) && /SYS\.qbo\.projectCache=qboProjects/.test(html) &&
@@ -163,6 +191,12 @@ ok('el botón global reemplaza todos los catálogos QBO y confirma sus cantidade
 ok('el primer lote se marca por compañía y los posteriores exigen asignación de casa',
   /initialProjectTransactionImportCompletedAt/.test(html) && /initialProjectTransactionImportRealmId/.test(html) &&
   /qboImportBatch:initialImport\?'initial':'incremental'/.test(html) && /houseAssignmentRequired:!initialImport/.test(html));
+ok('la política de costo v3 usa facturas sin IVA y agrega COGS FIFO',
+  /projectBillAllocationPolicyVersion\|\|0\)<3/.test(html) && /projectBillAllocationPolicyVersion=3/.test(html) &&
+  /qboProjectSubtotalUSD\?\?b\.subtotalUSD/.test(html) && /Facturas sin IVA/.test(html) && /inventario FIFO/.test(html));
+ok('la lista explica el monto aplicado frente al documento completo',
+  /Total \$\{fmt\(qboProjectCost\)\} de \$\{fmt\(qboDocumentCost\)\}/.test(html) &&
+  /Proyecto: "\$\{esc\(l\.qboLineProjectName/.test(html) && /esta línea no suma/.test(html));
 ok('el sync central omite transacciones sin proyecto en vez de enviarlas a Sin clasificar',
   /if\(projectResolution\.status!=='matched'\)[\s\S]{0,280}skippedTransactions\+\+/.test(html) &&
   !/SYS\.unclassified\.push\(\{\.\.\.newInv,type:'Invoice'\}\)/.test(html));

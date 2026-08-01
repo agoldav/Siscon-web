@@ -3722,16 +3722,24 @@ function renderBreadcrumb(){
 
 // ========== METRIC CALCULATIONS ==========
 // #6/#10: el gasto del proyecto proviene de las facturas de proveedor (no de las OC).
-// En Bills QBO suma exclusivamente las líneas del proyecto y su IVA asignado.
+// En QBO suma el costo neto de las líneas del proyecto, sin IVA, más el COGS FIFO
+// de los recibos de venta que retiran inventario. Nunca suma el total documental.
 function projSpent(p){
   if(!p)return 0;
   if(p.billVendor && p.billVendor.length){
     return p.billVendor.filter(b=>b.status!=='Anulada').reduce((s,b)=>s+(b.qboId
-      ?Number(b.qboProjectTotalUSD??b.totalUSD??0)
+      ?Number(b.qboProjectSubtotalUSD??b.subtotalUSD??0)
       :Number(b.subtotalUSD)||0),0);
   }
   // respaldo: compras registradas en casas (flujo anterior)
   return (p.houses||[]).reduce((s,h)=>s+(h.spent||0),0);
+}
+function projSpentBreakdown(p){
+  return (p&&p.billVendor||[]).filter(b=>b.status!=='Anulada').reduce((out,b)=>{
+    const amount=b.qboId?Number(b.qboProjectSubtotalUSD??b.subtotalUSD??0):(Number(b.subtotalUSD)||0);
+    if(b.qboEntity==='SalesReceipt')out.inventoryCogs+=amount;else out.vendorBills+=amount;
+    return out;
+  },{vendorBills:0,inventoryCogs:0});
 }
 function getCatTotal(typeObj){
   if(!typeObj.categories)return 0;
@@ -3764,6 +3772,7 @@ function renderMetric(){
   const p=curProj;
   syncProjectFromHouses(p);
   const realSpent=projSpent(p);
+  const spentBreakdown=projSpentBreakdown(p);
   const avail=p.budget-realSpent;
   const progPct=p.area>0?Math.round(p.areaInstalled/p.area*1000)/10:0;
   const budgeted=p.types.reduce((s,t)=>s+((getCatTotal(t)||t.budget||0)*p.houses.filter(h=>h.typeId===t.id).length),0);
@@ -3854,7 +3863,7 @@ function renderMetric(){
       </div>
       <div class="pm-band" style="gap:26px;align-items:flex-start">
         ${efld('Presupuesto',fmt(p.budget),p.budget,'budget','number','130px')}
-        ${ro('Costo Real',fmt(realSpent))}
+        ${ro('Costo Real',fmt(realSpent),'',`Facturas sin IVA ${fmt(spentBreakdown.vendorBills)} + inventario FIFO ${fmt(spentBreakdown.inventoryCogs)}`)}
         ${ro('Disponible',fmt(avail),avail>=0?'grn':'red')}
         ${efld('Precio de Venta',fmt(p.salePrice),p.salePrice,'salePrice','number','130px')}
         ${utilCell}
@@ -8070,7 +8079,11 @@ async function qboReadTransactions(force){
   if(!force&&_qboTransactionsCache)return _qboTransactionsCache;
   const documents=await qboRead('/api/qbo/transactions');
   const paymentData=await qboRead('/api/qbo/payments');
-  _qboTransactionsCache={...documents,payments:paymentData.payments||[],billPayments:paymentData.billPayments||[]};
+  const inventoryData=await qboRead('/api/qbo/inventory-costs');
+  _qboTransactionsCache={...documents,
+    payments:paymentData.payments||[],billPayments:paymentData.billPayments||[],
+    salesReceipts:inventoryData.salesReceipts||[],unresolvedInventoryCosts:Number(inventoryData.unresolvedCosts)||0,
+    inventoryCostErrors:inventoryData.reportErrors||[]};
   return _qboTransactionsCache;
 }
 async function qboReadCatalogs(force){
@@ -8171,7 +8184,8 @@ function qboApplyProjectLink(record,resolution){
 function qboMoveRecord(record,sourceProject,targetProject,collection){
   if(!targetProject||sourceProject===targetProject)return false;
   const target=targetProject[collection]||(targetProject[collection]=[]);
-  const duplicate=target.find(item=>item===record||(record.qboId&&String(item.qboId||'')===String(record.qboId)));
+  const recordEntity=String(record.qboEntity||'Bill');
+  const duplicate=target.find(item=>item===record||(record.qboId&&String(item.qboId||'')===String(record.qboId)&&String(item.qboEntity||'Bill')===recordEntity));
   if(duplicate&&duplicate!==record)return false;
   if(sourceProject){
     const source=sourceProject[collection]||[];
@@ -8436,6 +8450,7 @@ function qboApplyBillSlice(local,qb,slice,initialImport){
   const currency=String(qb.currency||'USD').toUpperCase();
   const useQboLines=local.createdBy==='QBO Import'||slice.projectCount>1||!(local.lines&&local.lines.length);
   qboApplyBillMatch(local,qb,['qbo_id']);
+  local.qboEntity='Bill';
   local.type='proveedor';
   local.num=local.num||('FP-QB-'+String(qb.docNumber||qb.id||''));
   local.invoiceNumber=String(qb.docNumber||local.invoiceNumber||'');
@@ -8454,6 +8469,8 @@ function qboApplyBillSlice(local,qb,slice,initialImport){
   local.qboProjectSourceSubtotal=slice.sourceSubtotal;
   local.qboProjectSourceTax=slice.sourceTax;
   local.qboDocumentTotal=Number(qb.total)||0;
+  local.qboDocumentSubtotalUSD=qboAmountToUSD(qb.subtotal,currency,qb.exchangeRate);
+  local.qboDocumentTaxUSD=qboAmountToUSD(qb.totalTax,currency,qb.exchangeRate);
   local.qboDocumentTotalUSD=qboAmountToUSD(qb.total,currency,qb.exchangeRate);
   local.qboDocumentTotalCRC=currency==='CRC'?(Number(qb.total)||0):0;
   local.qboMultiProject=slice.projectCount>1;
@@ -8468,7 +8485,7 @@ function qboApplyBillSlice(local,qb,slice,initialImport){
 function qboSyncVendorBills(qboBills,projectCatalog,options){
   const initialImport=!!(options&&options.initialImport);
   const locals=[];
-  projects.forEach(project=>(project.billVendor||[]).forEach(bill=>locals.push({project,bill})));
+  projects.forEach(project=>(project.billVendor||[]).filter(bill=>!bill.qboEntity||bill.qboEntity==='Bill').forEach(bill=>locals.push({project,bill})));
   (SYS.unclassified||[]).filter(bill=>bill.type==='Bill').forEach(bill=>locals.push({project:null,bill}));
   let linked=0,updated=0,imported=0,ambiguous=0,moved=0,unresolvedProject=0,missing=0,skippedNonProject=0,removed=0;
   const desiredProjectsByQboId=new Map();
@@ -8532,7 +8549,7 @@ function qboSyncVendorBills(qboBills,projectCatalog,options){
 
   // Verifica presencia por proyecto después de crear los slices por línea.
   const checkedAt=new Date().toISOString();
-  projects.forEach(project=>(project.billVendor||[]).forEach(bill=>{
+  projects.forEach(project=>(project.billVendor||[]).filter(bill=>!bill.qboEntity||bill.qboEntity==='Bill').forEach(bill=>{
     const desired=desiredProjectsByQboId.get(String(bill.qboId||''));
     const present=!!(desired&&desired.has(String(project.id)));
     const next=present?'present':'missing';
@@ -8543,6 +8560,98 @@ function qboSyncVendorBills(qboBills,projectCatalog,options){
     else {bill.qboPresenceMessage=`No se encuentra en el proyecto "${project.name}" de QuickBooks`;missing++;}
   }));
   return {linked,updated,imported,ambiguous,moved,unresolvedProject,missing,skippedNonProject,removed};
+}
+
+function qboSalesReceiptProjectSlices(receipt,projectCatalog){
+  const lines=receipt&&receipt.lines||[];
+  let lineResolutions=lines.map(line=>qboResolveBillLineProject(receipt,line,projectCatalog));
+  if(!lineResolutions.some(resolution=>resolution.status==='matched')){
+    const whole=qboResolveProject(receipt,projectCatalog);
+    if(whole.status!=='matched')return [];
+    lineResolutions=lines.length?lines.map(()=>whole):[whole];
+  }
+  const groups=new Map();
+  lineResolutions.forEach((resolution,index)=>{
+    if(resolution.status!=='matched'||!resolution.project)return;
+    const key=String(resolution.project.id);
+    if(!groups.has(key))groups.set(key,{project:resolution.project,resolution,lineIndexes:[],costUSD:0});
+    const group=groups.get(key);
+    if(index<lines.length){group.lineIndexes.push(index);group.costUSD+=Math.max(0,Number(lines[index].fifoCost)||0);}
+  });
+  const grouped=[...groups.values()];
+  const cogsTotal=Math.max(0,Number(receipt&&receipt.cogsTotal)||0);
+  const assignedTotal=grouped.reduce((sum,group)=>sum+group.costUSD,0);
+  if(grouped.length===1&&cogsTotal>0)grouped[0].costUSD=cogsTotal;
+  else if(assignedTotal>0&&cogsTotal>0&&lineResolutions.length&&lineResolutions.every(resolution=>resolution.status==='matched')){
+    const scale=cogsTotal/assignedTotal;grouped.forEach(group=>{group.costUSD*=scale;});
+  }
+  return grouped.filter(group=>group.costUSD>0).map(group=>({...group,lineResolutions,projectCount:grouped.length,documentCostUSD:cogsTotal}));
+}
+function qboSalesReceiptLinesForSlice(receipt,slice,existingLines){
+  const activeIndexes=new Set(slice.lineIndexes||[]),previousById=new Map((existingLines||[]).map(line=>[String(line.qboLineId||''),line]));
+  const rawLines=receipt&&receipt.lines||[];
+  const rawActiveTotal=rawLines.reduce((sum,line,index)=>sum+(activeIndexes.has(index)?Math.max(0,Number(line.fifoCost)||0):0),0);
+  const activeScale=rawActiveTotal>0?slice.costUSD/rawActiveTotal:1;
+  return rawLines.map((line,index)=>{
+    const previous=previousById.get(String(line.id||''))||{},resolution=slice.lineResolutions[index]||{};
+    const active=activeIndexes.has(index),rawCost=Math.max(0,Number(line.fifoCost)||0),cost=active?rawCost*activeScale:rawCost;
+    const qty=Number(line.quantity)||1,projectName=resolution.project&&resolution.project.name||resolution.name||'';
+    return {productId:String(line.item&&line.item.id||''),desc:String(line.item&&line.item.name||line.description||'Material de inventario'),
+      qty,price:qty?cost/qty:cost,discPct:0,assign:Array.isArray(previous.assign)?previous.assign:[],ivaRate:0,qboTaxUSD:0,
+      qboLineId:String(line.id||index),qboCostUSD:cost,qboLineProjectId:resolution.id||'',qboLineProjectName:projectName,
+      qboProjectActive:active};
+  });
+}
+function qboApplySalesReceiptSlice(local,receipt,slice,initialImport){
+  const before=JSON.stringify(local),documentCost=Math.max(0,Number(receipt.cogsTotal)||0);
+  local.qboId=String(receipt.id||'');local.qboEntity='SalesReceipt';local.type='proveedor';
+  local.num='RV-QB-'+String(receipt.docNumber||receipt.id||'');local.invoiceNumber=String(receipt.docNumber||receipt.id||'');
+  local.party='Inventario QuickBooks';local.date=String(receipt.txnDate||'');local.status='Aplicado';
+  local.currencyBill='USD';local.exchangeRate=1;local.lines=qboSalesReceiptLinesForSlice(receipt,slice,local.lines);
+  local.subtotalUSD=slice.costUSD;local.ivaUSD=0;local.totalUSD=slice.costUSD;local.totalCRC=0;
+  local.qboProjectSubtotalUSD=slice.costUSD;local.qboProjectTaxUSD=0;local.qboProjectTotalUSD=slice.costUSD;
+  local.qboDocumentSubtotalUSD=documentCost;local.qboDocumentTaxUSD=0;local.qboDocumentTotalUSD=documentCost;
+  local.qboDocumentTotal=Number(receipt.total)||0;local.qboSalesAmountUSD=qboAmountToUSD(receipt.total,receipt.currency,receipt.exchangeRate);
+  local.qboCostSource=String(receipt.cogsSource||'');local.qboMultiProject=slice.projectCount>1;
+  local.qboAllProjectRefs=qboTransactionProjectRefs(receipt);local.qboProjectPresence='present';delete local.qboPresenceMessage;
+  local.notes=String(receipt.privateNote||'');local.appliedToHouses=!!local.appliedToHouses;
+  if(!local.createdAt)local.createdAt=new Date().toLocaleDateString('es-CR');if(!local.createdBy)local.createdBy='QBO Import';
+  qboApplyProjectLink(local,slice.resolution);qboApplyImportPolicy(local,initialImport);
+  return before!==JSON.stringify(local);
+}
+function qboSyncSalesReceipts(receipts,projectCatalog,options){
+  const initialImport=!!(options&&options.initialImport),locals=[];
+  projects.forEach(project=>(project.billVendor||[]).filter(record=>record.qboEntity==='SalesReceipt').forEach(record=>locals.push({project,record})));
+  let imported=0,updated=0,moved=0,removed=0,skippedNonProject=0,unresolvedCost=0;
+  const seen=new Set();
+  for(const receipt of (receipts||[])){
+    const qboId=String(receipt.id||''),slices=qboSalesReceiptProjectSlices(receipt,projectCatalog);
+    const exactRows=locals.filter(row=>String(row.record.qboId||'')===qboId);
+    if(!(Number(receipt.cogsTotal)>0)){
+      unresolvedCost++;exactRows.forEach(row=>seen.add(`${qboId}|${String(row.project.id)}`));continue;
+    }
+    if(!slices.length){skippedNonProject++;continue;}
+    const usedRows=new Set();
+    for(const slice of slices){
+      const key=`${qboId}|${String(slice.project.id)}`;seen.add(key);
+      let row=exactRows.find(candidate=>candidate.project===slice.project&&!usedRows.has(candidate));
+      if(!row&&slices.length===1)row=exactRows.find(candidate=>!usedRows.has(candidate));
+      if(row){
+        usedRows.add(row);if(row.project!==slice.project&&qboMoveRecord(row.record,row.project,slice.project,'billVendor')){row.project=slice.project;moved++;}
+        if(qboApplySalesReceiptSlice(row.record,receipt,slice,initialImport))updated++;
+      }else{
+        const record={id:`qbo-salesreceipt-${qboId}-${String(slice.resolution.id||slice.project.id)}`,_pending:!initialImport,
+          qboImportBatch:initialImport?'initial':'incremental',qboInitialImportProcessed:initialImport,houseAssignmentRequired:!initialImport,
+          createdAt:new Date().toLocaleDateString('es-CR'),createdBy:'QBO Import',appliedToHouses:false};
+        qboApplySalesReceiptSlice(record,receipt,slice,initialImport);
+        if(!slice.project.billVendor)slice.project.billVendor=[];slice.project.billVendor.push(record);
+        const newRow={project:slice.project,record};locals.push(newRow);usedRows.add(newRow);imported++;
+      }
+    }
+    exactRows.filter(row=>!usedRows.has(row)).forEach(row=>{if(qboIsAutoImportedTransaction(row.record)&&qboRemoveRecord(row.record,row.project,'billVendor'))removed++;});
+  }
+  locals.forEach(row=>{const key=`${String(row.record.qboId||'')}|${String(row.project.id)}`;if(!seen.has(key)&&qboIsAutoImportedTransaction(row.record)&&qboRemoveRecord(row.record,row.project,'billVendor'))removed++;});
+  return {imported,updated,moved,removed,skippedNonProject,unresolvedCost};
 }
 
 function qboPaymentAllocations(payment,txnType){
@@ -8557,7 +8666,7 @@ function qboSyncPayments(snapshot){
   const invoices={},bills={},allPayments=[];
   projects.forEach(project=>{
     (project.invClient||[]).forEach(invoice=>{if(invoice.qboId)invoices[String(invoice.qboId)]={project,record:invoice};});
-    (project.billVendor||[]).forEach(bill=>{if(bill.qboId)(bills[String(bill.qboId)]||(bills[String(bill.qboId)]=[])).push({project,record:bill});});
+    (project.billVendor||[]).filter(bill=>!bill.qboEntity||bill.qboEntity==='Bill').forEach(bill=>{if(bill.qboId)(bills[String(bill.qboId)]||(bills[String(bill.qboId)]=[])).push({project,record:bill});});
     (project.payments||[]).forEach(payment=>allPayments.push({project,record:payment}));
   });
   let imported=0,updated=0,unresolved=0,removed=0;
@@ -9256,7 +9365,12 @@ function renderGenericList(type){
       const xrTx = qboAppExchangeRate(tx.currencyBill,tx.exchangeRate||SYS.exchangeRate||1);
       const totalCRCdisp = tx.totalCRC || (tx.totalUSD * xrTx);
       const totalUSDdisp = tx.totalUSD || (tx.totalCRC ? tx.totalCRC/xrTx : 0);
-      const amountDisplay = isCRCTx
+      const qboProjectCost=Number(tx.qboProjectSubtotalUSD??tx.subtotalUSD??0);
+      const qboDocumentCost=Number(tx.qboDocumentSubtotalUSD??qboProjectCost);
+      const amountDisplay = type==='proveedor'&&tx.qboId
+        ?`<span style="font-size:12px;font-weight:600;color:var(--grn)">Total ${fmt(qboProjectCost)} de ${fmt(qboDocumentCost)}</span>
+          <span style="font-size:10px;color:var(--t3)">${tx.qboEntity==='SalesReceipt'?'COGS FIFO de inventario':`sin IVA${Number(tx.qboProjectTaxUSD)>0?' · IVA informativo '+fmt(Number(tx.qboProjectTaxUSD)):''}`}</span>`
+        :isCRCTx
         ? `<span style="font-size:12px;font-weight:600;color:var(--org)">₡${totalCRCdisp.toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
            <span style="font-size:10px;color:var(--t3)">${fmt(totalUSDdisp)} USD</span>`
         : `<span style="font-size:12px;font-weight:600;color:var(--grn)">${fmt(tx.totalUSD||0)}</span>`;
@@ -9264,13 +9378,13 @@ function renderGenericList(type){
         <span class="oc-num-badge" style="color:${def.color}">${esc(type==='proveedor'&&tx.invoiceNumber?tx.invoiceNumber:tx.num)}</span>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}${type==='pagos'&&tx.paymentDirection?`<span style="font-size:9px;font-weight:700;color:${tx.paymentDirection==='received'?'var(--grn)':'var(--org)'}">${tx.paymentDirection==='received'?'RECIBIDO QB':'PAGADO QB'}</span>`:''}</div>
-          <div style="font-size:10px;color:${type==='proveedor'&&tx.qboProjectPresence==='missing'?'var(--red)':'var(--t2)'};margin-top:2px">${type==='proveedor'&&tx.qboProjectPresence==='missing'?`⚠ ${esc(tx.qboPresenceMessage||'No se encuentra en este proyecto de QuickBooks')}`:`${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.qboMultiProject?' · Parte de factura multiproyecto':''}${tx.consecutivo?' · Consec: '+esc(tx.consecutivo):''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}`}</div>
+          <div style="font-size:10px;color:${type==='proveedor'&&tx.qboProjectPresence==='missing'?'var(--red)':'var(--t2)'};margin-top:2px">${type==='proveedor'&&tx.qboProjectPresence==='missing'?`⚠ ${esc(tx.qboPresenceMessage||'No se encuentra en este proyecto de QuickBooks')}`:`${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.qboEntity==='SalesReceipt'?' · Recibo de venta QBO':''}${tx.qboMultiProject?' · Parte de factura multiproyecto':''}${tx.consecutivo?' · Consec: '+esc(tx.consecutivo):''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}`}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
           ${txnBadge(tx.status)}
           ${amountDisplay}
         </div>
-        <span class="qbo-badge${tx.qboId?'':' pending'}">${def.qbo?(tx.qboId?'✓ QBO':'⏳ QBO'):'Interno'}</span>
+        <span class="qbo-badge${tx.qboId?'':' pending'}">${def.qbo?(tx.qboId?(tx.qboEntity==='SalesReceipt'?'✓ RECIBO QBO':'✓ QBO'):'⏳ QBO'):'Interno'}</span>
         <div style="position:relative">
           <button onclick="event.stopPropagation();txnListMenuToggle('${tx.id}',event)" style="background:transparent;border:none;color:var(--t3);font-size:16px;cursor:pointer;padding:2px 6px" title="Opciones">⋮</button>
           <div id="txn-dd-${tx.id}" style="display:none;position:absolute;right:0;top:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);z-index:200;min-width:130px;box-shadow:0 4px 16px rgba(0,0,0,.4)">
@@ -11910,7 +12024,7 @@ function renderVendorBill(){
       const title=bc.hasBudget?`Presupuesto casa: ${isCRC?'₡'+budDisp.toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2}):fmt(bc.cost)}`:'Sin presupuesto de referencia para este material';
       diffCell=`<div class="oc-subtotal" style="color:${color};font-weight:600" title="${title}">${sign?sign+diffFmt:'='}</div>`;
     }
-    return `<div class="oc-line" style="${cols};${inactive?'opacity:.42;background:var(--bg3);filter:grayscale(.7)':''}">
+    return `<div class="oc-line" style="${cols};${inactive?'opacity:.42;background:var(--bg3);filter:grayscale(.7);pointer-events:none':''}">
       <div class="oc-dh">⠿</div>
       <input list="vb-items-list" class="oc-cell-inp" style="text-align:left" value="${curItemName.replace(/"/g,'&quot;')}" placeholder="Buscar producto QB..." onchange="vbSetProductByName(${i},this.value)"/>
       <input class="oc-cell-inp" style="text-align:left" value="${(l.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción..." oninput="vbState.lines[${i}].desc=this.value"/>
@@ -11927,7 +12041,7 @@ function renderVendorBill(){
       </select></span>
       <button class="btn-sm" style="font-size:10px;padding:3px 7px;${assignOk?'border-color:var(--grn);color:var(--grn)':'border-color:var(--amb);color:var(--amb)'}" onclick="vbOpenAssign(${i})" title="${assignedTxt}">Asignar</button>
       <button class="oc-btn-del" onclick="vbState.lines.splice(${i},1);renderVendorBill()">✕</button>
-    </div>${inactive?`<div style="padding:1px 16px 5px 78px;font-size:10px;color:var(--t3);background:var(--bg3)">Proyecto: "${esc(l.qboLineProjectName||'Sin proyecto')}" · esta línea no suma al costo de ${esc(p.name)}.</div>`:l.assign&&l.assign.length?`<div style="padding:0 16px 4px 78px;font-size:9px;color:${assignOk?'var(--grn)':'var(--amb)'}">→ ${assignedTxt}${!assignOk?' (la suma debe igualar '+(l.qty||0)+')':''}</div>`:''}`;
+    </div>${st.qboId?`<div style="padding:1px 16px 5px 78px;font-size:10px;color:${inactive?'var(--t3)':'var(--grn)'};${inactive?'background:var(--bg3)':''}">Proyecto: "${esc(l.qboLineProjectName||st.qboProjectName||p.name)}" · ${inactive?'esta línea no suma':'esta línea sí suma'} al costo de ${esc(p.name)}.</div>`:l.assign&&l.assign.length?`<div style="padding:0 16px 4px 78px;font-size:9px;color:${assignOk?'var(--grn)':'var(--amb)'}">→ ${assignedTxt}${!assignOk?' (la suma debe igualar '+(l.qty||0)+')':''}</div>`:''}`;
   }).join('');
   // Botón de PAGO: botón con dropdown de estados (Borrador / Pendiente de Pago / Pagada)
   const pagarBtn = (curTxnId==='new') ? '' : (()=>{
@@ -11957,7 +12071,7 @@ function renderVendorBill(){
       <button class="btn-cancel" onclick="curTxnId=null;renderTxnSub()">← Volver</button>
       <div class="th-title">${curTxnId==='new'?'Nueva Factura de Proveedor':'Editar Factura de Proveedor'}</div>
       ${st.linkedOcNum?`<span class="qbo-badge" style="background:rgba(13,153,255,.12);color:var(--acc);border-color:rgba(13,153,255,.3)">↪ Ligada a OC ${st.linkedOcNum}</span>`:''}
-      ${st.qboId?`<span class="qbo-badge">✓ Vinculada con QBO Bill ${st.qboId}</span>`:`<span class="qbo-badge pending">Pendiente de match QBO</span>`}
+      ${st.qboId?`<span class="qbo-badge">✓ ${st.qboEntity==='SalesReceipt'?'Recibo de venta QBO':'Vinculada con QBO Bill'} ${st.qboId}</span>`:`<span class="qbo-badge pending">Pendiente de match QBO</span>`}
     </div>
     <div class="oc-form-wrap">
       <div class="oc-form-header">
@@ -11972,7 +12086,8 @@ function renderVendorBill(){
       </div>
       ${st.qboInitialImportProcessed?`<div style="padding:6px 16px;background:rgba(29,184,122,.08);border-bottom:1px solid var(--border);font-size:11px;color:var(--grn)">Importación inicial tramitada · no requiere asignación a casas.</div>`:''}
       ${st.houseAssignmentRequired?`<div style="padding:6px 16px;background:rgba(212,148,26,.1);border-bottom:1px solid var(--border);font-size:11px;color:var(--amb)">Documento nuevo de QBO: asigna cada línea a una casa o bodega antes de tramitarlo.</div>`:''}
-      ${st.qboMultiProject?`<div style="padding:6px 16px;background:rgba(13,153,255,.08);border-bottom:1px solid var(--border);font-size:11px;color:var(--acc)">Factura multiproyecto · total completo QBO: ${st.currencyBill==='CRC'?'₡'+Number(st.qboDocumentTotal||0).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2}):fmt(st.qboDocumentTotalUSD||st.qboDocumentTotal||0)}. Solo las líneas activas y su IVA suman al costo de ${esc(p.name)}.</div>`:''}
+      ${st.qboId?`<div style="padding:7px 16px;background:rgba(13,153,255,.08);border-bottom:1px solid var(--border);font-size:11px;color:var(--acc)">${st.qboEntity==='SalesReceipt'?'Costo FIFO de inventario':'Costo sin IVA'} en este proyecto: <strong>${fmt(Number(st.qboProjectSubtotalUSD)||0)} de ${fmt(Number(st.qboDocumentSubtotalUSD??st.qboProjectSubtotalUSD)||0)}</strong>. ${st.qboEntity==='SalesReceipt'?`El recibo tiene valor de venta ${fmt(Number(st.qboSalesAmountUSD)||0)} y carga este COGS real al proyecto.`:`IVA informativo ${fmt(Number(st.qboProjectTaxUSD)||0)}; no se incluye en Costo Real. Total del documento con IVA ${fmt(Number(st.qboDocumentTotalUSD)||0)}.`}</div>`:''}
+      ${st.qboMultiProject?`<div style="padding:6px 16px;background:rgba(124,111,239,.08);border-bottom:1px solid var(--border);font-size:11px;color:var(--pur)">Documento multiproyecto: se muestra completo, pero solo las líneas activas suman al costo de ${esc(p.name)}.</div>`:''}
       <div class="oc-fields-area">
         <div class="oc-fields-row">
           <div class="oc-fld"><div class="oc-fld-label">Proyecto</div>
@@ -13147,17 +13262,16 @@ async function qboFullSync(btn){
   if(!qboConfigured()) return;
   const btnEl=btn||document.getElementById('qbo-sync-btn');
   if(btnEl){ btnEl.disabled=true; btnEl.textContent='QB ↻…'; }
-  let imported=0, updated=0, importedPayments=0, importedProjects=0, skippedTransactions=0, removedImports=0;
+  let imported=0, updated=0, importedPayments=0, importedProjects=0, importedInventoryReceipts=0, skippedTransactions=0, removedImports=0;
   try{
-    // Evita una ráfaga de diez lecturas simultáneas contra Intuit: primero se traen
-    // transacciones (incluidos Payment/BillPayment) y luego los catálogos.
+    // Las lecturas se serializan: documentos, pagos, recibos/COGS y luego catálogos.
     const snapshot=await qboReadTransactions(true);
     const catalogs=await qboReadCatalogs(true);
     const qboInvs=snapshot.invoices||[];
     const qboProjects=catalogs.projects||[];
     const activeRealm=String(SYS.qbo&&SYS.qbo.realmId||'');
     const initialImport=!SYS.qbo.initialProjectTransactionImportCompletedAt||String(SYS.qbo.initialProjectTransactionImportRealmId||'')!==activeRealm;
-    const billAllocationMigration=Number(SYS.qbo.projectBillAllocationPolicyVersion||0)<2;
+    const billAllocationMigration=Number(SYS.qbo.projectBillAllocationPolicyVersion||0)<3;
     const nextVendors=(catalogs.vendors||[]).filter(v=>v.active);
     const nextCustomers=(catalogs.customers||[]).filter(c=>c.active);
     const nextItems=(catalogs.items||[]).filter(i=>i.active).map(i=>({...i,price:i.unitPrice||0}));
@@ -13281,7 +13395,17 @@ async function qboFullSync(btn){
     removedImports+=vendorSync.removed;
     if(vendorSync.ambiguous)addNotif(`QB: ${vendorSync.ambiguous} factura(s) con coincidencia ambigua; no se enlazaron automáticamente.`);
 
-    // 3. Importar cobros de clientes y pagos de facturas de proveedores por LinkedTxn.
+    // 3. Importar recibos de venta con valor de venta cero pero COGS FIFO real.
+    const receiptSync=qboSyncSalesReceipts(snapshot.salesReceipts||[],qboProjects,{initialImport:initialImport||billAllocationMigration});
+    imported+=receiptSync.imported;importedInventoryReceipts+=receiptSync.imported;
+    updated+=receiptSync.updated+receiptSync.moved;removedImports+=receiptSync.removed;
+    skippedTransactions+=receiptSync.skippedNonProject;
+    if(receiptSync.unresolvedCost||snapshot.unresolvedInventoryCosts){
+      addNotif(`QB: ${Math.max(receiptSync.unresolvedCost||0,snapshot.unresolvedInventoryCosts||0)} recibo(s) de venta sin COGS contable disponible; no se sumaron.`);
+    }
+    if((snapshot.inventoryCostErrors||[]).length)addNotif(`QB: algunos reportes de costo no estuvieron disponibles (${snapshot.inventoryCostErrors.length}); se conservaron solo costos contables verificables.`);
+
+    // 4. Importar cobros de clientes y pagos de facturas de proveedores por LinkedTxn.
     const paymentSync=qboSyncPayments(snapshot);
     importedPayments+=paymentSync.imported;
     updated+=paymentSync.updated;
@@ -13295,7 +13419,7 @@ async function qboFullSync(btn){
       SYS.qbo.initialProjectTransactionImportCompletedAt=new Date().toISOString();
       SYS.qbo.initialProjectTransactionImportRealmId=activeRealm;
     }
-    SYS.qbo.projectBillAllocationPolicyVersion=2;
+    SYS.qbo.projectBillAllocationPolicyVersion=3;
 
     saveData();
     if(curTab==='txn')renderTxnSub();
@@ -13303,6 +13427,7 @@ async function qboFullSync(btn){
     updateBadges();
     const msg=[];
     if(imported)msg.push(`${imported} factura(s) nueva(s)`);
+    if(importedInventoryReceipts)msg.push(`${importedInventoryReceipts} recibo(s) de venta con COGS`);
     if(importedPayments)msg.push(`${importedPayments} pago(s) nuevo(s)`);
     if(importedProjects)msg.push(`${importedProjects} proyecto(s) nuevo(s)`);
     if(updated)msg.push(`${updated} registro(s) actualizado(s)`);
