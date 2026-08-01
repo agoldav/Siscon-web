@@ -178,6 +178,8 @@ ok('solo el botón global ejecuta la sincronización completa',
 ok('el frontend consume Payment y BillPayment sin publicar a QBO',
   /qboRead\('\/api\/qbo\/payments'\)/.test(html) && /snapshot\.payments/.test(html) && /snapshot\.billPayments/.test(html) &&
   !/app\.post\('\/api\/qbo\/transactions'/.test(html));
+ok('los errores QBO conservan el diagnóstico acotado que entrega el backend',
+  /\[data\.error\|\|\('QuickBooks HTTP '\+r\.status\),data\.detail\]\.filter\(Boolean\)\.join/.test(html));
 ok('el frontend consume SalesReceipt y COGS solo por GET',
   /qboRead\('\/api\/qbo\/inventory-costs'\)/.test(html) && /snapshot\.salesReceipts/.test(html) &&
   /qboSyncSalesReceipts\(snapshot\.salesReceipts/.test(html) && !/fetch\([^)]*inventory-costs[^)]*POST/.test(html));

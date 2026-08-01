@@ -8071,7 +8071,7 @@ let _qboTransactionsCache=null, _qboCatalogsCache=null;
 async function qboRead(path){
   const r=await fetch(backendUrl()+path,{method:'GET',headers:qboHdr(),credentials:'include'});
   let data={}; try{data=await r.json();}catch{}
-  if(!r.ok) throw new Error(data.error||('QuickBooks HTTP '+r.status));
+  if(!r.ok) throw new Error([data.error||('QuickBooks HTTP '+r.status),data.detail].filter(Boolean).join(': '));
   if(data.readOnly!==true) throw new Error('Respuesta QBO rechazada: falta garantía readOnly');
   return data;
 }
