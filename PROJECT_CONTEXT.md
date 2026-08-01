@@ -1737,7 +1737,6 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > Payments, así que la app no puede procesar cobros.
 
 ### Próxima sesión (2026-07-17+)
-- [x] **Supabase Auth real** — Login ✅, **gestión de usuarios ✅ Fase 1**, **RLS ✅ activado** y **directorio único Auth/profiles ✅** para Usuarios, Mensajes, Tareas y selectores. El email automático de invitaciones **no aplica al flujo actual**: el Administrador crea usuarios directamente y el acceso ocurre por Microsoft/Cloudflare Access. Los ids numéricos históricos de `SYS.users` se conservan solo como compatibilidad de lectura. Nota: RLS solo protege acceso directo; los roles se siguen aplicando en el backend (no hay políticas por-rol porque todo va por service_role).
 - [ ] **Invitar usuarios** — Para que colaboren en tiempo real (gestión de usuarios en la app)
 - [ ] **Ajustes finales** — UI, validaciones, seguridad (refactor de código, testing, optimizaciones)
 
