@@ -100,6 +100,26 @@ function environment(initialProjects) {
     put.body.expected_updated_at === 't1' && put.body.replace_data === true,
     updated.calls);
 
+  console.log('\nReasignación de proyecto por ProjectRef:');
+  const movedTx = { id: 'fac-move', num: 'F-M', totalUSD: 50, lines: [], qboProjectId: 'P20' };
+  const sourceProject = projectWithTransactions();
+  const targetProject = projectWithTransactions();
+  targetProject.id = 202; targetProject.name = 'Proyecto destino';
+  sourceProject.billVendor.push(movedTx);
+  const moved = environment([sourceProject,targetProject]);
+  moved.api._rememberProjectRow({ updated_at: 'p1' }, sourceProject);
+  moved.api._rememberProjectRow({ updated_at: 'p2' }, targetProject);
+  moved.api._rememberTransactionRow({ updated_at: 't1' }, movedTx, sourceProject.id, 'factura_proveedor');
+  sourceProject.billVendor.length = 0;
+  targetProject.billVendor.push(movedTx);
+  ok('reasignación termina OK', await moved.api._syncNormalizedProjectsHouses());
+  const moveCall=moved.calls.find(call=>call.url==='/api/db/transactions/fac-move/move');
+  ok('usa la ruta explícita de movimiento con versión y proyecto destino',
+    moveCall&&moveCall.method==='POST'&&moveCall.body.target_project_id==='202'&&moveCall.body.expected_updated_at==='t1',moved.calls);
+  ok('después del movimiento persiste los metadatos QBO sin borrar ni recrear la factura',
+    moved.calls.some(call=>call.method==='PUT'&&call.url==='/api/db/transactions/fac-move')&&
+    !moved.calls.some(call=>call.method==='DELETE'||(call.method==='POST'&&call.url==='/api/db/transactions')),moved.calls);
+
   console.log('\nBorrado individual:');
   const tx3 = { id: 'pago-1', totalUSD: 20, lines: [] };
   const project3 = projectWithTransactions();

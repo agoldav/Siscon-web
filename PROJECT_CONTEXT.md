@@ -1721,6 +1721,25 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Ajustes → Usuarios muestra la misma lista de cuentas reales que Mensajes; se eliminó el segundo flujo activo de registros RRHH para evitar listas divergentes. Pruebas: `test-unified-directory.js` (9/9), `test-project-collections.js` (22/22), sintaxis frontend/backend OK.
 - [x] Desplegado: frontend `5c937b1` en Vercel y backend `d1dd634` en Render; health del backend `200` y alias Vercel contiene el cambio.
 
+### Sesión 2026-07-31 (QuickBooks → Siscon — mapeo de solo lectura y deduplicación Outlook)
+> Código implementado y verificado localmente; todavía sin commit/deploy ni prueba contra la compañía QBO de producción.
+- [x] Dirección de integración fijada en código y UI: **QuickBooks → Siscon únicamente**. Los guardados de OC, facturas y transacciones ya no ofrecen acciones de envío a QBO ni llaman funciones de creación. El backend no recuperó `/api/qbo/query` ni `/api/qbo/create`.
+- [x] Backend con dos snapshots GET de lista blanca: `/api/qbo/transactions` y `/api/qbo/catalogs`. Las consultas se definen únicamente en servidor, se paginan en bloques de 1000, usan minor version 75 y solo leen `Bill`, `Invoice`, `Vendor`, `Customer`, `Item`, `Account`, `TaxRate` y `TaxCode`.
+- [x] Nuevo `qbo-read-model.js`: normaliza facturas, moneda documental, `ExchangeRate`/`HomeTotalAmt`, saldo/estado de pago, líneas por artículo o cuenta, impuestos reales, campos personalizados, proveedores, clientes, artículos, costo de compra, cuenta de gasto y proveedor preferido.
+- [x] Factura a cliente importada desde QBO usa `TxnTaxDetail.TotalTax`; se eliminó la suposición de IVA fijo de 13%. El consecutivo de Hacienda se obtiene de los campos personalizados y admite configuración por nombre o `DefinitionId` en `SYS.qbo.haciendaField`.
+- [x] Match de Factura de Proveedor Outlook ↔ QBO: prioridad por `qboId`; si no existe, exige número de factura normalizado + evidencia fuerte de proveedor y monto o fecha, respetando moneda. Dos candidatos con igual evidencia quedan ambiguos y **no** se enlazan automáticamente.
+- [x] Una factura de Outlook que coincide con un registro existente adjunta su PDF y enriquece ese mismo registro; no crea otra factura. La sincronización QBO enlaza metadatos, cuentas, artículos, moneda, saldo y estado sobre `billVendor` existente y nunca agrega automáticamente un segundo Bill al proyecto.
+- [x] Corregido `qboConfigured()` para el Plan B same-origin (`BACKEND_URL=''`), que antes trataba una URL relativa válida como “QBO no configurado”. Refresh OAuth concurrente protegido con una sola promesa en vuelo.
+- [x] Pruebas nuevas: backend `test-qbo-readonly.js` **13/13**; frontend `test-qbo-bill-matching.js` **14/14**. Todas las demás suites backend/frontend pasan salvo `test-login-concurrency.js`, que ya falla en `HEAD` por buscar `function openSettings` aunque la función real es `async function openSettings` (fallo preexistente y fuera de este alcance).
+
+### Sesión 2026-08-01 (QuickBooks Projects → proyectos Siscon)
+> Código implementado y verificado localmente; todavía sin commit/deploy, activación del permiso premium ni prueba contra la compañía QBO de producción.
+- [x] El adaptador conserva el `ProjectRef` real de QuickBooks: en cabecera para `Invoice` y por línea para `Bill`. Las referencias repetidas al mismo proyecto se consolidan; una factura de compra repartida entre varios proyectos queda ambigua y no se mueve automáticamente.
+- [x] Catálogo de proyectos mediante una operación GraphQL fija de solo lectura (`projectManagementProjects`), paginada y definida exclusivamente en el backend. Aunque GraphQL usa POST, el documento enviado solo contiene `query`; no existe ruta ni código de mutation. Activación controlada por `QBO_PROJECTS_ENABLED` para no romper el OAuth existente si el permiso premium aún no está habilitado.
+- [x] El vínculo se resuelve exclusivamente por nombre exacto de proyecto y luego queda estabilizado con `qboProjectId`. Ya no se infiere el proyecto de una factura a cliente por el nombre del cliente.
+- [x] Una factura existente en otro proyecto o en Sin clasificar se reubica como el mismo objeto al proyecto indicado por QBO, sin crear una copia. La importación Outlook también prefiere el proyecto de QBO cuando el Bill ya tuvo match fuerte.
+- [x] Pruebas: backend `test-qbo-readonly.js` **17/17**; frontend `test-qbo-bill-matching.js` **14/14** y `test-qbo-project-linking.js` **10/10**. Suite completa backend y frontend (excepto el fallo preexistente documentado de `test-login-concurrency.js`) en verde.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1744,8 +1763,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - (Ambas completadas: Tareas y Mensajes Internos.)
 
 ### Integraciones pendientes
-- [ ] **QuickBooks:** afinar mapeo de campos en producción (cuentas de gasto, custom field consecutivo Hacienda, monedas CRC/USD)
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
+- [ ] **Activar QuickBooks Projects en producción:** requiere Partner tier Silver o superior, habilitar el permiso restringido `project-management.project` en Intuit Developer, configurar `QBO_PROJECTS_ENABLED=true` en Render, desplegar este código y reconectar QuickBooks para emitir un token con el scope nuevo.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
 ### Infraestructura / Producción
