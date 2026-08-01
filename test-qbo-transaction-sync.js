@@ -28,6 +28,7 @@ const sandbox = { projects: [project], SYS: { unclassified: [] }, tcGet: () => 5
 vm.createContext(sandbox);
 vm.runInContext([
   'qboProjectName', 'qboTransactionProjectRefs', 'qboResolveProject', 'qboBindProjectId', 'qboApplyProjectLink', 'qboMoveRecord',
+  'qboSyncProjectCatalog',
   'qboTextKey', 'qboVendorKey', 'qboBillAmount', 'qboBillMatch', 'qboFindBestBillMatch', 'qboBillAsRecord',
   'qboAmountToUSD', 'qboApplyBillMatch', 'qboSyncVendorBills', 'qboPaymentAllocations', 'qboSyncPayments',
 ].map(extractFunction).join('\n'), sandbox);
@@ -39,6 +40,17 @@ function ok(name, condition) {
 }
 
 const catalog = [{ id: 'P10', name: 'Condominio Roble' }];
+console.log('Proyectos QBO:');
+const projectCatalogFirst = sandbox.qboSyncProjectCatalog([
+  {id:'P10',name:'Condominio Roble',status:'ACTIVE',customerId:'C1'},
+  {id:'P20',name:'Proyecto Nuevo',status:'ACTIVE',customerId:'C2'},
+], [{id:'C2',name:'Cliente Dos'}]);
+ok('enlaza el proyecto existente e importa el proyecto QBO faltante',
+  projectCatalogFirst.imported===1 && project.qboProjectId==='P10' && sandbox.projects.some(p=>p.qboProjectId==='P20'&&p.name==='Proyecto Nuevo'&&p.client==='Cliente Dos'));
+const projectCatalogSecond = sandbox.qboSyncProjectCatalog([{id:'P20',name:'Proyecto Renombrado',status:'ACTIVE',customerId:'C2'}], []);
+ok('repetir el catálogo no duplica y conserva el nombre exacto de QBO',
+  projectCatalogSecond.imported===0 && sandbox.projects.filter(p=>p.qboProjectId==='P20').length===1 && sandbox.projects.find(p=>p.qboProjectId==='P20').name==='Proyecto Renombrado');
+
 const qboBill = {
   id: 'B1', docNumber: 'G-100', txnDate: '2026-08-01', currency: 'USD', exchangeRate: 1,
   total: 100, subtotal: 100, totalTax: 0, balance: 100, paymentStatus: 'Pendiente de Pago',
@@ -85,7 +97,8 @@ ok('el botón global reemplaza todos los catálogos QBO y confirma sus cantidade
   /SYS\.qbo\.vendorCache=nextVendors;SYS\.qbo\.customerCache=nextCustomers/.test(html) &&
   /SYS\.qbo\.itemCache=nextItems/.test(html) && /SYS\.qbo\.projectCache=qboProjects/.test(html) &&
   /nextItems\.length\} materiales/.test(html) && /nextCustomers\.length\} clientes/.test(html) &&
-  /qboProjects\.length\} proyectos/.test(html) && /nextVendors\.length\} proveedores/.test(html));
+  /qboProjects\.length\} proyectos/.test(html) && /nextVendors\.length\} proveedores/.test(html) &&
+  /qboSyncProjectCatalog\(qboProjects,nextCustomers\)/.test(html));
 
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);

@@ -8143,6 +8143,37 @@ function qboMoveRecord(record,sourceProject,targetProject,collection){
   return true;
 }
 
+function qboSyncProjectCatalog(qboProjects,qboCustomers){
+  let imported=0,updated=0,ambiguous=0;
+  (qboProjects||[]).filter(qb=>String(qb.status||'ACTIVE').toUpperCase()!=='INACTIVE').forEach((qb,index)=>{
+    const qboId=String(qb.id||''),name=qboProjectName(qb.name);
+    if(!qboId||!name)return;
+    let local=projects.find(project=>String(project.qboProjectId||'')===qboId);
+    if(!local){
+      const exact=projects.filter(project=>qboProjectName(project.name)===name);
+      if(exact.length===1)local=exact[0];
+      else if(exact.length>1){ambiguous++;return;}
+    }
+    if(local){
+      const before=JSON.stringify([local.name||'',local.qboProjectId||'',local.qboProjectName||'']);
+      local.name=name;local.qboProjectId=qboId;local.qboProjectName=name;
+      if(before!==JSON.stringify([local.name||'',local.qboProjectId||'',local.qboProjectName||'']))updated++;
+      return;
+    }
+    const parent=(qboCustomers||[]).find(customer=>String(customer.id||'')===String(qb.customerId||''));
+    projects.push({
+      id:Date.now()+index,name,num:'QB-'+qboId,client:parent&&parent.name||'',razonSocial:'',correo:'',
+      status:'Sin iniciar',startDate:'',lastActivity:Date.now(),budget:0,salePrice:0,utilityPct:0,
+      area:0,areaInstalled:0,locked:false,exchangeRate:SYS.exchangeRate||1,
+      types:[],houses:[],docs:[],uploads:[],garantias:[],bitacora:[],tasks:[],ocs:[],
+      invClient:[],billVendor:[],payments:[],creditNotes:[],requis:[],subAdvances:[],bodega:[],
+      qboProjectId:qboId,qboProjectName:name,createdBy:'QBO Import',createdAt:new Date().toLocaleDateString('es-CR'),
+    });
+    imported++;
+  });
+  return {imported,updated,ambiguous};
+}
+
 function qboTextKey(value){
   return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 }
@@ -12873,7 +12904,7 @@ async function qboFullSync(btn){
   if(!qboConfigured()) return;
   const btnEl=btn||document.getElementById('qbo-sync-btn');
   if(btnEl){ btnEl.disabled=true; btnEl.textContent='QB ↻…'; }
-  let imported=0, updated=0, importedPayments=0;
+  let imported=0, updated=0, importedPayments=0, importedProjects=0;
   try{
     // Evita una ráfaga de diez lecturas simultáneas contra Intuit: primero se traen
     // transacciones (incluidos Payment/BillPayment) y luego los catálogos.
@@ -12899,6 +12930,12 @@ async function qboFullSync(btn){
     SYS.qbo.projectCache=qboProjects;SYS.qbo.taxCodeCache=nextTaxCodes;
     SYS.qbo.projectCatalogStatus=nextProjectStatus;
     SYS.qbo.lastSync=new Date().toLocaleString('es-CR');
+
+    // Los Customer/Job activos de QBO también forman la lista de proyectos de Siscon.
+    // Se enlazan por ID estable o nombre exacto y solo se crea el proyecto que falte.
+    const projectSync=qboSyncProjectCatalog(qboProjects,nextCustomers);
+    importedProjects=projectSync.imported;updated+=projectSync.updated;
+    if(projectSync.ambiguous)addNotif(`QB: ${projectSync.ambiguous} proyecto(s) con nombre duplicado en Siscon; no se enlazaron.`);
 
     // Construir índice de facturas existentes en la app (por qboId y por DocNumber)
     const existById={}, existByDoc={};
@@ -12988,10 +13025,12 @@ async function qboFullSync(btn){
 
     saveData();
     if(curTab==='txn')renderTxnSub();
+    else if(!curProj&&dashboardView==='proyectos')renderDash();
     updateBadges();
     const msg=[];
     if(imported)msg.push(`${imported} factura(s) nueva(s)`);
     if(importedPayments)msg.push(`${importedPayments} pago(s) nuevo(s)`);
+    if(importedProjects)msg.push(`${importedProjects} proyecto(s) nuevo(s)`);
     if(updated)msg.push(`${updated} registro(s) actualizado(s)`);
     msg.push(`${nextItems.length} materiales`,`${nextCustomers.length} clientes`,`${qboProjects.length} proyectos`,`${nextVendors.length} proveedores`);
     showToast('QB → Siscon: '+msg.join(' · '));
