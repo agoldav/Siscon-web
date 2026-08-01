@@ -1719,6 +1719,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] **Supabase Auth/profiles queda como directorio canónico** para Usuarios, Mensajes, Tareas y selectores de transacciones. La caché común se carga desde `GET /api/auth/directory`.
 - [x] La pestaña Tareas guarda nuevos asignados con el UUID real de Auth y lo indexa en `tasks.assignee_id`; los ids numéricos históricos de `SYS.users` siguen siendo legibles como compatibilidad.
 - [x] Ajustes → Usuarios muestra la misma lista de cuentas reales que Mensajes; se eliminó el segundo flujo activo de registros RRHH para evitar listas divergentes. Pruebas: `test-unified-directory.js` (9/9), `test-project-collections.js` (22/22), sintaxis frontend/backend OK.
+- [x] Desplegado: frontend `5c937b1` en Vercel y backend `d1dd634` en Render; health del backend `200` y alias Vercel contiene el cambio.
 
 ## 10. ⏳ Pendiente
 
