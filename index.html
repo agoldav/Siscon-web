@@ -1026,7 +1026,14 @@ if(!window._fetchWrappedCF){
   window.fetch=function(input,init){
     try{
       const url=typeof input==='string'?input:(input&&input.url)||'';
-      if(_isBackendUrl(url)){ init=Object.assign({},init,{credentials:'include'}); }
+      if(_isBackendUrl(url)){
+        init=Object.assign({},init,{credentials:'include'});
+        if(SYS&&SYS.appResetId){
+          const headers=new Headers(init.headers||{});
+          headers.set('x-siscon-reset-id',SYS.appResetId);
+          init.headers=headers;
+        }
+      }
     }catch(e){}
     return _origFetch(input,init);
   };
@@ -2548,13 +2555,23 @@ function loadData(){
     });
   }catch(e){console.warn('Error cargando datos guardados:',e);}
 }
-function resetData(){
-  if(!confirm('¿Seguro que deseas borrar todos los proyectos y datos operativos? Los ajustes del sistema (usuarios, conexiones, API keys) se conservarán. Esta acción no se puede deshacer.'))return;
-  // Preserve all SYS settings, only clear operational data
-  const saved = {projects:[], activityLog:[], SYS: JSON.parse(JSON.stringify(SYS))};
-  saved.SYS.cotizaciones = [];
-  localStorage.setItem(LS_KEY, JSON.stringify(saved));
-  location.reload();
+async function resetData(){
+  if(!confirm('¿Confirmas BORRAR TODO el contenido operativo de Siscon?\n\nSe conservarán únicamente usuarios, roles, contraseñas, API keys, infraestructura, auditoría y backups. QuickBooks y Outlook quedarán desconectados.'))return;
+  try{
+    const resp=await fetch(`${BACKEND_URL}/api/admin/reset-app`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${_sbToken||''}`,'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},
+      body:JSON.stringify({confirmation:'BORRAR TODO'})
+    });
+    const result=await resp.json().catch(()=>({}));
+    if(!resp.ok)throw new Error(result.detail||result.message||result.error||`HTTP ${resp.status}`);
+    localStorage.removeItem(LS_KEY);
+    localStorage.removeItem('migrated_to_supabase');
+    alert('La aplicación quedó limpia. QuickBooks y Outlook fueron desconectados.');
+    location.reload();
+  }catch(e){
+    alert('No se completó el borrado: '+e.message);
+  }
 }
 
 async function migrateLocalStorageToSupabase(){
