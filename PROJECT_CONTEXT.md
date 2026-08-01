@@ -1766,6 +1766,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Validación en vivo: tras un `502` transitorio del backend durante el despliegue, una nueva ejecución de **Sync QBO** terminó correctamente, importó **2 facturas nuevas**, actualizó **8 registros** y dejó la app en estado **Guardado**. No se ejecutó ninguna escritura hacia QuickBooks.
 - [x] Corregido el destino incorrecto 116↔Dor (`de9ce67`, `d32f9dc`, `1d065b2`): el adaptador conserva referencias de proyecto de cabecera y línea, el nombre exacto gana sobre un `qboProjectId` obsoleto y una referencia sin nombre puede vincularse una sola vez desde **Sin clasificar**. Esa asignación guarda el `ProjectRef` estable en el proyecto local; las siguientes facturas con el mismo ID se clasifican automáticamente. La lista sin clasificar ahora muestra número, cliente/proveedor, fecha, monto y ProjectRef.
 - [x] Validación real con la compañía de prueba: el REST contable devolvió el ProjectRef `808402993` sin nombre (el nombre pertenece a la API Projects premium). Se vinculó gratuitamente a **Dor** y quedaron guardadas allí la factura a cliente **1001** por **$2,500.00** y la factura de proveedor **00100001010000073216** de **Polycenter S.A. USD** por **$883.11**, ambas con marca **✓ QBO**. Se recargó la aplicación y ambas persistieron. No hubo escrituras hacia QuickBooks.
+- [x] Sincronización centralizada (`e2e3319`, `7c5f8b2`): se eliminaron los botones QBO de Facturas de Proveedores, formularios y catálogos de Ajustes. El único control manual es **QB ↻** junto a la barra de Claude y trae facturas, pagos y catálogos exclusivamente QBO → Siscon.
+- [x] La lectura de pagos se separó en `GET /api/qbo/payments` para no agotar el timeout del proxy gratuito. `Payment` y `BillPayment` se consultan con concurrencia acotada y reintento corto; el frontend los combina con Invoice/Bill antes de enlazarlos al mismo proyecto y documento sin duplicidad. Pruebas QBO: frontend **9/9** y backend **25/25**.
 
 ## 10. ⏳ Pendiente
 
@@ -1792,6 +1794,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
 - [ ] **Validar QuickBooks Projects gratis con datos reales:** falta dejar conectada desde Ajustes la compañía definitiva y ejecutar una sincronización para verificar los nombres `Customer/Job`/`ProjectRef`. Ya no se cambia `QBO_REALM_ID` manualmente.
+- [ ] **Validación final de pagos QBO en producción:** después del despliegue, iniciar sesión nuevamente, pulsar el único botón **QB ↻** y confirmar en Dor → Transacciones → Pagos que aparecen el cobro de Invoice 1001 y el pago del Bill 00100001010000073216.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
 ### Infraestructura / Producción
