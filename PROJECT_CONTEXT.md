@@ -134,7 +134,8 @@ Estructura raíz: `{ projects: [...], SYS: {...}, activityLog: [...] }`.
 ### SYS (configuración global)
 ```js
 { supervisorPassword, exchangeRate, theme,
-  qbo:{ connected, realmId, environment, vendorCache, customerCache, itemCache, lastSync },
+  qbo:{ connected, realmId, companyName, environment, connectEnvironment,
+        environments, pending, vendorCache, customerCache, itemCache, lastSync },
   mailbox:{ user, msConnected },   // Outlook OAuth vía backend
   subcontractors:[...],
   googleMapsKey, claudeKey, backendUrl, backendToken,
@@ -166,11 +167,13 @@ Estructura raíz: `{ projects: [...], SYS: {...}, activityLog: [...] }`.
 | GET | `/` | Salud |
 | POST | `/api/claude` | Proxy Anthropic |
 | GET | `/api/tc` | Tipo de cambio Hacienda |
-| GET | `/api/qbo/connect` | OAuth QBO → redirect Intuit |
-| GET | `/api/qbo/callback` | Intercambia code por tokens QBO |
-| GET | `/api/qbo/status` | Estado conexión QBO |
-| POST | `/api/qbo/query` | Query QBO |
-| POST | `/api/qbo/create` | Crea entidad QBO |
+| GET | `/api/qbo/connect?environment=...` | OAuth QBO para Sandbox o Producción → redirect Intuit (solo Admin) |
+| GET | `/api/qbo/callback` | Intercambia code, lee `CompanyInfo` y deja la compañía pendiente de confirmación |
+| GET | `/api/qbo/status` | Estado, compañía activa, entornos disponibles y selección pendiente |
+| POST | `/api/qbo/confirm-company` | Activa la compañía pendiente (solo Admin) |
+| POST | `/api/qbo/cancel-company` | Descarta la compañía pendiente (solo Admin) |
+| GET | `/api/qbo/transactions` | Snapshot de solo lectura de Bill/Invoice |
+| GET | `/api/qbo/catalogs` | Snapshot de solo lectura de catálogos y Customer/Job |
 | GET | `/api/ms/connect` | OAuth Microsoft → redirect Azure |
 | GET | `/api/ms/callback` | Intercambia code por tokens MS |
 | GET | `/api/ms/status` | Estado conexión Outlook |
@@ -190,9 +193,12 @@ Estructura raíz: `{ projects: [...], SYS: {...}, activityLog: [...] }`.
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 SISCON_TOKEN=siscon-2026-pmapp
-QBO_CLIENT_ID=...
-QBO_CLIENT_SECRET=...
-QBO_ENV=sandbox
+QBO_DEVELOPMENT_CLIENT_ID=...       # compañías Sandbox
+QBO_DEVELOPMENT_CLIENT_SECRET=...
+QBO_PRODUCTION_CLIENT_ID=...        # compañías reales
+QBO_PRODUCTION_CLIENT_SECRET=...
+QBO_ENV=production                  # entorno legado/default
+# QBO_CLIENT_ID / QBO_CLIENT_SECRET siguen como compatibilidad para el QBO_ENV default
 BACKEND_BASE=https://siscon-backend.onrender.com
 MS_CLIENT_ID=...          # Azure App Registration
 MS_CLIENT_SECRET=...
@@ -984,14 +990,14 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   - El callback ligaba el `realmId` al `state` de esa autorización (VUL-026, ya cerraba el riesgo de reasociarlo
     a mitad de flujo), pero no lo comparaba contra una compañía esperada. Si la cuenta de Intuit que completa el
     consentimiento tiene acceso a varias compañías, podía autorizar sin querer una distinta de la de Siscon.
-  - **Corregido:** si `QBO_REALM_ID` está fijado en el entorno, el callback exige que coincida (403 si no). Si no
-    está fijado, no se puede validar contra nada — se deja pasar como antes (compatibilidad hacia atrás; hoy
-    Render no tiene ese valor fijado, así que el comportamiento no cambia hasta que se configure a propósito).
-    Documentado en `.env.example` como recomendado.
-- Pruebas del lote VUL-037/038/041/042: `siscon-backend/test-oauth-hardening.js` (33/33) — servidor real en
+  - **Corregido inicialmente:** `QBO_REALM_ID` fijaba una sola compañía. **Diseño vigente (2026-08-01):** el
+    callback consulta el nombre real con `CompanyInfo` por GET y deja los tokens pendientes; un Administrador
+    debe confirmar explícitamente nombre, entorno y realm desde Ajustes. Así se puede escoger cualquier compañía
+    disponible sin aceptar una distinta en silencio ni editar `QBO_REALM_ID` en Render.
+- Pruebas del lote VUL-037/038/041/042: `siscon-backend/test-oauth-hardening.js` (43/43) — servidor real en
   proceso hijo (403 sin JWT en las 4 rutas nuevas/tocadas), extracción y ejecución de `generateMsState`/
   `saveMsAuthState`/`validateAndClearMsAuthState` (aleatoriedad, un solo uso, TTL, state ausente) y de la
-  comparación de `realmId` (con/sin `QBO_REALM_ID`, coincide/no coincide), y — para VUL-041 — las 4 combinaciones
+  selección/confirmación QBO sin activación silenciosa, y — para VUL-041 — las 4 combinaciones
   reales de `checkToken()`: sin nada configurado → 503; con el opt-in → 200 (dev local sigue igual); con el
   opt-in + `SISCON_TOKEN` → 401/200 según el header; con Access activo → 403 (el fix es no-op en producción).
 - [x] **VUL-040 | Backups sin control de rol ni cifrado** (MEDIA)
@@ -1744,6 +1750,15 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Render quedó temporalmente fijado a la compañía QBO de prueba mediante `QBO_REALM_ID`; el servicio se reconstruyó correctamente y `/health` responde `200`. No se desactivó el pinning de compañía.
 - [x] Corregido el reconocimiento de la conexión QBO bajo el proxy gratuito same-origin (`aa52a00`): `qboTestConnection()` ya no interpreta `BACKEND_URL=''` como ausencia de backend y siempre consulta `/api/qbo/status`. La autorización OAuth de la compañía de prueba completó correctamente con el `realmId` fijado; el deploy de Vercel se verificó en vivo y Ajustes muestra **Conectado**. Regresión nueva `test-qbo-connection.js` **3/3**; pruebas de vínculo de proyectos **11/11** y deduplicación Outlook↔QBO **14/14**.
 
+### Sesión 2026-08-01 (selección manual de compañía QuickBooks)
+> Cambio solicitado y autorizado sobre la conexión QBO ya completada. QuickBooks continúa estrictamente como fuente de lectura para Siscon.
+- [x] Ajustes permite escoger **Sandbox** o **Producción** y abrir OAuth con las credenciales Development/Production correspondientes, siempre guardadas solo en el backend. Las variables legadas `QBO_CLIENT_ID/SECRET` siguen funcionando para el entorno default.
+- [x] El callback ya no activa silenciosamente el `realmId`: consulta `CompanyInfo` mediante GET, muestra el nombre/entorno/realm como selección pendiente y exige que un Administrador pulse **Usar esta compañía**. También se puede cancelar sin alterar la conexión activa.
+- [x] Al confirmar un cambio de compañía se limpian las cachés QBO del navegador para no mezclar proveedores, clientes, artículos, impuestos, proyectos ni transacciones de dos compañías. No se ejecuta sincronización automática ni ninguna escritura a QuickBooks.
+- [x] VUL-042 queda reemplazada por una confirmación explícita más flexible que el pin estático `QBO_REALM_ID`; el `state` liga el entorno a la autorización, PKCE sigue activo y solo Admin puede iniciar/confirmar/cancelar.
+- [x] Pruebas: backend `test-qbo-company-selection.js` **10/10**, `test-qbo-readonly.js` **18/18**, `test-oauth-hardening.js` **43/43**, `test-auth-legacy.js` **31/31** y `test-cf-access.js` **12/12**; frontend `test-qbo-connection.js` **9/9**, proyectos **11/11**, deduplicación **14/14**, transacciones **18/18** y XSS **29/29**. Suite backend completa en verde; frontend conserva solo el fallo preexistente de `test-login-concurrency.js`.
+- [x] Desplegado: backend `7a2a916` en Render y frontend `c383541` en Vercel; `/health` responde `200` y la UI publicada muestra los dos entornos. Producción ya tiene credenciales; Sandbox aparece correctamente como **sin credenciales** hasta que el OWNER acepte personalmente los términos de Intuit y se configuren las Development keys.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1768,7 +1783,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
-- [ ] **Validar QuickBooks Projects gratis en producción:** la conexión OAuth de prueba ya quedó validada con el único scope contable estándar; falta ejecutar una sincronización real y confirmar los nombres `Customer/Job`/`ProjectRef`. Antes de pasar a la compañía real, sustituir el `QBO_REALM_ID` temporal de prueba por el realm real; no dejarlo vacío.
+- [ ] **Validar QuickBooks Projects gratis con datos reales:** falta conectar desde Ajustes la compañía deseada, confirmarla por nombre y ejecutar una sincronización para verificar los nombres `Customer/Job`/`ProjectRef`. Para Sandbox faltan las Development keys, bloqueadas hasta que el OWNER acepte personalmente los términos actualizados de Intuit. Ya no se cambia `QBO_REALM_ID` manualmente.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
 ### Infraestructura / Producción
