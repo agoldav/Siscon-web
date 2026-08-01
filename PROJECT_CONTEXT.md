@@ -1763,6 +1763,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] El snapshot GET de solo lectura incorpora `Payment` y `BillPayment`. Siscon importa cobros ligados a `Invoice` y pagos ligados a `Bill` mediante `LinkedTxn`, dentro del mismo proyecto y sin duplicarlos al repetir la sincronización.
 - [x] Pruebas locales: backend QBO **21/21**, vínculo de proyectos **13/13**, deduplicación Outlook↔QBO **15/15** y sincronización transaccional **9/9**.
 - [x] Cambios publicados en `main`: backend `5965406` y frontend `678bc41`. El frontend nuevo se verificó activo detrás de Cloudflare y `/health` del backend responde `200`.
+- [x] Validación en vivo: tras un `502` transitorio del backend durante el despliegue, una nueva ejecución de **Sync QBO** terminó correctamente, importó **2 facturas nuevas**, actualizó **8 registros** y dejó la app en estado **Guardado**. No se ejecutó ninguna escritura hacia QuickBooks.
 
 ## 10. ⏳ Pendiente
 
