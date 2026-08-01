@@ -3084,9 +3084,9 @@ async function openSettings(){
           <button onclick="qboFetchTaxCodes()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">Sync Impuestos</button>
         </div>
         ${SYS.qbo&&SYS.qbo.vendorCache&&SYS.qbo.vendorCache.length?`<div style="font-size:10px;color:var(--grn);margin-top:5px">✓ ${SYS.qbo.vendorCache.length} proveedores · ${(SYS.qbo.customerCache||[]).length} clientes · ${(SYS.qbo.itemCache||[]).length} productos en caché</div>`:''}
-        ${SYS.qbo&&SYS.qbo.projectCatalogStatus==='project-api'
-          ?`<div style="font-size:10px;color:var(--grn);margin-top:5px">✓ ${(SYS.qbo.projectCache||[]).length} proyectos QBO disponibles para vínculo exacto</div>`
-          :`<div style="font-size:10px;color:var(--amb);margin-top:5px">⚠ Vínculo de Proyectos QBO pendiente de habilitar o reconectar</div>`}
+        ${SYS.qbo&&SYS.qbo.projectCatalogStatus==='customer-jobs'
+          ?`<div style="font-size:10px;color:var(--grn);margin-top:5px">✓ ${(SYS.qbo.projectCache||[]).length} proyectos QBO disponibles mediante acceso gratuito</div>`
+          :`<div style="font-size:10px;color:var(--t3);margin-top:5px">El vínculo de proyectos usa el acceso estándar gratuito y ProjectRef</div>`}
       </div>
     </div>
     <div class="settings-section">
@@ -8287,7 +8287,7 @@ async function qboSyncPaidBills(btn,qboBills){
 async function qboStatus(){
   const be=backendUrl();
   try{ const r=await fetch(be+'/api/qbo/status',{headers:qboHdr()}); const d=await r.json();
-    if(!SYS.qbo)SYS.qbo={}; SYS.qbo.connected=!!d.connected; SYS.qbo.realmId=d.realmId||''; SYS.qbo.environment=d.env||'sandbox'; SYS.qbo.qboConfigured=!!d.configured; SYS.qbo.projectsConfigured=!!d.projectsConfigured;
+    if(!SYS.qbo)SYS.qbo={}; SYS.qbo.connected=!!d.connected; SYS.qbo.realmId=d.realmId||''; SYS.qbo.environment=d.env||'sandbox'; SYS.qbo.qboConfigured=!!d.configured;
     return d;
   }catch(e){ return {connected:false,error:e.message}; }
 }
@@ -12810,10 +12810,10 @@ async function qboFullSync(btn){
     const vendorSync=qboSyncVendorBills(snapshot.bills||[],qboProjects);
     updated+=vendorSync.linked+vendorSync.updated+vendorSync.moved;
     if(vendorSync.ambiguous)addNotif(`QB: ${vendorSync.ambiguous} factura(s) con coincidencia ambigua; no se enlazaron automáticamente.`);
-    if(catalogs.projectsAvailable===false&&SYS.qbo.projectCatalogWarning!==nextProjectStatus){
+    if(nextProjectStatus==='project-ref-only'&&SYS.qbo.projectCatalogWarning!==nextProjectStatus){
       SYS.qbo.projectCatalogWarning=nextProjectStatus;
-      addNotif('QB: el catálogo de Proyectos no está autorizado. Habilita project-management.project y vuelve a conectar QuickBooks.');
-    }else if(catalogs.projectsAvailable===true){SYS.qbo.projectCatalogWarning='';}
+      addNotif('QB: no se encontraron proyectos como Customer/Job; se usará ProjectRef y las facturas sin nombre quedarán Sin clasificar.');
+    }else if(nextProjectStatus==='customer-jobs'){SYS.qbo.projectCatalogWarning='';}
 
     if(imported||updated||catalogChanged){ saveData(); if(curTxnType==='cliente') renderTxnSub(); }
     updateBadges();

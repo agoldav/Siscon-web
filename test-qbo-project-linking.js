@@ -70,6 +70,10 @@ ok('Outlook usa el proyecto resuelto desde QBO como destino preferente',
   /const destinationProject=qboProjectResolution&&qboProjectResolution\.status==='matched'\?qboProjectResolution\.project:proj/.test(html));
 ok('la importación comparativa conserva el vínculo del proyecto',
   /if\(d\.projectResolution\)qboApplyProjectLink\(rec,d\.projectResolution\)/.test(html));
+ok('la UI usa el catálogo gratuito Customer/Job y no recomienda permisos premium',
+  /projectCatalogStatus==='customer-jobs'/.test(html) &&
+  /acceso estándar gratuito y ProjectRef/.test(html) &&
+  !html.includes('project-management.project'));
 
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);
