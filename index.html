@@ -2501,7 +2501,6 @@ function applyDefaults(sys){
   migratePasswordsToHash(SYS);
   if(!SYS.supervisorPasswordHash) SYS.supervisorPasswordHash=hashPwd('13/11/81');
   if(!SYS.qbo)SYS.qbo={realmId:'',accessToken:'',environment:'sandbox',vendorCache:[],lastSync:null};
-  if(!SYS.qbo.connectEnvironment)SYS.qbo.connectEnvironment=SYS.qbo.environment||'sandbox';
   if(!SYS.qbo.customerCache)SYS.qbo.customerCache=[];
   if(!SYS.qbo.itemCache)SYS.qbo.itemCache=[];
   if(!SYS.theme)SYS.theme='dark';
@@ -2987,8 +2986,6 @@ async function openSettings(){
   if(currentUser&&typeof msgLoadDirectory==='function') await msgLoadDirectory();
   await qboStatus();
   const unifiedUsers=directoryUsers();
-  const qboEnvironmentChoice=(SYS.qbo&&SYS.qbo.connectEnvironment)||'sandbox';
-  const qboEnvironments=(SYS.qbo&&SYS.qbo.environments)||{};
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">Ajustes del Sistema <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div class="settings-section">
@@ -3070,25 +3067,14 @@ async function openSettings(){
     <div class="settings-section">
       <div class="settings-section-title">QuickBooks Online</div>
       <div class="qbo-settings">
-        <div style="font-size:11px;color:var(--t3);margin-bottom:8px">Elige el entorno y la compañía manualmente. Intuit mostrará las compañías disponibles; al regresar, Siscon mostrará el nombre seleccionado para que lo confirmes antes de activarlo.</div>
-        <div class="ff" style="margin-bottom:8px"><label>Entorno de la compañía</label>
-          <select id="s-qbo-env" style="width:220px">
-            <option value="sandbox" ${qboEnvironmentChoice==='sandbox'?'selected':''}>Sandbox · compañía de prueba${qboEnvironments.sandbox===false?' (sin credenciales)':''}</option>
-            <option value="production" ${qboEnvironmentChoice==='production'?'selected':''}>Producción · compañía real${qboEnvironments.production===false?' (sin credenciales)':''}</option>
-          </select>
-        </div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:8px">Pulsa Conectar QuickBooks. El inicio de sesión y la selección de compañía ocurren directamente en Intuit; Siscon nunca recibe tu contraseña. Puedes repetir el proceso para cambiar de cuenta o compañía.</div>
         <div class="qbo-status-row" id="s-qbo-status">
           <div class="qbo-dot${SYS.qbo&&SYS.qbo.connected?' connected':''}"></div>
-          <span style="font-size:12px;color:var(--t1);font-weight:500">${SYS.qbo&&SYS.qbo.connected?('Conectado · '+esc(SYS.qbo.companyName||('Realm '+(SYS.qbo.realmId||'')))+' · '+(SYS.qbo.environment==='production'?'Producción':'Sandbox')):'Sin conectar'}</span>
+          <span style="font-size:12px;color:var(--t1);font-weight:500">${SYS.qbo&&SYS.qbo.connected?('Conectado · '+esc(SYS.qbo.companyName||('Realm '+(SYS.qbo.realmId||'')))):'Sin conectar'}</span>
           ${SYS.qbo&&SYS.qbo.lastSync?`<span style="font-size:10px;color:var(--t3);margin-left:auto">Última sync: ${SYS.qbo.lastSync}</span>`:''}
         </div>
-        ${SYS.qbo&&SYS.qbo.pending?`<div style="margin-top:8px;padding:9px 10px;border:1px solid var(--amb);border-radius:7px;background:rgba(212,148,26,.08);font-size:11px;color:var(--t1)">
-          <div style="font-weight:600;margin-bottom:3px">Compañía seleccionada: ${esc(SYS.qbo.pending.companyName||'Sin nombre')}</div>
-          <div style="color:var(--t3);margin-bottom:7px">${SYS.qbo.pending.environment==='production'?'Producción':'Sandbox'} · Realm ${esc(SYS.qbo.pending.realmId||'')}</div>
-          <div style="display:flex;gap:7px;flex-wrap:wrap"><button onclick="qboConfirmCompany()" style="background:var(--grn);color:#fff;border:none;border-radius:6px;padding:6px 11px;font-size:11px;cursor:pointer">Usar esta compañía</button><button onclick="qboCancelCompany()" style="background:transparent;color:var(--t2);border:1px solid var(--border2);border-radius:6px;padding:5px 11px;font-size:11px;cursor:pointer">Cancelar selección</button></div>
-        </div>`:''}
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-          <button onclick="qboConnect()" style="background:var(--grn);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:11px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M9 15 15 9"/><path d="M11 6l1-1a4 4 0 0 1 6 6l-1 1"/><path d="M13 18l-1 1a4 4 0 0 1-6-6l1-1"/></svg> ${SYS.qbo&&SYS.qbo.connected?'Cambiar compañía':'Conectar compañía'}</button>
+          <button onclick="qboConnect()" style="background:var(--grn);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:11px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M9 15 15 9"/><path d="M11 6l1-1a4 4 0 0 1 6 6l-1 1"/><path d="M13 18l-1 1a4 4 0 0 1-6-6l1-1"/></svg> ${SYS.qbo&&SYS.qbo.connected?'Cambiar cuenta o compañía':'Conectar QuickBooks'}</button>
           <button onclick="qboTestConnection()" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">↻ Probar conexión</button>
           <!-- VUL-003: Botón "Guardar token" eliminado — refresh_token nunca sale del servidor (FASE 1) -->
         </div>
@@ -3129,7 +3115,6 @@ function saveSettings(){
   const _spwd=document.getElementById('s-spwd')?.value||'';
   if(_spwd) SYS.supervisorPasswordHash=hashPwd(_spwd);
   if(!SYS.qbo) SYS.qbo={vendorCache:[],lastSync:null};
-  SYS.qbo.connectEnvironment=document.getElementById('s-qbo-env')?.value||SYS.qbo.connectEnvironment||'sandbox';
   logAction('Ajustes guardados','log-edit','Sistema',null,{xrate:SYS.exchangeRate,qboConfigured:qboConfigured()});
   saveData();
   closeModal();
@@ -3139,12 +3124,11 @@ async function qboTestConnection(){
   showToast('Verificando conexión QBO…');
   const d=await qboStatus(); saveData();
   await openSettings();
-  if(d.pending){ alert('Confirma en Ajustes si deseas usar la compañía '+d.pending.companyName+'.'); return; }
   if(d.connected){
     // VUL-006: qboApiQuery() desactivada — consultas arbitrarias a QB prohibidas (FASE 1)
     // La verificación de conexión solo usa qboStatus() ahora
-    alert('✓ Conectado a QuickBooks · '+(d.companyName||('Realm '+d.realmId))+' · '+(d.env==='production'?'Producción':'Sandbox'));
-  } else if(!d.configured){ alert('El backend no tiene credenciales configuradas para ese entorno de QuickBooks.'); }
+    alert('✓ Conectado a QuickBooks · '+(d.companyName||('Realm '+d.realmId)));
+  } else if(!d.configured){ alert('El servidor no tiene configurada la aplicación OAuth de QuickBooks.'); }
   else { alert('Aún sin conectar. Pulsa "Conectar QuickBooks", autoriza en Intuit y reintenta.'); }
 }
 
@@ -8302,8 +8286,14 @@ async function qboStatus(){
   const be=backendUrl();
   try{ const r=await fetch(be+'/api/qbo/status',{headers:qboHdr()}); const d=await r.json();
     if(!r.ok)throw new Error(d.error||('QuickBooks HTTP '+r.status));
-    if(!SYS.qbo)SYS.qbo={}; SYS.qbo.connected=!!d.connected; SYS.qbo.realmId=d.realmId||''; SYS.qbo.companyName=d.companyName||''; SYS.qbo.environment=d.env||'sandbox'; SYS.qbo.qboConfigured=!!d.configured; SYS.qbo.environments=d.environments||{}; SYS.qbo.pending=d.pending||null;
-    if(!SYS.qbo.connectEnvironment)SYS.qbo.connectEnvironment=SYS.qbo.environment||'sandbox';
+    if(!SYS.qbo)SYS.qbo={};
+    const previousRealm=SYS.qbo.realmId||'';
+    const hasCompanyCache=['vendorCache','customerCache','itemCache','expenseAccountCache','projectCache','taxCodeCache'].some(k=>Array.isArray(SYS.qbo[k])&&SYS.qbo[k].length);
+    const companyChanged=!!(d.connected&&d.realmId&&d.realmId!==previousRealm&&(previousRealm||hasCompanyCache));
+    if(companyChanged)qboClearCompanyCaches();
+    SYS.qbo.connected=!!d.connected; SYS.qbo.realmId=d.realmId||''; SYS.qbo.companyName=d.companyName||''; SYS.qbo.environment='production'; SYS.qbo.qboConfigured=!!d.configured;
+    delete SYS.qbo.environments; delete SYS.qbo.pending; delete SYS.qbo.connectEnvironment;
+    if(companyChanged)saveData();
     return d;
   }catch(e){ return {connected:false,error:e.message}; }
 }
@@ -8316,32 +8306,15 @@ async function qboApiQuery(q){
 async function qboApiCreate(entity,payload){
   throw new Error('FASE 1: Crear entidades en QB (POST /api/qbo/create) está prohibido. QB es solo lectura. Los datos se crean en Siscon; la sincronización de QB ocurre en FASE 4.');
 }
+function qboClearCompanyCaches(){
+  _qboTransactionsCache=null; _qboCatalogsCache=null;
+  if(!SYS.qbo)SYS.qbo={};
+  ['vendorCache','customerCache','itemCache','expenseAccountCache','projectCache','taxCodeCache'].forEach(k=>SYS.qbo[k]=[]);
+  SYS.qbo.lastSync=null; SYS.qbo.projectCatalogStatus=''; SYS.qbo.projectCatalogWarning='';
+}
 function qboConnect(){
-  const environment=document.getElementById('s-qbo-env')?.value||(SYS.qbo&&SYS.qbo.connectEnvironment)||'sandbox';
-  if(!SYS.qbo)SYS.qbo={}; SYS.qbo.connectEnvironment=environment; saveData();
-  if(SYS.qbo.environments&&SYS.qbo.environments[environment]===false){alert('Faltan las credenciales '+(environment==='production'?'Production':'Development')+' de Intuit en el servidor.');return;}
-  window.open(backendUrl()+'/api/qbo/connect?environment='+encodeURIComponent(environment),'_blank');
-  showToast('Selecciona la compañía en Intuit, regresa y presiona "Probar conexión".');
-}
-async function qboConfirmCompany(){
-  if(!confirm('¿Usar '+((SYS.qbo&&SYS.qbo.pending&&SYS.qbo.pending.companyName)||'esta compañía')+' como la compañía activa de QuickBooks?'))return;
-  try{
-    const r=await fetch(backendUrl()+'/api/qbo/confirm-company',{method:'POST',headers:qboHdr(),credentials:'include'});
-    const d=await r.json(); if(!r.ok)throw new Error(d.error||('QuickBooks HTTP '+r.status));
-    _qboTransactionsCache=null; _qboCatalogsCache=null;
-    if(!SYS.qbo)SYS.qbo={};
-    ['vendorCache','customerCache','itemCache','expenseAccountCache','projectCache','taxCodeCache'].forEach(k=>SYS.qbo[k]=[]);
-    SYS.qbo.lastSync=null; SYS.qbo.projectCatalogStatus=''; SYS.qbo.projectCatalogWarning='';
-    await qboStatus(); saveData(); await openSettings();
-    alert('✓ Compañía activa: '+(d.companyName||('Realm '+d.realmId))+' · '+(d.env==='production'?'Producción':'Sandbox'));
-  }catch(e){alert('No se pudo confirmar la compañía: '+e.message);}
-}
-async function qboCancelCompany(){
-  try{
-    const r=await fetch(backendUrl()+'/api/qbo/cancel-company',{method:'POST',headers:qboHdr(),credentials:'include'});
-    const d=await r.json(); if(!r.ok)throw new Error(d.error||('QuickBooks HTTP '+r.status));
-    await qboStatus(); saveData(); await openSettings();
-  }catch(e){alert('No se pudo cancelar la selección: '+e.message);}
+  window.open(backendUrl()+'/api/qbo/connect','_blank');
+  showToast('Inicia sesión y elige la compañía en Intuit; al volver, presiona "Probar conexión".');
 }
 // VUL-003: qboCopyRefreshToken eliminada — refresh_token nunca sale del servidor (FASE 1)
 
