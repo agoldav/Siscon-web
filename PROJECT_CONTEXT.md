@@ -1742,6 +1742,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Desplegado: backend `b9acba1` en Render y frontend `66c32b9` en Vercel; health del backend responde `200` y la UI publicada confirma acceso gratuito sin referencias al permiso premium.
 - [x] Corregido el callback OAuth QBO en producción (`1407ead`): `/api/qbo/callback` es la única ruta QBO exenta del JWT global de Cloudflare porque Intuit no puede enviarlo. El callback mantiene `state` aleatorio de un solo uso con TTL, PKCE y validación de `realmId`; todas las rutas que inician conexión o leen datos siguen protegidas. `test-oauth-hardening.js` **43/43**, `test-auth-legacy.js` **31/31**, `test-cf-access.js` **12/12** y suite backend completa en verde. Verificado en vivo: un callback sin JWT llega al handler y un `state` inválido sigue rechazado.
 - [x] Render quedó temporalmente fijado a la compañía QBO de prueba mediante `QBO_REALM_ID`; el servicio se reconstruyó correctamente y `/health` responde `200`. No se desactivó el pinning de compañía.
+- [x] Corregido el reconocimiento de la conexión QBO bajo el proxy gratuito same-origin (`aa52a00`): `qboTestConnection()` ya no interpreta `BACKEND_URL=''` como ausencia de backend y siempre consulta `/api/qbo/status`. La autorización OAuth de la compañía de prueba completó correctamente con el `realmId` fijado. Regresión nueva `test-qbo-connection.js` **3/3**; pruebas de vínculo de proyectos **11/11** y deduplicación Outlook↔QBO **14/14**.
 
 ## 10. ⏳ Pendiente
 
@@ -1767,7 +1768,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
-- [ ] **Validar QuickBooks Projects gratis en producción:** repetir la conexión QBO después del fix `1407ead`, usando el único scope contable estándar, y ejecutar una sincronización real para confirmar los nombres `Customer/Job`/`ProjectRef`. Antes de pasar a la compañía real, sustituir el `QBO_REALM_ID` temporal de prueba por el realm real; no dejarlo vacío.
+- [ ] **Validar QuickBooks Projects gratis en producción:** la conexión OAuth de prueba ya quedó validada con el único scope contable estándar; falta ejecutar una sincronización real y confirmar los nombres `Customer/Job`/`ProjectRef`. Antes de pasar a la compañía real, sustituir el `QBO_REALM_ID` temporal de prueba por el realm real; no dejarlo vacío.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
 ### Infraestructura / Producción
