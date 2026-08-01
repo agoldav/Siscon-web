@@ -8106,6 +8106,20 @@ function qboResolveProject(transaction,projectCatalog){
   if(!name&&byId.length>1)return {status:'ambiguous',project:null,id,name,refs};
   return {status:'unresolved',project:null,id,name,refs};
 }
+function qboBindProjectId(project,id,name){
+  const qboId=String(id||'');if(!project||!qboId)return false;
+  let changed=false;
+  projects.forEach(other=>{
+    if(other!==project&&String(other.qboProjectId||'')===qboId){
+      other.qboProjectId='';other.qboProjectName='';changed=true;
+    }
+  });
+  const qboName=qboProjectName(name||project.name);
+  if(String(project.qboProjectId||'')!==qboId||qboProjectName(project.qboProjectName)!==qboName){
+    project.qboProjectId=qboId;project.qboProjectName=qboName;changed=true;
+  }
+  return changed;
+}
 function qboApplyProjectLink(record,resolution){
   const before=JSON.stringify([record.qboProjectRefs||[],record.qboProjectId||'',record.qboProjectName||'',record.qboProjectMatchStatus||'']);
   let projectChanged=false;
@@ -8119,9 +8133,7 @@ function qboApplyProjectLink(record,resolution){
   record.qboProjectName=resolution.name||'';
   record.qboProjectMatchStatus=resolution.status;
   if(resolution.status==='matched'&&resolution.project){
-    if(String(resolution.project.qboProjectId||'')!==String(resolution.id||'')||qboProjectName(resolution.project.qboProjectName)!==qboProjectName(resolution.name||resolution.project.name))projectChanged=true;
-    resolution.project.qboProjectId=resolution.id||resolution.project.qboProjectId||'';
-    resolution.project.qboProjectName=resolution.name||resolution.project.name||'';
+    if(qboBindProjectId(resolution.project,resolution.id,resolution.name||resolution.project.name))projectChanged=true;
   }
   return projectChanged||before!==JSON.stringify([record.qboProjectRefs||[],record.qboProjectId||'',record.qboProjectName||'',record.qboProjectMatchStatus||'']);
 }
@@ -13058,8 +13070,8 @@ function renderUnclassBody(){
   el.innerHTML=`
     <div style="font-size:12px;color:var(--t2);margin-bottom:10px">Documentos importados de QuickBooks sin proyecto asignado. Asígnalos a un proyecto.</div>
     ${docs.length?docs.map((d,i)=>`<div class="oc-list-item">
-      <span class="oc-num-badge">${d.docNumber||d.type||'Doc'}</span>
-      <div style="flex:1"><div style="font-size:12px;color:var(--t1)">${d.party||'—'}</div><div style="font-size:10px;color:var(--t3)">${d.date||''} · ${fmt(d.total||0)}</div></div>
+      <span class="oc-num-badge">${esc(d.docNumber||d.invoiceNumber||d.num||d.qboId||d.type||'Doc')}</span>
+      <div style="flex:1"><div style="font-size:12px;color:var(--t1)">${esc(d.party||d.client||'—')}</div><div style="font-size:10px;color:var(--t3)">${d.date||d.dateInv||''} · ${fmt(d.qboDocumentTotal??d.total??d.totalUSD??0)}${d.qboProjectName?` · Proyecto QB: ${esc(d.qboProjectName)}`:d.qboProjectId?` · Proyecto QB ID: ${esc(d.qboProjectId)}`:''}</div></div>
       <select id="unc-proj-${i}" style="font-size:11px">${projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
       <button class="btn-sm" onclick="assignUnclassified(${i})">Asignar</button>
     </div>`).join(''):'<div style="color:var(--t3);text-align:center;padding:24px;font-size:12px">No hay documentos sin clasificar.</div>'}`;
@@ -13067,6 +13079,7 @@ function renderUnclassBody(){
 function assignUnclassified(i){
   const d=SYS.unclassified[i]; const pid=parseInt(document.getElementById('unc-proj-'+i).value);
   const p=projects.find(x=>x.id===pid); if(!p||!d)return;
+  if(d.qboProjectId)qboBindProjectId(p,d.qboProjectId,p.name);
   const key={Invoice:'invClient',Bill:'billVendor',Payment:'payments',CreditMemo:'creditNotes'}[d.type]||'billVendor';
   if(!p[key])p[key]=[]; p[key].push({...d,id:(key.slice(0,2))+'-'+Date.now()});
   SYS.unclassified.splice(i,1); saveData(); renderUnclassBody(); showToast('Documento asignado a '+p.name);

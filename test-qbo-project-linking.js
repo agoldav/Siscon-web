@@ -30,7 +30,7 @@ const sandbox = { projects: [proyectoA, proyectoB], SYS: { unclassified: [] } };
 vm.createContext(sandbox);
 vm.runInContext([
   'qboProjectName', 'qboTransactionProjectRefs', 'qboResolveProject',
-  'qboApplyProjectLink', 'qboMoveRecord',
+  'qboBindProjectId', 'qboApplyProjectLink', 'qboMoveRecord',
 ].map(extractFunction).join('\n'), sandbox);
 
 let pass = 0, fail = 0;
@@ -72,6 +72,9 @@ proyectoB.invClient.push(record);
 sandbox.qboApplyProjectLink(record, staleResolution);
 ok('se guarda el ID estable del proyecto de QuickBooks', record.qboProjectId === 'P10' && proyectoA.qboProjectId === 'P10');
 ok('al aplicar el vínculo se limpia el qboProjectId obsoleto', proyectoB.qboProjectId === '');
+proyectoB.qboProjectId = 'P20';
+ok('la asignación manual gratuita guarda el ProjectRef para sincronizaciones futuras',
+  sandbox.qboBindProjectId(proyectoA, 'P20', 'Condominio Roble') && proyectoA.qboProjectId === 'P20' && proyectoB.qboProjectId === '');
 ok('la misma factura se reubica sin crear otra copia',
   sandbox.qboMoveRecord(record, proyectoB, proyectoA, 'invClient') && proyectoB.invClient.length === 0 && proyectoA.invClient.length === 1);
 

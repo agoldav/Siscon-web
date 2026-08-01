@@ -27,7 +27,7 @@ const project = { id: 'A', name: 'Condominio Roble', invClient: [], billVendor: 
 const sandbox = { projects: [project], SYS: { unclassified: [] }, tcGet: () => 500 };
 vm.createContext(sandbox);
 vm.runInContext([
-  'qboProjectName', 'qboTransactionProjectRefs', 'qboResolveProject', 'qboApplyProjectLink', 'qboMoveRecord',
+  'qboProjectName', 'qboTransactionProjectRefs', 'qboResolveProject', 'qboBindProjectId', 'qboApplyProjectLink', 'qboMoveRecord',
   'qboTextKey', 'qboVendorKey', 'qboBillAmount', 'qboBillMatch', 'qboFindBestBillMatch', 'qboBillAsRecord',
   'qboAmountToUSD', 'qboApplyBillMatch', 'qboSyncVendorBills', 'qboPaymentAllocations', 'qboSyncPayments',
 ].map(extractFunction).join('\n'), sandbox);
