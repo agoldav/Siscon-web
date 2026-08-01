@@ -67,8 +67,10 @@ ok('Outlook busca duplicados en todos los proyectos, no solo en la carpeta desti
   /projects\.forEach\(candidateProject=>\(candidateProject\.billVendor\|\|\[\]\)/.test(html));
 ok('QBO enlaza sobre billVendor existente',
   /function qboSyncVendorBills[\s\S]{0,2600}qboApplyBillMatch\(result\.match\.bill/.test(html));
-ok('la sincronización no agrega Bills nuevos automáticamente al proyecto',
-  !/function qboSyncVendorBills[\s\S]{0,1200}\.billVendor\.push/.test(html));
+ok('la sincronización importa Bills nuevos solo después de descartar coincidencias',
+  /function qboSyncVendorBills[\s\S]{0,6000}else \{[\s\S]{0,3000}billVendor\.push\(newBill\)/.test(html));
+ok('la sincronización marca las facturas locales ausentes del proyecto QBO sin borrarlas',
+  /qboProjectPresence=next/.test(html) && /No se encuentra en el proyecto/.test(html));
 ok('la UI no ofrece acciones de envío o sincronización hacia QBO',
   !/Guardar y Sincronizar QBO|Enviar a QB|Guardar y Enviar/.test(html));
 ok('los guardados de Siscon no llaman funciones de creación QBO',

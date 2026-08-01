@@ -1729,7 +1729,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Nuevo `qbo-read-model.js`: normaliza facturas, moneda documental, `ExchangeRate`/`HomeTotalAmt`, saldo/estado de pago, líneas por artículo o cuenta, impuestos reales, campos personalizados, proveedores, clientes, artículos, costo de compra, cuenta de gasto y proveedor preferido.
 - [x] Factura a cliente importada desde QBO usa `TxnTaxDetail.TotalTax`; se eliminó la suposición de IVA fijo de 13%. El consecutivo de Hacienda se obtiene de los campos personalizados y admite configuración por nombre o `DefinitionId` en `SYS.qbo.haciendaField`.
 - [x] Match de Factura de Proveedor Outlook ↔ QBO: prioridad por `qboId`; si no existe, exige número de factura normalizado + evidencia fuerte de proveedor y monto o fecha, respetando moneda. Dos candidatos con igual evidencia quedan ambiguos y **no** se enlazan automáticamente.
-- [x] Una factura de Outlook que coincide con un registro existente adjunta su PDF y enriquece ese mismo registro; no crea otra factura. La sincronización QBO enlaza metadatos, cuentas, artículos, moneda, saldo y estado sobre `billVendor` existente y nunca agrega automáticamente un segundo Bill al proyecto.
+- [x] Una factura de Outlook que coincide con un registro existente adjunta su PDF y enriquece ese mismo registro; no crea otra factura. La sincronización QBO enlaza metadatos, cuentas, artículos, moneda, saldo y estado sobre `billVendor` existente. Desde 2026-08-01, si el Bill solo existe en QBO se importa una vez al proyecto exacto; el match fuerte sigue impidiendo una segunda copia.
 - [x] Corregido `qboConfigured()` para el Plan B same-origin (`BACKEND_URL=''`), que antes trataba una URL relativa válida como “QBO no configurado”. Refresh OAuth concurrente protegido con una sola promesa en vuelo.
 - [x] Pruebas nuevas: backend `test-qbo-readonly.js` **13/13**; frontend `test-qbo-bill-matching.js` **14/14**. Todas las demás suites backend/frontend pasan salvo `test-login-concurrency.js`, que ya falla en `HEAD` por buscar `function openSettings` aunque la función real es `async function openSettings` (fallo preexistente y fuera de este alcance).
 
@@ -1753,6 +1753,15 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Se conserva `state` aleatorio de un solo uso, PKCE y el gate de Administrador. Un refresh en vuelo de la conexión anterior termina antes de activar los tokens nuevos para impedir que restaure la compañía anterior por carrera.
 - [x] Pruebas: backend `test-qbo-company-selection.js` **8/8**, `test-qbo-readonly.js` **18/18**, `test-oauth-hardening.js` **43/43**, `test-auth-legacy.js` **31/31** y `test-cf-access.js` **12/12**; frontend `test-qbo-connection.js` **9/9**, proyectos **11/11**, deduplicación **14/14**, transacciones **18/18** y XSS **29/29**. Suite backend completa en verde; frontend conserva solo el fallo preexistente de `test-login-concurrency.js`.
 - [x] Desplegado: backend `9b2b564` en Render y frontend `6edfca2` en Vercel; `/health` responde `200`. Verificado en vivo: el botón único abrió Intuit y, como el navegador ya tenía una sesión iniciada, conectó **Siscon SRL 3-102-846248** inmediatamente. No se ejecutó ninguna sincronización ni escritura a QBO.
+
+### Sesión 2026-08-01 (sincronización transaccional QBO por proyecto)
+> Cambio solicitado y autorizado sobre el mapeo QBO completado. La dirección continúa siendo exclusivamente QuickBooks → Siscon.
+- [x] El botón **Sync QBO** de Facturas de Proveedores ya no imprime el SVG como texto y ejecuta la sincronización transaccional completa.
+- [x] Los Bills que existen en QBO y no en Siscon se importan una sola vez al proyecto resuelto. Los Bills ya enlazados o con coincidencia fuerte Outlook↔QBO se actualizan sin duplicarse.
+- [x] Las facturas locales que no aparecen ligadas al mismo Customer/Job de QBO se conservan y muestran la marca **No se encuentra en el proyecto ... de QuickBooks**.
+- [x] El proyecto se resuelve tanto desde `ProjectRef` como desde el `CustomerRef` exacto cuando su ID pertenece al catálogo gratuito `Customer(Job=true)`; nunca se aproxima por nombre de cliente.
+- [x] El snapshot GET de solo lectura incorpora `Payment` y `BillPayment`. Siscon importa cobros ligados a `Invoice` y pagos ligados a `Bill` mediante `LinkedTxn`, dentro del mismo proyecto y sin duplicarlos al repetir la sincronización.
+- [x] Pruebas locales: backend QBO **21/21**, vínculo de proyectos **13/13**, deduplicación Outlook↔QBO **15/15** y sincronización transaccional **9/9**.
 
 ## 10. ⏳ Pendiente
 

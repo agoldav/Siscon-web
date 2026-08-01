@@ -8075,7 +8075,17 @@ function qboTransactionProjectRefs(transaction){
     .filter((ref,index,all)=>all.findIndex(other=>(ref.id&&other.id===ref.id)||(!ref.id&&!other.id&&other.name===ref.name))===index);
 }
 function qboResolveProject(transaction,projectCatalog){
-  const refs=qboTransactionProjectRefs(transaction);
+  let refs=qboTransactionProjectRefs(transaction);
+  // En QBO Projects, el proyecto también puede venir como CustomerRef (Customer/Job)
+  // en la cabecera de una Invoice o en las líneas de un Bill. Solo se acepta cuando
+  // el ID existe en el catálogo de proyectos de QBO; no se infiere por nombre de cliente.
+  if(!refs.length){
+    const projectIds=new Set((projectCatalog||[]).map(item=>String(item.id||'')).filter(Boolean));
+    const customerRefs=[transaction&&transaction.customer,...((transaction&&transaction.lines)||[]).map(line=>line&&line.customer)]
+      .map(ref=>({id:String(ref&&ref.id||''),name:qboProjectName(ref&&ref.name)}))
+      .filter(ref=>ref.id&&projectIds.has(ref.id));
+    refs=customerRefs.filter((ref,index,all)=>all.findIndex(other=>other.id===ref.id)===index);
+  }
   if(!refs.length)return {status:'none',project:null,id:'',name:'',refs:[]};
   if(refs.length!==1)return {status:'ambiguous',project:null,id:'',name:'',refs};
   const ref=refs[0];
@@ -8222,7 +8232,7 @@ function qboSyncVendorBills(qboBills,projectCatalog){
   const locals=[];
   projects.forEach(project=>(project.billVendor||[]).forEach(bill=>locals.push({project,bill})));
   (SYS.unclassified||[]).filter(bill=>bill.type==='Bill').forEach(bill=>locals.push({project:null,bill}));
-  let linked=0,updated=0,ambiguous=0,moved=0,unresolvedProject=0;
+  let linked=0,updated=0,imported=0,ambiguous=0,moved=0,unresolvedProject=0,missing=0;
   for(const qb of (qboBills||[])){
     const projectResolution=qboResolveProject(qb,projectCatalog);
     const exact=locals.find(row=>String(row.bill.qboId||'')===String(qb.id||''));
@@ -8243,8 +8253,126 @@ function qboSyncVendorBills(qboBills,projectCatalog){
       else if(projectResolution.status==='unresolved')unresolvedProject++;
       linked++;
     }else if(result.status==='ambiguous')ambiguous++;
+    else {
+      const currency=String(qb.currency||'USD').toUpperCase();
+      const totalUSD=qboAmountToUSD(qb.total,currency,qb.exchangeRate);
+      const subtotalUSD=qboAmountToUSD(qb.subtotal==null?qb.total:qb.subtotal,currency,qb.exchangeRate);
+      const ivaUSD=qboAmountToUSD(qb.totalTax||0,currency,qb.exchangeRate);
+      const newBill={
+        id:'qbo-bill-'+String(qb.id||Date.now()),type:'proveedor',
+        num:'FP-QB-'+String(qb.docNumber||qb.id||''),invoiceNumber:String(qb.docNumber||''),
+        party:String(qb.vendor&&qb.vendor.name||''),date:String(qb.txnDate||''),
+        status:qb.paymentStatus||'Pendiente de Pago',currencyBill:currency,
+        exchangeRate:Number(qb.exchangeRate)||1,discountOn:false,
+        lines:(qb.lines||[]).map(line=>{
+          const qty=Number(line.quantity)||1;
+          const sourcePrice=Number(line.unitPrice)||(Number(line.amount)||0)/qty;
+          return {productId:String(line.item&&line.item.id||''),desc:String(line.item&&line.item.name||line.description||line.account&&line.account.name||''),qty,
+            price:qboAmountToUSD(sourcePrice,currency,qb.exchangeRate),discPct:0,assign:[],ivaRate:0};
+        }),
+        notes:String(qb.privateNote||''),subtotalUSD,ivaUSD,totalUSD,
+        totalCRC:currency==='CRC'?(Number(qb.total)||0):0,
+        qboDocumentTotal:Number(qb.total)||0,_pending:true,appliedToHouses:false,
+        createdAt:new Date().toLocaleDateString('es-CR'),createdBy:'QBO Import',
+      };
+      qboApplyBillMatch(newBill,qb,['qbo_id']);
+      qboApplyProjectLink(newBill,projectResolution);
+      if(projectResolution.status==='matched'){
+        if(!projectResolution.project.billVendor)projectResolution.project.billVendor=[];
+        projectResolution.project.billVendor.push(newBill);
+        locals.push({project:projectResolution.project,bill:newBill});
+      }else{
+        if(!SYS.unclassified)SYS.unclassified=[];
+        SYS.unclassified.push({...newBill,type:'Bill'});
+        locals.push({project:null,bill:newBill});
+        if(projectResolution.status==='ambiguous')ambiguous++;
+        else if(projectResolution.status==='unresolved')unresolvedProject++;
+      }
+      imported++;
+    }
   }
-  return {linked,updated,ambiguous,moved,unresolvedProject};
+
+  // Verifica la presencia por proyecto después de enlazar/mover/importar. Las facturas
+  // locales no se borran: solo se marca que QBO no las tiene ligadas a ese proyecto.
+  const checkedAt=new Date().toISOString();
+  projects.forEach(project=>(project.billVendor||[]).forEach(bill=>{
+    const exact=(qboBills||[]).find(qb=>bill.qboId&&String(qb.id||'')===String(bill.qboId));
+    const match=exact?{status:'matched',match:{qb:exact}}:qboFindBestBillMatch(bill,(qboBills||[]).map(qb=>({qb,bill:qboBillAsRecord(qb)})));
+    const qb=match.status==='matched'&&match.match&&(match.match.qb||match.match);
+    const resolution=qb?qboResolveProject(qb,projectCatalog):null;
+    const present=!!(resolution&&resolution.status==='matched'&&String(resolution.project.id)===String(project.id));
+    const next=present?'present':'missing';
+    if(bill.qboProjectPresence!==next)updated++;
+    bill.qboProjectPresence=next;
+    bill.qboPresenceCheckedAt=checkedAt;
+    if(present)delete bill.qboPresenceMessage;
+    else {bill.qboPresenceMessage=`No se encuentra en el proyecto "${project.name}" de QuickBooks`;missing++;}
+  }));
+  return {linked,updated,imported,ambiguous,moved,unresolvedProject,missing};
+}
+
+function qboPaymentAllocations(payment,txnType){
+  const grouped={};
+  (payment&&payment.linkedTransactions||[]).filter(link=>String(link.txnType||'').toLowerCase()===txnType.toLowerCase()).forEach(link=>{
+    const id=String(link.txnId||'');if(!id)return;
+    grouped[id]=(grouped[id]||0)+(Number(link.amount)||0);
+  });
+  return Object.entries(grouped).map(([txnId,amount])=>({txnId,amount}));
+}
+function qboSyncPayments(snapshot){
+  const invoices={},bills={},allPayments=[];
+  projects.forEach(project=>{
+    (project.invClient||[]).forEach(invoice=>{if(invoice.qboId)invoices[String(invoice.qboId)]={project,record:invoice};});
+    (project.billVendor||[]).forEach(bill=>{if(bill.qboId)bills[String(bill.qboId)]={project,record:bill};});
+    (project.payments||[]).forEach(payment=>allPayments.push({project,record:payment}));
+  });
+  let imported=0,updated=0,unresolved=0;
+
+  function upsert(qboPayment,allocation,linked,direction){
+    if(!linked){unresolved++;return;}
+    const project=linked.project,reference=linked.record;
+    if(!project.payments)project.payments=[];
+    const qboEntity=direction==='received'?'Payment':'BillPayment';
+    const stableId=`qbo-${direction}-${qboPayment.id}-${allocation.txnId}`;
+    const amountUSD=qboAmountToUSD(allocation.amount,qboPayment.currency,qboPayment.exchangeRate);
+    const party=direction==='received'
+      ?String(qboPayment.customer&&qboPayment.customer.name||reference.client||'')
+      :String(qboPayment.vendor&&qboPayment.vendor.name||reference.party||'');
+    const refKey=direction==='received'?'refInvoiceId':'refBillId';
+    let existing=allPayments.find(row=>row.record.id===stableId||(
+      row.record.qboEntity===qboEntity&&String(row.record.qboPaymentId||row.record.qboId||'')===String(qboPayment.id)&&
+      String(row.record.qboLinkedTxnId||'')===allocation.txnId
+    ));
+    if(!existing){
+      existing=allPayments.find(row=>String(row.record[refKey]||'')===String(reference.id)&&String(row.record.date||'')===String(qboPayment.txnDate||'')&&
+        Math.abs((Number(row.record.totalUSD)||0)-amountUSD)<0.01&&qboVendorKey(row.record.party)===qboVendorKey(party));
+    }
+    const next={
+      id:stableId,type:'pagos',num:`PAG-QB-${qboPayment.id}`,party,date:qboPayment.txnDate||'',status:'Registrada',
+      currency:String(qboPayment.currency||'USD').toUpperCase(),exchangeRate:Number(qboPayment.exchangeRate)||1,
+      lines:[{desc:`${direction==='received'?'Pago recibido de':'Pago realizado a'} ${direction==='received'?'factura':'factura de proveedor'} ${reference.num||reference.invoiceNumber||''}`,qty:1,price:amountUSD}],
+      subtotalUSD:amountUSD,ivaUSD:0,totalUSD:amountUSD,qboId:String(qboPayment.id||''),qboEntity,
+      qboPaymentId:String(qboPayment.id||''),qboLinkedTxnId:allocation.txnId,paymentDirection:direction,
+      [refKey]:reference.id,
+      [direction==='received'?'refInvoiceNum':'refBillNum']:reference.num||reference.invoiceNumber||'',
+      qboLastUpdatedAt:qboPayment.lastUpdatedAt||'',createdAt:new Date().toLocaleDateString('es-CR'),createdBy:'QBO Import',
+    };
+    if(existing){
+      const before=JSON.stringify(existing.record);
+      Object.assign(existing.record,next,{id:existing.record.id||stableId,num:existing.record.num||next.num});
+      if(before!==JSON.stringify(existing.record))updated++;
+      if(existing.project!==project){
+        existing.project.payments=(existing.project.payments||[]).filter(item=>item!==existing.record);
+        project.payments.push(existing.record);existing.project=project;updated++;
+      }
+    }else{
+      project.payments.push(next);allPayments.push({project,record:next});imported++;
+    }
+  }
+
+  (snapshot.payments||[]).forEach(payment=>qboPaymentAllocations(payment,'Invoice').forEach(allocation=>upsert(payment,allocation,invoices[allocation.txnId],'received')));
+  (snapshot.billPayments||[]).forEach(payment=>qboPaymentAllocations(payment,'Bill').forEach(allocation=>upsert(payment,allocation,bills[allocation.txnId],'paid')));
+  return {imported,updated,unresolved};
 }
 
 // Sincroniza estado de pago desde QBO: facturas con Balance=0 en QBO → "Pagada" en la app
@@ -8279,7 +8407,7 @@ async function qboSyncPaidBills(btn,qboBills){
     addNotif('Error al sincronizar con QBO: '+e.message);
     console.warn('qboSyncPaidBills error',e);
   } finally {
-    if(btn){ btn.disabled=false; btn.textContent='<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="vertical-align:-2px;margin-right:2px"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg> Sync QBO'; }
+    if(btn){ btn.disabled=false; btn.textContent='Sync QBO'; }
   }
 }
 async function qboStatus(){
@@ -8856,7 +8984,7 @@ function renderGenericList(type){
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn-add" onclick="newGenericTxn('${type}')">+ Nuevo</button>
         ${type==='proveedor'?`<button id="btn-refresh-mail" class="btn-refresh-mail" onclick="msForceScanQuiet()" title="Escanear buzón de facturas">${MAIL_ICON} Refrescar</button>`:''}
-        ${type==='proveedor'&&qboConfigured()?`<button onclick="qboSyncPaidBills(this)" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer" title="Marcar como Pagadas las facturas que QBO ya tiene pagadas"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="vertical-align:-2px;margin-right:2px"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg> Sync QBO</button>`:''}
+        ${type==='proveedor'&&qboConfigured()?`<button data-qbo-project-sync="1" onclick="qboFullSync(this)" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer" title="Importar facturas y pagos desde QuickBooks y verificar su proyecto">Sync QBO</button>`:''}
         <button class="btn-history" onclick="showLogModal('${def.label}',curProj.id)">Log</button>
         ${txnSortSelect(`renderGenericList('${type}')`)}
       </div>
@@ -8874,8 +9002,8 @@ function renderGenericList(type){
       return `<div class="oc-list-item" onclick="openGenericTxn('${type}','${tx.id}')" style="${tx._pending?'border-left:3px solid var(--red)':''}">
         <span class="oc-num-badge" style="color:${def.color}">${esc(type==='proveedor'&&tx.invoiceNumber?tx.invoiceNumber:tx.num)}</span>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}</div>
-          <div style="font-size:10px;color:var(--t2);margin-top:2px">${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.consecutivo?' · Consec: '+esc(tx.consecutivo):''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}${type==='pagos'&&tx.paymentDirection?`<span style="font-size:9px;font-weight:700;color:${tx.paymentDirection==='received'?'var(--grn)':'var(--org)'}">${tx.paymentDirection==='received'?'RECIBIDO QB':'PAGADO QB'}</span>`:''}</div>
+          <div style="font-size:10px;color:${type==='proveedor'&&tx.qboProjectPresence==='missing'?'var(--red)':'var(--t2)'};margin-top:2px">${type==='proveedor'&&tx.qboProjectPresence==='missing'?`⚠ ${esc(tx.qboPresenceMessage||'No se encuentra en este proyecto de QuickBooks')}`:`${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.consecutivo?' · Consec: '+esc(tx.consecutivo):''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}`}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
           ${txnBadge(tx.status)}
@@ -12731,8 +12859,9 @@ function compareImport(){
 async function qboFullSync(btn){
   if(!qboConfigured()) return;
   const btnEl=btn||document.getElementById('qbo-sync-btn');
-  if(btnEl){ btnEl.disabled=true; btnEl.textContent='QB ↻…'; }
-  let imported=0, updated=0;
+  const projectButton=!!(btnEl&&btnEl.dataset&&btnEl.dataset.qboProjectSync);
+  if(btnEl){ btnEl.disabled=true; btnEl.textContent=projectButton?'Sincronizando…':'QB ↻…'; }
+  let imported=0, updated=0, importedPayments=0;
   try{
     const [snapshot,catalogs]=await Promise.all([qboReadTransactions(true),qboReadCatalogs(true)]);
     const qboInvs=snapshot.invoices||[];
@@ -12778,7 +12907,9 @@ async function qboFullSync(btn){
         if(qid)inv.qboId=qid;
         inv.qboDocumentTotal=qi.total;inv.qboBalance=qi.balance;inv.qboCurrency=qi.currency;
         inv.qboExchangeRate=qi.exchangeRate;inv.qboTaxTotal=qi.totalTax;inv.qboLastUpdatedAt=qi.lastUpdatedAt||'';
-        if(qi.paymentStatus==='Pagada')inv.status='Pagada';
+        if(Math.abs(Number(qi.balance)||0)<0.000001)inv.status='Pagada';
+        else if(Number(qi.balance)<Number(qi.total))inv.status='Pagada parcial';
+        else inv.status='Emitida';
         const after=JSON.stringify([inv.qboId||'',inv.consecutivo||'',inv.qboDocumentTotal??null,inv.qboBalance??null,inv.qboCurrency||'',inv.qboExchangeRate??null,inv.qboTaxTotal??null,inv.qboLastUpdatedAt||'',inv.status||'']);
         if(before!==after)updated++;
         if(qboApplyProjectLink(inv,projectResolution))updated++;
@@ -12786,8 +12917,7 @@ async function qboFullSync(btn){
         continue;
       }
 
-      // Factura nueva en QBO: el proyecto se obtiene exclusivamente de ProjectRef.
-      // No se infiere por cliente, porque un mismo cliente puede tener varios proyectos.
+      // Factura nueva en QBO: usa ProjectRef o el Customer/Job exacto del catálogo QBO.
       const clientName=qi.customer&&qi.customer.name||'';
       const proj=projectResolution.status==='matched'?projectResolution.project:null;
       const lines=(qi.lines||[]).map(l=>({
@@ -12820,26 +12950,36 @@ async function qboFullSync(btn){
       imported++;
     }
 
-    // 2. Enlazar facturas de proveedor ya cargadas desde Outlook. Nunca crea un duplicado:
-    // exige coincidencia fuerte de número + proveedor/monto/fecha, o el qboId ya guardado.
+    // 2. Enlazar las facturas cargadas desde Outlook e importar las que solo existen en QBO.
+    // La coincidencia fuerte evita crear una segunda copia del mismo documento.
     const vendorSync=qboSyncVendorBills(snapshot.bills||[],qboProjects);
+    imported+=vendorSync.imported;
     updated+=vendorSync.linked+vendorSync.updated+vendorSync.moved;
     if(vendorSync.ambiguous)addNotif(`QB: ${vendorSync.ambiguous} factura(s) con coincidencia ambigua; no se enlazaron automáticamente.`);
+
+    // 3. Importar cobros de clientes y pagos de facturas de proveedores por LinkedTxn.
+    const paymentSync=qboSyncPayments(snapshot);
+    importedPayments+=paymentSync.imported;
+    updated+=paymentSync.updated;
     if(nextProjectStatus==='project-ref-only'&&SYS.qbo.projectCatalogWarning!==nextProjectStatus){
       SYS.qbo.projectCatalogWarning=nextProjectStatus;
       addNotif('QB: no se encontraron proyectos como Customer/Job; se usará ProjectRef y las facturas sin nombre quedarán Sin clasificar.');
     }else if(nextProjectStatus==='customer-jobs'){SYS.qbo.projectCatalogWarning='';}
 
-    if(imported||updated||catalogChanged){ saveData(); if(curTxnType==='cliente') renderTxnSub(); }
+    if(imported||importedPayments||updated||catalogChanged){
+      saveData();
+      if(curTab==='txn')renderTxnSub();
+    }
     updateBadges();
-    if(imported||updated){
+    if(imported||importedPayments||updated){
       const msg=[];
       if(imported) msg.push(`${imported} factura(s) nueva(s) importada(s) de QB`);
+      if(importedPayments)msg.push(`${importedPayments} pago(s) importado(s) de QB`);
       if(updated)  msg.push(`${updated} registro(s) actualizado(s) desde QB`);
       showToast(msg.join(' · '));
     }
   }catch(e){ console.warn('qboFullSync error',e); addNotif('Error QB sync: '+e.message); }
-  finally{ if(btnEl){ btnEl.disabled=false; btnEl.textContent='QB ↻'; } }
+  finally{ if(btnEl){ btnEl.disabled=false; btnEl.textContent=projectButton?'Sync QBO':'QB ↻'; } }
 }
 
 // ════════════════════════════════════════════════════════════

@@ -52,6 +52,10 @@ ok('varias líneas del mismo proyecto se consolidan',
   sandbox.qboResolveProject(oneProjectBill, catalog).status === 'matched');
 ok('una factura repartida entre dos proyectos queda ambigua',
   sandbox.qboResolveProject({ projectRefs: [{ id: 'P10' }, { id: 'P20' }] }, catalog).status === 'ambiguous');
+ok('CustomerRef se acepta cuando su ID es un Customer/Job del catálogo',
+  sandbox.qboResolveProject({ customer: { id: 'P10', name: 'Cliente padre' } }, catalog).status === 'matched');
+ok('CustomerRef de un cliente que no es proyecto no se usa',
+  sandbox.qboResolveProject({ customer: { id: 'C1', name: 'Condominio Roble' } }, catalog).status === 'none');
 
 const record = { id: 'F1', qboId: 'Q1' };
 proyectoB.invClient.push(record);
@@ -63,7 +67,7 @@ ok('la misma factura se reubica sin crear otra copia',
 console.log('\nCableado de sincronización:');
 ok('facturas de proveedor reciben el catálogo y pueden moverse al proyecto QBO',
   /function qboSyncVendorBills\(qboBills,projectCatalog\)[\s\S]{0,2200}qboMoveRecord\([^)]*'billVendor'\)/.test(html));
-ok('facturas a clientes usan ProjectRef y no infieren el proyecto por cliente',
+ok('facturas a clientes usan referencias estables QBO y no aproximan por nombre de cliente',
   /const projectResolution=qboResolveProject\(qi,qboProjects\)/.test(html) &&
   !/const cln=clientName\.toLowerCase\(\)\.trim\(\)/.test(html));
 ok('Outlook usa el proyecto resuelto desde QBO como destino preferente',
