@@ -793,7 +793,7 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
         </button>
       </div>
       <div style="position:relative">
-        <button id="qbo-sync-btn" title="Sincronizar todo con QuickBooks" onclick="qboFullSync(this)" style="font-size:11px;font-weight:700;background:rgba(29,184,122,.15);border:1px solid var(--grn);color:var(--grn);border-radius:8px;padding:4px 10px;cursor:pointer;display:flex;align-items:center;gap:4px">QB ↻</button>
+        <button id="qbo-sync-btn" title="Actualizar Siscon con todo QuickBooks" onclick="qboFullSync(this)" style="font-size:11px;font-weight:700;background:rgba(29,184,122,.15);border:1px solid var(--grn);color:var(--grn);border-radius:8px;padding:4px 10px;cursor:pointer;display:flex;align-items:center;gap:4px">QB ↻</button>
       </div>
       <div style="position:relative;flex:1">
         <input id="claude-q" placeholder="Pregúntale a Claude sobre tus proyectos…" autocomplete="off" style="width:100%;font-size:12px;padding:6px 12px" onkeydown="if(event.key==='Enter')askClaude()"/>
@@ -12885,15 +12885,20 @@ async function qboFullSync(btn){
     const nextCustomers=(catalogs.customers||[]).filter(c=>c.active);
     const nextItems=(catalogs.items||[]).filter(i=>i.active).map(i=>({...i,price:i.unitPrice||0}));
     const nextAccounts=(catalogs.accounts||[]).filter(a=>a.active&&/Expense|Cost of Goods Sold/i.test(a.type||''));
+    const taxRateMap={};(catalogs.taxRates||[]).forEach(rate=>{taxRateMap[rate.id]=Number(rate.rate)||0;});
+    const nextTaxCodes=(catalogs.taxCodes||[]).filter(code=>code.active).map(code=>{
+      let rate=0;(code.salesTaxRates||[]).forEach(ref=>{if(ref.id&&taxRateMap[ref.id])rate+=taxRateMap[ref.id];});
+      if(!rate){const match=String(code.name||'').match(/(\d+([.,]\d+)?)\s*%/);if(match)rate=parseFloat(match[1].replace(',','.'));}
+      return {id:code.id,name:code.name,rate,taxable:code.taxable!==false};
+    });
     const nextProjectStatus=String(catalogs.projectsSource||'unavailable');
-    const catalogChanged=JSON.stringify([SYS.qbo.vendorCache||[],SYS.qbo.customerCache||[],SYS.qbo.itemCache||[],SYS.qbo.expenseAccountCache||[],SYS.qbo.projectCache||[],SYS.qbo.projectCatalogStatus||''])
-      !==JSON.stringify([nextVendors,nextCustomers,nextItems,nextAccounts,qboProjects,nextProjectStatus]);
-    if(catalogChanged){
-      SYS.qbo.vendorCache=nextVendors;SYS.qbo.customerCache=nextCustomers;
-      SYS.qbo.itemCache=nextItems;SYS.qbo.expenseAccountCache=nextAccounts;
-      SYS.qbo.projectCache=qboProjects;SYS.qbo.projectCatalogStatus=nextProjectStatus;
-      SYS.qbo.lastSync=new Date().toLocaleString('es-CR');
-    }
+    // Cada clic reemplaza todos los catálogos locales con la lectura actual de QBO,
+    // aunque las cantidades no hayan cambiado desde la sincronización anterior.
+    SYS.qbo.vendorCache=nextVendors;SYS.qbo.customerCache=nextCustomers;
+    SYS.qbo.itemCache=nextItems;SYS.qbo.expenseAccountCache=nextAccounts;
+    SYS.qbo.projectCache=qboProjects;SYS.qbo.taxCodeCache=nextTaxCodes;
+    SYS.qbo.projectCatalogStatus=nextProjectStatus;
+    SYS.qbo.lastSync=new Date().toLocaleString('es-CR');
 
     // Construir índice de facturas existentes en la app (por qboId y por DocNumber)
     const existById={}, existByDoc={};
@@ -12981,18 +12986,15 @@ async function qboFullSync(btn){
       addNotif('QB: no se encontraron proyectos como Customer/Job; se usará ProjectRef y las facturas sin nombre quedarán Sin clasificar.');
     }else if(nextProjectStatus==='customer-jobs'){SYS.qbo.projectCatalogWarning='';}
 
-    if(imported||importedPayments||updated||catalogChanged){
-      saveData();
-      if(curTab==='txn')renderTxnSub();
-    }
+    saveData();
+    if(curTab==='txn')renderTxnSub();
     updateBadges();
-    if(imported||importedPayments||updated){
-      const msg=[];
-      if(imported) msg.push(`${imported} factura(s) nueva(s) importada(s) de QB`);
-      if(importedPayments)msg.push(`${importedPayments} pago(s) importado(s) de QB`);
-      if(updated)  msg.push(`${updated} registro(s) actualizado(s) desde QB`);
-      showToast(msg.join(' · '));
-    }
+    const msg=[];
+    if(imported)msg.push(`${imported} factura(s) nueva(s)`);
+    if(importedPayments)msg.push(`${importedPayments} pago(s) nuevo(s)`);
+    if(updated)msg.push(`${updated} registro(s) actualizado(s)`);
+    msg.push(`${nextItems.length} materiales`,`${nextCustomers.length} clientes`,`${qboProjects.length} proyectos`,`${nextVendors.length} proveedores`);
+    showToast('QB → Siscon: '+msg.join(' · '));
   }catch(e){ console.warn('qboFullSync error',e); addNotif('Error QB sync: '+e.message); }
   finally{ if(btnEl){ btnEl.disabled=false; btnEl.textContent='QB ↻'; } }
 }

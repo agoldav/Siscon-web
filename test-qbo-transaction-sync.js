@@ -81,6 +81,11 @@ ok('solo el botón global ejecuta la sincronización completa',
 ok('el frontend consume Payment y BillPayment sin publicar a QBO',
   /qboRead\('\/api\/qbo\/payments'\)/.test(html) && /snapshot\.payments/.test(html) && /snapshot\.billPayments/.test(html) &&
   !/app\.post\('\/api\/qbo\/transactions'/.test(html));
+ok('el botón global reemplaza todos los catálogos QBO y confirma sus cantidades',
+  /SYS\.qbo\.vendorCache=nextVendors;SYS\.qbo\.customerCache=nextCustomers/.test(html) &&
+  /SYS\.qbo\.itemCache=nextItems/.test(html) && /SYS\.qbo\.projectCache=qboProjects/.test(html) &&
+  /nextItems\.length\} materiales/.test(html) && /nextCustomers\.length\} clientes/.test(html) &&
+  /qboProjects\.length\} proyectos/.test(html) && /nextVendors\.length\} proveedores/.test(html));
 
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);
