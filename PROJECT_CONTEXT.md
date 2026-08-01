@@ -1708,7 +1708,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   (incluida `test-xss.js` — todos los campos de usuario nuevos pasan por `esc()` y los numéricos por
   `toLocaleString`). Render real con Chrome headless en tema claro y oscuro, y con casos borde:
   razón social distinta, proyecto vacío con nombre largo (trunca con elipsis y muestra `—`), y
-  disponible negativo con avance al 100%.
+ disponible negativo con avance al 100%.
+
+### Sesión 2026-07-31 (activación de backups Dropbox)
+- [x] **Backups automáticos a Dropbox** — exportación comprimida y cifrada con AES-256-GCM; endpoint interno protegido; workflow de GitHub Actions cada 6 horas; registro `backups_log` con RLS y retención de 10 copias.
+- [x] Migración ejecutada en Supabase `siscon-pm-prod`; secretos configurados en Render y GitHub Actions; backend desplegado en Render con commit `68734e1`.
+- [x] Primera ejecución manual del workflow completada exitosamente (`Backup cifrado a Dropbox #1`, commit `98144a0`).
 
 ## 10. ⏳ Pendiente
 
@@ -1727,12 +1732,6 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Próxima sesión (2026-07-17+)
 - [~] **Supabase Auth real** — Login ✅, **gestión de usuarios ✅ Fase 1**, **RLS ✅ activado** (cierra el hueco de la anon key; ver sesión 2026-07-20). **Falta:** (a) **email automático** de invitaciones (hoy se comparte link a mano — backend `invite-user` tiene el envío como TODO; requiere proveedor SMTP o el de Supabase); (b) **sincronizar `SYS.users` ↔ Auth** para que los invitados aparezcan en Mensajes/avatares (hoy la mensajería usa el directorio local, con ids numéricos vs uuid de Auth — hacer con cuidado). Nota: RLS solo protege acceso directo; los roles se siguen aplicando en el backend (no hay políticas por-rol porque todo va por service_role).
-- [~] **Backups automáticos** — código listo: exportación comprimida + AES-256-GCM, endpoint interno
-  protegido para GitHub Actions, workflow cada 6 horas, log `backups_log` y limpieza de los 10 últimos.
-  **Pendiente de configuración externa para cerrar producción:** `DROPBOX_REFRESH_TOKEN`,
-  `DROPBOX_CLIENT_ID`, `DROPBOX_CLIENT_SECRET`, `BACKUP_ENCRYPTION_KEY` e `INTERNAL_BACKUP_SECRET`
-  en Render; el mismo `INTERNAL_BACKUP_SECRET` como secret de GitHub Actions; y ejecutar
-  `siscon-backend/migration-backups-log.sql` en Supabase.
 - [ ] **Invitar usuarios** — Para que colaboren en tiempo real (gestión de usuarios en la app)
 - [ ] **Ajustes finales** — UI, validaciones, seguridad (refactor de código, testing, optimizaciones)
 
