@@ -1777,6 +1777,15 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Desplegado: backend `05efb23` y frontend `c01805d`. Reinicio ejecutado en producción y verificado en vivo: **0 proyectos**, montos **$0.00**, QuickBooks **Sin conectar**, Outlook **Sin conectar** y los cinco usuarios/perfiles visibles se conservaron. Suite backend completa y prueba específica `test-app-reset.js` en verde.
 - [x] Corregida la vista obsoleta en Safari (`5ea0e3b`): una respuesta válida del servidor con **0 proyectos** ya no activa el fallback histórico de `localStorage`. El estado vacío de Supabase ahora es autoritativo en login, bootstrap e invitaciones; prueba `test-empty-server-state.js` en verde y deploy de Vercel confirmado.
 
+### Sesión 2026-08-01 (política de primera importación QBO por proyecto)
+> Cambio solicitado y autorizado sobre la sincronización QBO completada. Se mantiene estrictamente QuickBooks → Siscon; no se agregó ninguna escritura hacia Intuit.
+- [x] El sincronizador central persiste exclusivamente `Invoice` y `Bill` con una relación de proyecto verificable. Las transacciones sin proyecto, ambiguas o no resolubles se omiten antes de importar y ya no se envían a **Sin clasificar**.
+- [x] Se reforzó el mapeo gratuito: un `ProjectRef` sin nombre puede resolverse mediante el `CustomerRef`/Customer Job verificable del mismo documento o, si existe `ProjectRef` explícito, por un único nombre exacto coincidente en Siscon. Nunca se infiere un proyecto desde el nombre de un cliente cuando no existe evidencia de proyecto.
+- [x] La primera importación queda identificada por `realmId`: todas las facturas QBO del lote inicial van directamente a su proyecto, quedan tramitadas (`_pending=false`) y no requieren casas. Las facturas descubiertas en sincronizaciones posteriores quedan pendientes y exigen asignar cada línea a una casa; los Bills admiten casa o bodega.
+- [x] Migración segura de la importación anterior: se reubican documentos QBO al proyecto correcto y se eliminan solamente copias automáticas QBO sin PDF que no pertenecen a proyectos. Documentos locales/Outlook se conservan. Los cobros y pagos siguen ligados por `LinkedTxn`, se mueven con su factura y se depuran si el documento QBO ligado deja de pertenecer a un proyecto.
+- [x] Pruebas: proyecto QBO **21/21**, sincronización transaccional **20/20**, deduplicación **15/15**, conexión **9/9** y persistencia normalizada **18/18**. Suite frontend completa en verde salvo el fallo preexistente documentado de `test-login-concurrency.js`.
+- [x] Publicado en `main`: frontend `48c74b7`; Vercel reportó despliegue exitoso y el bundle de `app.sisconcr.com` contiene la nueva política. La ejecución del lote inicial en datos reales queda pendiente de iniciar sesión en la app y pulsar **QB ↻** una vez.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1801,8 +1810,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
-- [ ] **Validar QuickBooks Projects gratis con datos reales:** falta dejar conectada desde Ajustes la compañía definitiva y ejecutar una sincronización para verificar los nombres `Customer/Job`/`ProjectRef`. Ya no se cambia `QBO_REALM_ID` manualmente.
-- [ ] **Validación final de pagos QBO en producción:** después del despliegue, iniciar sesión nuevamente, pulsar el único botón **QB ↻** y confirmar en Dor → Transacciones → Pagos que aparecen el cobro de Invoice 1001 y el pago del Bill 00100001010000073216.
+- [ ] **Ejecutar y validar el lote inicial QBO corregido:** iniciar sesión en producción, pulsar una vez el único botón **QB ↻** y confirmar que cada factura con proyecto queda en su proyecto, sin casas y tramitada; que las facturas sin proyecto no aparecen; y que cobros/pagos quedan ligados a su documento.
+- [ ] **Carga posterior de casas desde Excel:** el usuario entregará por proyecto las listas de tipos de casa y sus líneas de materiales, más la lista de números de casa y tipo correspondiente. Importarlas automáticamente solo cuando entregue cada archivo e instrucciones.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
 ### Infraestructura / Producción
