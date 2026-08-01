@@ -8086,25 +8086,43 @@ function qboTransactionProjectRefs(transaction){
     .filter((ref,index,all)=>all.findIndex(other=>(ref.id&&other.id===ref.id)||(!ref.id&&!other.id&&other.name===ref.name))===index);
 }
 function qboResolveProject(transaction,projectCatalog){
-  let refs=qboTransactionProjectRefs(transaction);
-  // En QBO Projects, el proyecto también puede venir como CustomerRef (Customer/Job)
-  // en la cabecera de una Invoice o en las líneas de un Bill. Solo se acepta cuando
-  // el ID existe en el catálogo de proyectos de QBO; no se infiere por nombre de cliente.
-  if(!refs.length){
-    const projectIds=new Set((projectCatalog||[]).map(item=>String(item.id||'')).filter(Boolean));
-    const customerRefs=[transaction&&transaction.customer,...((transaction&&transaction.lines)||[]).map(line=>line&&line.customer)]
-      .map(ref=>({id:String(ref&&ref.id||''),name:qboProjectName(ref&&ref.name)}))
-      .filter(ref=>ref.id&&projectIds.has(ref.id));
-    refs=customerRefs.filter((ref,index,all)=>all.findIndex(other=>other.id===ref.id)===index);
+  const explicitRefs=qboTransactionProjectRefs(transaction);
+  const catalog=projectCatalog||[];
+  const projectIds=new Set(catalog.map(item=>String(item.id||'')).filter(Boolean));
+  const allCustomerRefs=[transaction&&transaction.customer,...((transaction&&transaction.lines)||[]).map(line=>line&&line.customer)]
+    .map(ref=>({id:String(ref&&ref.id||''),name:qboProjectName(ref&&ref.name)}))
+    .filter(ref=>ref.id||ref.name);
+  const projectCustomerRefs=allCustomerRefs.filter(ref=>ref.id&&projectIds.has(ref.id))
+    .filter((ref,index,all)=>all.findIndex(other=>other.id===ref.id)===index);
+  let refs=explicitRefs;
+  // Algunos Bills entregan ProjectRef sin nombre ni entrada correspondiente en el
+  // catálogo Customer/Job. Si el mismo documento trae un único CustomerRef que sí
+  // pertenece al catálogo de proyectos, esa referencia verificable es la que manda.
+  if(explicitRefs.length===1&&!qboProjectName(explicitRefs[0].name)&&
+     !catalog.some(item=>String(item.id||'')===explicitRefs[0].id)&&projectCustomerRefs.length){
+    refs=projectCustomerRefs;
+  }else if(!refs.length){
+    // Sin ProjectRef solo se acepta CustomerRef si su ID es un Customer/Job de QBO.
+    refs=projectCustomerRefs;
   }
   if(!refs.length)return {status:'none',project:null,id:'',name:'',refs:[]};
   if(refs.length!==1)return {status:'ambiguous',project:null,id:'',name:'',refs};
   const ref=refs[0];
-  const catalogMatches=(projectCatalog||[]).filter(item=>ref.id&&String(item.id||'')===ref.id);
+  const catalogMatches=catalog.filter(item=>ref.id&&String(item.id||'')===ref.id);
   if(catalogMatches.length>1)return {status:'ambiguous',project:null,id:ref.id,name:'',refs};
   const catalogProject=catalogMatches[0]||null;
   const id=ref.id||String(catalogProject&&catalogProject.id||'');
-  const name=qboProjectName(catalogProject&&catalogProject.name||ref.name);
+  let name=qboProjectName(catalogProject&&catalogProject.name||ref.name);
+  // Con ProjectRef explícito, QBO puede omitir el nombre del proyecto. En ese caso
+  // se permite un único nombre exacto de CustomerRef que coincida con Siscon. Sin
+  // ProjectRef no se infiere por nombre, para no confundir cliente con proyecto.
+  if(!name&&explicitRefs.length===1){
+    const exactNames=allCustomerRefs.map(candidate=>candidate.name).filter(Boolean)
+      .filter(candidate=>projects.some(project=>qboProjectName(project.name)===candidate))
+      .filter((candidate,index,all)=>all.indexOf(candidate)===index);
+    if(exactNames.length>1)return {status:'ambiguous',project:null,id:ref.id,name:'',refs};
+    if(exactNames.length===1)name=exactNames[0];
+  }
   const byId=id?projects.filter(project=>String(project.qboProjectId||'')===id):[];
   const byName=name?projects.filter(project=>qboProjectName(project.name)===name):[];
   // Los nombres de proyecto son iguales en QBO y Siscon. Si un ID guardado apunta a
@@ -8161,6 +8179,26 @@ function qboMoveRecord(record,sourceProject,targetProject,collection){
   }
   if(!target.includes(record))target.push(record);
   return true;
+}
+function qboIsAutoImportedTransaction(record){
+  return !!(record&&record.qboId&&record.createdBy==='QBO Import'&&!record.pdfBlobId&&!record.pdfName&&!record.attachName);
+}
+function qboRemoveRecord(record,sourceProject,collection){
+  if(!record)return false;
+  const source=sourceProject?(sourceProject[collection]||[]):(SYS.unclassified||[]);
+  const index=source.indexOf(record);
+  if(index<0)return false;
+  source.splice(index,1);
+  return true;
+}
+function qboApplyImportPolicy(record,initialImport){
+  if(!qboIsAutoImportedTransaction(record)||record.qboImportBatch)return false;
+  const before=JSON.stringify([record.qboImportBatch||'',record.qboInitialImportProcessed,record.houseAssignmentRequired,record._pending]);
+  record.qboImportBatch=initialImport?'initial':'incremental';
+  record.qboInitialImportProcessed=!!initialImport;
+  record.houseAssignmentRequired=!initialImport;
+  record._pending=!initialImport;
+  return before!==JSON.stringify([record.qboImportBatch||'',record.qboInitialImportProcessed,record.houseAssignmentRequired,record._pending]);
 }
 
 function qboSyncProjectCatalog(qboProjects,qboCustomers){
@@ -8293,29 +8331,41 @@ function qboApplyBillMatch(local,qb,reasons){
   if(changed)local.qboMatchedAt=new Date().toISOString();
   return changed;
 }
-function qboSyncVendorBills(qboBills,projectCatalog){
+function qboSyncVendorBills(qboBills,projectCatalog,options){
+  const initialImport=!!(options&&options.initialImport);
   const locals=[];
   projects.forEach(project=>(project.billVendor||[]).forEach(bill=>locals.push({project,bill})));
   (SYS.unclassified||[]).filter(bill=>bill.type==='Bill').forEach(bill=>locals.push({project:null,bill}));
-  let linked=0,updated=0,imported=0,ambiguous=0,moved=0,unresolvedProject=0,missing=0;
+  let linked=0,updated=0,imported=0,ambiguous=0,moved=0,unresolvedProject=0,missing=0,skippedNonProject=0,removed=0;
   for(const qb of (qboBills||[])){
     const projectResolution=qboResolveProject(qb,projectCatalog);
     const exact=locals.find(row=>String(row.bill.qboId||'')===String(qb.id||''));
+    // Una transacción sin relación verificable con un proyecto nunca se importa.
+    // La migración elimina solo copias creadas automáticamente por QBO; documentos
+    // locales o de Outlook se conservan y se marcan como ausentes más abajo.
+    if(projectResolution.status!=='matched'){
+      skippedNonProject++;
+      if(projectResolution.status==='ambiguous')ambiguous++;
+      else if(projectResolution.status==='unresolved')unresolvedProject++;
+      if(exact&&qboIsAutoImportedTransaction(exact.bill)&&qboRemoveRecord(exact.bill,exact.project,'billVendor')){
+        const localIndex=locals.indexOf(exact);if(localIndex>=0)locals.splice(localIndex,1);
+        removed++;
+      }
+      continue;
+    }
     if(exact){
       if(qboApplyBillMatch(exact.bill,qb,['qbo_id']))updated++;
       if(qboApplyProjectLink(exact.bill,projectResolution))updated++;
-      if(projectResolution.status==='matched'&&qboMoveRecord(exact.bill,exact.project,projectResolution.project,'billVendor'))moved++;
-      else if(projectResolution.status==='ambiguous')ambiguous++;
-      else if(projectResolution.status==='unresolved')unresolvedProject++;
+      if(qboMoveRecord(exact.bill,exact.project,projectResolution.project,'billVendor')){exact.project=projectResolution.project;moved++;}
+      if(qboApplyImportPolicy(exact.bill,initialImport))updated++;
       continue;
     }
     const result=qboFindBestBillMatch(qboBillAsRecord(qb),locals);
     if(result.status==='matched'){
       qboApplyBillMatch(result.match.bill,qb,result.reasons);
       qboApplyProjectLink(result.match.bill,projectResolution);
-      if(projectResolution.status==='matched'&&qboMoveRecord(result.match.bill,result.match.project,projectResolution.project,'billVendor'))moved++;
-      else if(projectResolution.status==='ambiguous')ambiguous++;
-      else if(projectResolution.status==='unresolved')unresolvedProject++;
+      if(qboMoveRecord(result.match.bill,result.match.project,projectResolution.project,'billVendor')){result.match.project=projectResolution.project;moved++;}
+      if(qboApplyImportPolicy(result.match.bill,initialImport))updated++;
       linked++;
     }else if(result.status==='ambiguous')ambiguous++;
     else {
@@ -8337,22 +8387,16 @@ function qboSyncVendorBills(qboBills,projectCatalog){
         }),
         notes:String(qb.privateNote||''),subtotalUSD,ivaUSD,totalUSD,
         totalCRC:currency==='CRC'?(Number(qb.total)||0):0,
-        qboDocumentTotal:Number(qb.total)||0,_pending:true,appliedToHouses:false,
+        qboDocumentTotal:Number(qb.total)||0,_pending:!initialImport,appliedToHouses:false,
+        qboImportBatch:initialImport?'initial':'incremental',qboInitialImportProcessed:initialImport,
+        houseAssignmentRequired:!initialImport,
         createdAt:new Date().toLocaleDateString('es-CR'),createdBy:'QBO Import',
       };
       qboApplyBillMatch(newBill,qb,['qbo_id']);
       qboApplyProjectLink(newBill,projectResolution);
-      if(projectResolution.status==='matched'){
-        if(!projectResolution.project.billVendor)projectResolution.project.billVendor=[];
-        projectResolution.project.billVendor.push(newBill);
-        locals.push({project:projectResolution.project,bill:newBill});
-      }else{
-        if(!SYS.unclassified)SYS.unclassified=[];
-        SYS.unclassified.push({...newBill,type:'Bill'});
-        locals.push({project:null,bill:newBill});
-        if(projectResolution.status==='ambiguous')ambiguous++;
-        else if(projectResolution.status==='unresolved')unresolvedProject++;
-      }
+      if(!projectResolution.project.billVendor)projectResolution.project.billVendor=[];
+      projectResolution.project.billVendor.push(newBill);
+      locals.push({project:projectResolution.project,bill:newBill});
       imported++;
     }
   }
@@ -8373,7 +8417,7 @@ function qboSyncVendorBills(qboBills,projectCatalog){
     if(present)delete bill.qboPresenceMessage;
     else {bill.qboPresenceMessage=`No se encuentra en el proyecto "${project.name}" de QuickBooks`;missing++;}
   }));
-  return {linked,updated,imported,ambiguous,moved,unresolvedProject,missing};
+  return {linked,updated,imported,ambiguous,moved,unresolvedProject,missing,skippedNonProject,removed};
 }
 
 function qboPaymentAllocations(payment,txnType){
@@ -8391,7 +8435,7 @@ function qboSyncPayments(snapshot){
     (project.billVendor||[]).forEach(bill=>{if(bill.qboId)bills[String(bill.qboId)]={project,record:bill};});
     (project.payments||[]).forEach(payment=>allPayments.push({project,record:payment}));
   });
-  let imported=0,updated=0,unresolved=0;
+  let imported=0,updated=0,unresolved=0,removed=0;
 
   function upsert(qboPayment,allocation,linked,direction){
     if(!linked){unresolved++;return;}
@@ -8437,7 +8481,21 @@ function qboSyncPayments(snapshot){
 
   (snapshot.payments||[]).forEach(payment=>qboPaymentAllocations(payment,'Invoice').forEach(allocation=>upsert(payment,allocation,invoices[allocation.txnId],'received')));
   (snapshot.billPayments||[]).forEach(payment=>qboPaymentAllocations(payment,'Bill').forEach(allocation=>upsert(payment,allocation,bills[allocation.txnId],'paid')));
-  return {imported,updated,unresolved};
+  // Depura pagos importados por QBO cuyo documento ligado ya no pertenece a ningún
+  // proyecto sincronizado. Los pagos creados manualmente en Siscon no se tocan.
+  const invoiceRecordIds=new Set(Object.values(invoices).map(row=>String(row.record.id)));
+  const billRecordIds=new Set(Object.values(bills).map(row=>String(row.record.id)));
+  projects.forEach(project=>{
+    const before=(project.payments||[]).length;
+    project.payments=(project.payments||[]).filter(payment=>{
+      if(payment.createdBy!=='QBO Import'||!payment.qboPaymentId)return true;
+      if(payment.paymentDirection==='received')return invoiceRecordIds.has(String(payment.refInvoiceId||''));
+      if(payment.paymentDirection==='paid')return billRecordIds.has(String(payment.refBillId||''));
+      return true;
+    });
+    removed+=before-project.payments.length;
+  });
+  return {imported,updated,unresolved,removed};
 }
 
 // Sincroniza estado de pago desde QBO: facturas con Balance=0 en QBO → "Pagada" en la app
@@ -8504,6 +8562,8 @@ function qboClearCompanyCaches(){
   if(!SYS.qbo)SYS.qbo={};
   ['vendorCache','customerCache','itemCache','expenseAccountCache','projectCache','taxCodeCache'].forEach(k=>SYS.qbo[k]=[]);
   SYS.qbo.lastSync=null; SYS.qbo.projectCatalogStatus=''; SYS.qbo.projectCatalogWarning='';
+  delete SYS.qbo.initialProjectTransactionImportCompletedAt;
+  delete SYS.qbo.initialProjectTransactionImportRealmId;
 }
 function qboConnect(){
   window.open(backendUrl()+'/api/qbo/connect','_blank');
@@ -9552,7 +9612,7 @@ function ciSetProduct(idx,val){
 function ciSetDesc(idx,val){ ciState.houseLines[idx].description=val; }
 
 // ---- líneas manuales (productos sueltos QBO) ----
-function ciAddManual(){ ciState.manualLines.push({productId:'2',productName:'Suministro de Materiales',description:'',qty:1,price:0,ivaRate:0.13}); renderClientInvForm(); }
+function ciAddManual(){ ciState.manualLines.push({productId:'2',productName:'Suministro de Materiales',description:'',qty:1,price:0,ivaRate:0.13,houseId:null}); renderClientInvForm(); }
 function ciDelManual(i){ ciState.manualLines.splice(i,1); renderClientInvForm(); }
 
 // importes USD
@@ -9651,12 +9711,15 @@ function renderClientInvForm(){
   }).join('');
 
   // líneas manuales
+  const manualHouseOpts=(selected)=>`<option value="">— Casa —</option>`+(p.houses||[]).map(h=>`<option value="${h.id}"${String(h.id)===String(selected||'')?' selected':''}>${esc(h.num)}</option>`).join('');
   const manualRows=st.manualLines.map((l,i)=>`
     <div class="oc-line extra-line" style="${cols}">
       <div class="oc-cell-r" style="color:var(--t3)">+</div>
       <select class="oc-cell-inp" style="text-align:left" onchange="ciState.manualLines[${i}].productId=this.value;ciState.manualLines[${i}].productName=this.options[this.selectedIndex].text;ciRecalc()">${itemOpts(l.productId)}</select>
       <input class="oc-cell-inp" style="text-align:left" value="${(l.description||'').replace(/"/g,'&quot;')}" placeholder="Descripción..." oninput="ciState.manualLines[${i}].description=this.value"/>
-      <div class="oc-cell-r" style="color:var(--t3)">—</div>
+      ${st.houseAssignmentRequired
+        ?`<select class="oc-cell-inp" style="font-size:10px" onchange="ciState.manualLines[${i}].houseId=this.value||null">${manualHouseOpts(l.houseId)}</select>`
+        :`<div class="oc-cell-r" style="color:var(--t3)">—</div>`}
       <input type="number" class="oc-cell-inp" value="${l.qty}" min="0" step="0.01" onchange="ciState.manualLines[${i}].qty=parseFloat(this.value)||0;ciRecalc()"/>
       <input type="number" class="oc-cell-inp" value="${l.price}" min="0" step="0.01" onchange="ciState.manualLines[${i}].price=parseFloat(this.value)||0;ciRecalc()"/>
       <div class="oc-subtotal amber">${ciFmt((l.qty||0)*(l.price||0))}</div>
@@ -9692,6 +9755,8 @@ function renderClientInvForm(){
       </div>
       ${st.status==='Anulada'&&st.creditNoteNum?`<div style="padding:6px 16px;background:rgba(226,75,74,.08);border-bottom:1px solid var(--border);font-size:11px;color:var(--red)">Anulada con Nota de Crédito ${st.creditNoteNum}</div>`:''}
       ${st.status==='Pagada'&&st.paidDate?`<div style="padding:6px 16px;background:rgba(29,184,122,.08);border-bottom:1px solid var(--border);font-size:11px;color:var(--grn)">Pagada el ${fmtDate(st.paidDate)}</div>`:''}
+      ${st.qboInitialImportProcessed?`<div style="padding:6px 16px;background:rgba(29,184,122,.08);border-bottom:1px solid var(--border);font-size:11px;color:var(--grn)">Importación inicial tramitada · no requiere asignación a casas.</div>`:''}
+      ${st.houseAssignmentRequired?`<div style="padding:6px 16px;background:rgba(212,148,26,.1);border-bottom:1px solid var(--border);font-size:11px;color:var(--amb)">Documento nuevo de QBO: asigna cada línea a una casa antes de tramitarlo.</div>`:''}
 
       <div class="oc-fields-area">
         <div class="oc-fields-row">
@@ -9746,7 +9811,7 @@ function renderClientInvForm(){
 
       <div class="oc-tbl-head" style="${cols}">
         <div class="oc-th">N.º</div><div class="oc-th">Producto/Servicio</div><div class="oc-th">Descripción</div>
-        <div class="oc-th" style="text-align:center">Avance</div><div class="oc-th" style="text-align:center">Cantidad (m²)</div><div class="oc-th" style="text-align:center">Tarifa</div><div class="oc-th r">Importe</div>
+        <div class="oc-th" style="text-align:center">${st.houseAssignmentRequired?'Casa':'Avance'}</div><div class="oc-th" style="text-align:center">Cantidad (m²)</div><div class="oc-th" style="text-align:center">Tarifa</div><div class="oc-th r">Importe</div>
         <div class="oc-th" style="text-align:center">IVA</div><div class="oc-th"></div>
       </div>
       <div class="oc-tbl-body">
@@ -9856,10 +9921,15 @@ function saveClientInv(send){
   const p=curProj;
   if(!ciState.client){ alert('Indique el cliente.'); return; }
   if(!ciState.houseLines.length && !ciState.manualLines.length){ alert('Agregue al menos una casa o línea.'); return; }
+  if(ciState.houseAssignmentRequired){
+    const missing=(ciState.manualLines||[]).some(line=>!line.houseId||!(p.houses||[]).some(h=>String(h.id)===String(line.houseId)));
+    if(missing){ alert('Asigna cada línea de la factura a una casa antes de guardarla.'); return; }
+  }
   ciRecalc();
   const arr=txnArr('cliente');
   const data=JSON.parse(JSON.stringify(ciState));
   data.lastModified=new Date().toLocaleString('es-CR'); data._pending=false;
+  if(data.houseAssignmentRequired){data.houseAssignmentRequired=false;data.houseAssignmentCompletedAt=new Date().toISOString();}
   if(data.status==='Pagada'&&!data.paidDate) data.paidDate=new Date().toISOString().slice(0,10);
   if(curTxnId==='new'){ arr.push(data); curTxnId=data.id;
     logAction(`Factura a Cliente "${data.num}" creada`,'log-create','Factura a Cliente',null,{num:data.num,client:data.client,total:data.totalUSD});
@@ -11758,6 +11828,8 @@ function renderVendorBill(){
           <span style="font-size:10px;color:var(--t3)">Creado por ${st.createdBy} · ${st.createdAt}</span>
         </div>
       </div>
+      ${st.qboInitialImportProcessed?`<div style="padding:6px 16px;background:rgba(29,184,122,.08);border-bottom:1px solid var(--border);font-size:11px;color:var(--grn)">Importación inicial tramitada · no requiere asignación a casas.</div>`:''}
+      ${st.houseAssignmentRequired?`<div style="padding:6px 16px;background:rgba(212,148,26,.1);border-bottom:1px solid var(--border);font-size:11px;color:var(--amb)">Documento nuevo de QBO: asigna cada línea a una casa o bodega antes de tramitarlo.</div>`:''}
       <div class="oc-fields-area">
         <div class="oc-fields-row">
           <div class="oc-fld"><div class="oc-fld-label">Proyecto</div>
@@ -12130,6 +12202,7 @@ function vbAssignAllConfirm(){
   closeModal(); renderVendorBill();
 }
 function vbValidateAssignments(){
+  if(vbState&&vbState.qboInitialImportProcessed&&vbState.houseAssignmentRequired===false)return null;
   for(const l of vbState.lines){
     if(!l.desc&&!l.qty)continue;
     if(!l.assign||!l.assign.length) return 'Todos los productos deben estar asociados a un proyecto, casa o bodega, por favor completar la información y guardar.';
@@ -12236,6 +12309,7 @@ function saveVendorBill(sync){
   const data=JSON.parse(JSON.stringify(st));
   data.status=st.status==='Borrador'?'Registrada':st.status;
   data.lastModified=new Date().toLocaleString('es-CR'); data._pending=false;
+  if(data.houseAssignmentRequired){data.houseAssignmentRequired=false;data.houseAssignmentCompletedAt=new Date().toISOString();}
   if(curTxnId==='new'){ arr.push(data); curTxnId=data.id;
     logAction(`Factura de Proveedor "${data.num}" creada`,'log-create','Factura de Proveedor',null,{num:data.num,party:data.party,total:data.totalUSD});
   } else { const idx=arr.findIndex(x=>String(x.id)===String(curTxnId)); if(idx>=0)arr[idx]=data; }
@@ -12880,7 +12954,7 @@ async function compareRun(){
       return {type:'Invoice',qboId:iv.id,docNumber:iv.docNumber,party:iv.customer&&iv.customer.name,date:iv.txnDate,total:iv.total,
         currency:iv.currency,project:projectResolution.status==='matched'?projectResolution.project.name:null,
         projectResolution,qboInvoice:iv,lines:(iv.lines||[]).map(l=>({desc:l.description,qty:l.quantity,price:l.unitPrice})),_sel:false,_open:false};
-    });
+    }).filter(row=>row.projectResolution.status==='matched');
     const bills=(data.bills||[]).filter(qb=>{
       if(existingIds.has('Bill|'+qb.id))return false;
       return qboFindBestBillMatch(qboBillAsRecord(qb),localBills).status!=='matched';
@@ -12890,7 +12964,7 @@ async function compareRun(){
         party:qb.vendor&&qb.vendor.name,date:qb.txnDate,total:qb.total,currency:qb.currency,
         qboBill:qb,project:projectResolution.status==='matched'?projectResolution.project.name:null,projectResolution,
         lines:(qb.lines||[]).map(l=>({desc:l.description,qty:l.quantity,price:l.unitPrice||l.amount})),_sel:false,_open:false};
-    });
+    }).filter(row=>row.projectResolution.status==='matched');
     compareList=[...invoices,...bills];
     renderCompareBody('done');
   }catch(e){ console.warn(e); compareList=[]; alert('No se pudo consultar QuickBooks (CORS/credenciales).'); renderCompareBody('init'); }
@@ -12898,23 +12972,22 @@ async function compareRun(){
 function compareImport(){
   const sel=compareList.filter(d=>d._sel); if(!sel.length){ alert('Selecciona al menos un documento.'); return; }
   let imported=0;
-  if(!SYS.unclassified)SYS.unclassified=[];
   sel.forEach(d=>{
     const p=d.project?projects.find(x=>x.name===d.project):null;
     const isBill=d.type==='Bill', currency=String(d.currency||'USD').toUpperCase();
     const rec={qboId:d.qboId,num:d.docNumber,invoiceNumber:isBill?d.docNumber:'',party:d.party,date:d.date,
       currency,currencyBill:currency,qboVendorId:d.qboVendorId||'',qboDocumentTotal:d.total,
       totalCRC:currency==='CRC'?d.total:0,totalUSD:currency==='USD'?d.total:qboAmountToUSD(d.total,currency,d.qboBill&&d.qboBill.exchangeRate),
-      status:isBill&&d.qboBill?d.qboBill.paymentStatus:'Emitida',lines:d.lines,type:d.type};
+      status:isBill&&d.qboBill?d.qboBill.paymentStatus:'Emitida',lines:d.lines.map(line=>({...line,houseId:null,assign:line.assign||[]})),type:d.type,
+      createdBy:'QBO Import',createdAt:new Date().toLocaleDateString('es-CR'),qboImportBatch:'incremental',
+      qboInitialImportProcessed:false,houseAssignmentRequired:true,_pending:true};
     if(isBill&&d.qboBill)qboApplyBillMatch(rec,d.qboBill,['qbo_id']);
     if(d.projectResolution)qboApplyProjectLink(rec,d.projectResolution);
-    if(p){ const key=d.type==='Invoice'?'invClient':'billVendor'; if(!p[key])p[key]=[]; p[key].push({...rec,id:'imp-'+Date.now()+imported}); }
-    else { SYS.unclassified.push({...rec,id:'unc-'+Date.now()+imported}); }
-    imported++;
+    if(p){ const key=d.type==='Invoice'?'invClient':'billVendor'; if(!p[key])p[key]=[]; p[key].push({...rec,id:'imp-'+Date.now()+imported}); imported++; }
   });
   compareList=compareList.filter(d=>!d._sel);
   saveData(); renderCompareBody('done'); updateBadges();
-  addNotif(imported+' documento(s) importado(s)'+(SYS.unclassified.length?' · revisa "Sin clasificar"':''));
+  addNotif(imported+' documento(s) de proyecto importado(s)');
 }
 
 // ════════════════════════════════════════════════════════════
@@ -12924,7 +12997,7 @@ async function qboFullSync(btn){
   if(!qboConfigured()) return;
   const btnEl=btn||document.getElementById('qbo-sync-btn');
   if(btnEl){ btnEl.disabled=true; btnEl.textContent='QB ↻…'; }
-  let imported=0, updated=0, importedPayments=0, importedProjects=0;
+  let imported=0, updated=0, importedPayments=0, importedProjects=0, skippedTransactions=0, removedImports=0;
   try{
     // Evita una ráfaga de diez lecturas simultáneas contra Intuit: primero se traen
     // transacciones (incluidos Payment/BillPayment) y luego los catálogos.
@@ -12932,6 +13005,8 @@ async function qboFullSync(btn){
     const catalogs=await qboReadCatalogs(true);
     const qboInvs=snapshot.invoices||[];
     const qboProjects=catalogs.projects||[];
+    const activeRealm=String(SYS.qbo&&SYS.qbo.realmId||'');
+    const initialImport=!SYS.qbo.initialProjectTransactionImportCompletedAt||String(SYS.qbo.initialProjectTransactionImportRealmId||'')!==activeRealm;
     const nextVendors=(catalogs.vendors||[]).filter(v=>v.active);
     const nextCustomers=(catalogs.customers||[]).filter(c=>c.active);
     const nextItems=(catalogs.items||[]).filter(i=>i.active).map(i=>({...i,price:i.unitPrice||0}));
@@ -12957,6 +13032,15 @@ async function qboFullSync(btn){
     importedProjects=projectSync.imported;updated+=projectSync.updated;
     if(projectSync.ambiguous)addNotif(`QB: ${projectSync.ambiguous} proyecto(s) con nombre duplicado en Siscon; no se enlazaron.`);
 
+    // Migración controlada: la política actual nunca conserva transacciones QBO
+    // sin proyecto en "Sin clasificar". Solo se retiran copias automáticas sin PDF;
+    // documentos locales y de Outlook permanecen intactos.
+    if(SYS.unclassified){
+      const before=SYS.unclassified.length;
+      SYS.unclassified=SYS.unclassified.filter(record=>!(['Invoice','Bill'].includes(record.type)&&qboIsAutoImportedTransaction(record)));
+      removedImports+=before-SYS.unclassified.length;
+    }
+
     // Construir índice de facturas existentes en la app (por qboId y por DocNumber)
     const existById={}, existByDoc={};
     projects.forEach(p=>{
@@ -12977,6 +13061,12 @@ async function qboFullSync(btn){
       const existing=existById[qid]||existByDoc[doc];
       const projectResolution=qboResolveProject(qi,qboProjects);
 
+      if(projectResolution.status!=='matched'){
+        skippedTransactions++;
+        if(existing&&qboIsAutoImportedTransaction(existing.inv)&&qboRemoveRecord(existing.inv,existing.proj,'invClient'))removedImports++;
+        continue;
+      }
+
       if(existing){
         const inv=existing.inv;
         const before=JSON.stringify([inv.qboId||'',inv.consecutivo||'',inv.qboDocumentTotal??null,inv.qboBalance??null,inv.qboCurrency||'',inv.qboExchangeRate??null,inv.qboTaxTotal??null,inv.qboLastUpdatedAt||'',inv.status||'']);
@@ -12990,7 +13080,8 @@ async function qboFullSync(btn){
         const after=JSON.stringify([inv.qboId||'',inv.consecutivo||'',inv.qboDocumentTotal??null,inv.qboBalance??null,inv.qboCurrency||'',inv.qboExchangeRate??null,inv.qboTaxTotal??null,inv.qboLastUpdatedAt||'',inv.status||'']);
         if(before!==after)updated++;
         if(qboApplyProjectLink(inv,projectResolution))updated++;
-        if(projectResolution.status==='matched'&&qboMoveRecord(inv,existing.proj,projectResolution.project,'invClient'))updated++;
+        if(qboMoveRecord(inv,existing.proj,projectResolution.project,'invClient'))updated++;
+        if(qboApplyImportPolicy(inv,initialImport))updated++;
         continue;
       }
 
@@ -13003,6 +13094,7 @@ async function qboFullSync(btn){
         qty:l.quantity||0,
         price:l.unitPrice||0,
         taxCodeId:'',
+        houseId:null,
       }));
       const subtotalUSD=qboAmountToUSD(qi.subtotal,qi.currency,qi.exchangeRate);
       const ivaUSD=qboAmountToUSD(qi.totalTax,qi.currency,qi.exchangeRate);
@@ -13013,35 +13105,40 @@ async function qboFullSync(btn){
         houseLines:[], manualLines:lines,
         subtotalUSD,ivaUSD,totalUSD:qboAmountToUSD(qi.total,qi.currency,qi.exchangeRate),
         qboDocumentTotal:qi.total,qboBalance:qi.balance,
-        status:qi.paymentStatus==='Pagada'?'Pagada':'Emitida', notes:qi.customerMemo||'',
-        createdAt:new Date().toLocaleDateString('es-CR'), createdBy:'QBO Import', _pending:true,
+        status:qi.paymentStatus||'Emitida', notes:qi.customerMemo||'',
+        createdAt:new Date().toLocaleDateString('es-CR'), createdBy:'QBO Import', _pending:!initialImport,
+        qboImportBatch:initialImport?'initial':'incremental',qboInitialImportProcessed:initialImport,
+        houseAssignmentRequired:!initialImport,
       };
       qboApplyProjectLink(newInv,projectResolution);
-      if(proj){
-        if(!proj.invClient)proj.invClient=[];
-        proj.invClient.push(newInv);
-      } else {
-        if(!SYS.unclassified)SYS.unclassified=[];
-        SYS.unclassified.push({...newInv,type:'Invoice'});
-      }
+      if(!proj.invClient)proj.invClient=[];
+      proj.invClient.push(newInv);
       imported++;
     }
 
     // 2. Enlazar las facturas cargadas desde Outlook e importar las que solo existen en QBO.
     // La coincidencia fuerte evita crear una segunda copia del mismo documento.
-    const vendorSync=qboSyncVendorBills(snapshot.bills||[],qboProjects);
+    const vendorSync=qboSyncVendorBills(snapshot.bills||[],qboProjects,{initialImport});
     imported+=vendorSync.imported;
     updated+=vendorSync.linked+vendorSync.updated+vendorSync.moved;
+    skippedTransactions+=vendorSync.skippedNonProject;
+    removedImports+=vendorSync.removed;
     if(vendorSync.ambiguous)addNotif(`QB: ${vendorSync.ambiguous} factura(s) con coincidencia ambigua; no se enlazaron automáticamente.`);
 
     // 3. Importar cobros de clientes y pagos de facturas de proveedores por LinkedTxn.
     const paymentSync=qboSyncPayments(snapshot);
     importedPayments+=paymentSync.imported;
     updated+=paymentSync.updated;
+    removedImports+=paymentSync.removed;
     if(nextProjectStatus==='project-ref-only'&&SYS.qbo.projectCatalogWarning!==nextProjectStatus){
       SYS.qbo.projectCatalogWarning=nextProjectStatus;
-      addNotif('QB: no se encontraron proyectos como Customer/Job; se usará ProjectRef y las facturas sin nombre quedarán Sin clasificar.');
+      addNotif('QB: no se encontraron proyectos como Customer/Job; se usará ProjectRef y se omitirá cualquier factura cuya relación con un proyecto no sea verificable.');
     }else if(nextProjectStatus==='customer-jobs'){SYS.qbo.projectCatalogWarning='';}
+
+    if(initialImport){
+      SYS.qbo.initialProjectTransactionImportCompletedAt=new Date().toISOString();
+      SYS.qbo.initialProjectTransactionImportRealmId=activeRealm;
+    }
 
     saveData();
     if(curTab==='txn')renderTxnSub();
@@ -13052,6 +13149,8 @@ async function qboFullSync(btn){
     if(importedPayments)msg.push(`${importedPayments} pago(s) nuevo(s)`);
     if(importedProjects)msg.push(`${importedProjects} proyecto(s) nuevo(s)`);
     if(updated)msg.push(`${updated} registro(s) actualizado(s)`);
+    if(skippedTransactions)msg.push(`${skippedTransactions} transacción(es) sin proyecto omitida(s)`);
+    if(removedImports)msg.push(`${removedImports} importación(es) anterior(es) depurada(s)`);
     msg.push(`${nextItems.length} materiales`,`${nextCustomers.length} clientes`,`${qboProjects.length} proyectos`,`${nextVendors.length} proveedores`);
     showToast('QB → Siscon: '+msg.join(' · '));
   }catch(e){ console.warn('qboFullSync error',e); addNotif('Error QB sync: '+e.message); }

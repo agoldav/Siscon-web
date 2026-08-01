@@ -28,6 +28,7 @@ const sandbox = { projects: [project], SYS: { unclassified: [] }, tcGet: () => 5
 vm.createContext(sandbox);
 vm.runInContext([
   'qboProjectName', 'qboTransactionProjectRefs', 'qboResolveProject', 'qboBindProjectId', 'qboApplyProjectLink', 'qboMoveRecord',
+  'qboIsAutoImportedTransaction', 'qboRemoveRecord', 'qboApplyImportPolicy',
   'qboSyncProjectCatalog',
   'qboTextKey', 'qboVendorKey', 'qboBillAmount', 'qboBillMatch', 'qboFindBestBillMatch', 'qboBillAsRecord',
   'qboAmountToUSD', 'qboApplyBillMatch', 'qboSyncVendorBills', 'qboPaymentAllocations', 'qboSyncPayments',
@@ -59,17 +60,35 @@ const qboBill = {
 };
 
 console.log('Sincronización idempotente de Bills:');
-const first = sandbox.qboSyncVendorBills([qboBill], catalog);
+const first = sandbox.qboSyncVendorBills([qboBill], catalog, {initialImport:true});
 ok('importa un Bill faltante al proyecto exacto', first.imported === 1 && project.billVendor.length === 1);
 ok('el Bill importado queda enlazado y presente en el proyecto QBO',
   project.billVendor[0].qboId === 'B1' && project.billVendor[0].qboProjectPresence === 'present');
+ok('el lote inicial queda tramitado sin exigir casa',
+  project.billVendor[0].qboImportBatch === 'initial' && project.billVendor[0].qboInitialImportProcessed === true &&
+  project.billVendor[0].houseAssignmentRequired === false && project.billVendor[0]._pending === false);
 const second = sandbox.qboSyncVendorBills([qboBill], catalog);
 ok('repetir sync no crea duplicados', second.imported === 0 && project.billVendor.length === 1);
+
+const nonProjectBill={...qboBill,id:'B-NP',docNumber:'G-NP',project:null,projectRefs:[],lines:[{amount:20,quantity:1,unitPrice:20,description:'Sin proyecto'}]};
+const skipped=sandbox.qboSyncVendorBills([nonProjectBill], catalog);
+ok('un Bill sin proyecto se omite y nunca va a Sin clasificar',
+  skipped.skippedNonProject===1 && !project.billVendor.some(b=>b.qboId==='B-NP') && sandbox.SYS.unclassified.length===0);
+project.billVendor.push({id:'OLD-NP',qboId:'B-NP',createdBy:'QBO Import',invoiceNumber:'G-NP'});
+const cleaned=sandbox.qboSyncVendorBills([nonProjectBill], catalog);
+ok('la migración elimina solo la copia QBO automática que no pertenece a proyecto',
+  cleaned.removed===1 && !project.billVendor.some(b=>b.qboId==='B-NP'));
+
+const incrementalBill={...qboBill,id:'B2',docNumber:'G-200'};
+sandbox.qboSyncVendorBills([incrementalBill], catalog, {initialImport:false});
+const incremental=project.billVendor.find(b=>b.qboId==='B2');
+ok('un Bill posterior queda pendiente de asignar por línea',
+  incremental && incremental.qboImportBatch==='incremental' && incremental.houseAssignmentRequired===true && incremental._pending===true);
 
 project.billVendor.push({ id: 'LOCAL1', num: 'FP-LOCAL', invoiceNumber: 'LOCAL-9', party: 'Otro', date: '2026-08-01', totalUSD: 25, currencyBill: 'USD' });
 sandbox.qboSyncVendorBills([qboBill], catalog);
 ok('una factura local ausente se conserva y queda marcada',
-  project.billVendor.length === 2 && project.billVendor[1].qboProjectPresence === 'missing' && /QuickBooks/.test(project.billVendor[1].qboPresenceMessage));
+  project.billVendor.some(b=>b.id==='LOCAL1'&&b.qboProjectPresence==='missing'&&/QuickBooks/.test(b.qboPresenceMessage)));
 
 console.log('\nCobros y pagos QBO:');
 project.invClient.push({ id: 'INVLOCAL', qboId: 'I1', num: 'FAC-1', client: 'Cliente Uno' });
@@ -84,6 +103,10 @@ ok('cada pago queda ligado al documento local correspondiente',
   project.payments.some(p => p.refBillId === 'qbo-bill-B1' && p.paymentDirection === 'paid'));
 const paymentsSecond = sandbox.qboSyncPayments(paymentSnapshot);
 ok('repetir sync de pagos tampoco duplica', paymentsSecond.imported === 0 && project.payments.length === 2);
+project.payments.push({id:'OLD-PAY',createdBy:'QBO Import',qboPaymentId:'OLD',paymentDirection:'received',refInvoiceId:'REMOVED'});
+const paymentsCleaned=sandbox.qboSyncPayments(paymentSnapshot);
+ok('elimina solo pagos QBO cuyo documento ya no pertenece a un proyecto',
+  paymentsCleaned.removed===1 && !project.payments.some(p=>p.id==='OLD-PAY'));
 
 console.log('\nInterfaz y dirección de datos:');
 ok('solo el botón global ejecuta la sincronización completa',
@@ -99,6 +122,14 @@ ok('el botón global reemplaza todos los catálogos QBO y confirma sus cantidade
   /nextItems\.length\} materiales/.test(html) && /nextCustomers\.length\} clientes/.test(html) &&
   /qboProjects\.length\} proyectos/.test(html) && /nextVendors\.length\} proveedores/.test(html) &&
   /qboSyncProjectCatalog\(qboProjects,nextCustomers\)/.test(html));
+ok('el primer lote se marca por compañía y los posteriores exigen asignación de casa',
+  /initialProjectTransactionImportCompletedAt/.test(html) && /initialProjectTransactionImportRealmId/.test(html) &&
+  /qboImportBatch:initialImport\?'initial':'incremental'/.test(html) && /houseAssignmentRequired:!initialImport/.test(html));
+ok('el sync central omite transacciones sin proyecto en vez de enviarlas a Sin clasificar',
+  /if\(projectResolution\.status!=='matched'\)[\s\S]{0,280}skippedTransactions\+\+/.test(html) &&
+  !/SYS\.unclassified\.push\(\{\.\.\.newInv,type:'Invoice'\}\)/.test(html));
+ok('las líneas posteriores de facturas a clientes requieren una casa antes de tramitarse',
+  /if\(ciState\.houseAssignmentRequired\)[\s\S]{0,420}Asigna cada línea de la factura a una casa/.test(html));
 
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);

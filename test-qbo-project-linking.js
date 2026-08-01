@@ -60,6 +60,12 @@ ok('Invoice usa ProjectRef de línea aunque no exista ProjectRef en cabecera',
   sandbox.qboResolveProject({ lines: [{ project: { id: 'P10', name: 'Condominio Roble' } }] }, catalog).project === proyectoA);
 ok('Invoice usa Customer/Job de línea y descarta el cliente padre de cabecera',
   sandbox.qboResolveProject({ customer: { id: 'C1', name: 'Cliente padre' }, lines: [{ customer: { id: 'P10', name: 'Condominio Roble' } }] }, catalog).project === proyectoA);
+ok('ProjectRef sin nombre usa el Customer/Job verificable del mismo documento',
+  sandbox.qboResolveProject({ project: { id: 'PX' }, customer: { id: 'P10', name: 'Condominio Roble' } }, catalog).project === proyectoA);
+ok('ProjectRef sin nombre permite un único nombre exacto de proyecto en CustomerRef',
+  sandbox.qboResolveProject({ project: { id: 'PX' }, customer: { id: 'C1', name: 'Condominio Roble' } }, []).project === proyectoA);
+ok('sin ProjectRef no se infiere proyecto por un nombre de cliente',
+  sandbox.qboResolveProject({ customer: { id: 'C1', name: 'Condominio Roble' } }, []).status === 'none');
 
 proyectoB.qboProjectId = 'P10';
 proyectoB.qboProjectName = 'Condominio Roble';
@@ -80,7 +86,7 @@ ok('la misma factura se reubica sin crear otra copia',
 
 console.log('\nCableado de sincronización:');
 ok('facturas de proveedor reciben el catálogo y pueden moverse al proyecto QBO',
-  /function qboSyncVendorBills\(qboBills,projectCatalog\)[\s\S]{0,2200}qboMoveRecord\([^)]*'billVendor'\)/.test(html));
+  /function qboSyncVendorBills\(qboBills,projectCatalog,options\)[\s\S]{0,3200}qboMoveRecord\([^)]*'billVendor'\)/.test(html));
 ok('facturas a clientes usan referencias estables QBO y no aproximan por nombre de cliente',
   /const projectResolution=qboResolveProject\(qi,qboProjects\)/.test(html) &&
   !/const cln=clientName\.toLowerCase\(\)\.trim\(\)/.test(html));
