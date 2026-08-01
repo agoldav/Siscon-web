@@ -1740,6 +1740,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Una factura existente en otro proyecto o en Sin clasificar se reubica como el mismo objeto al proyecto indicado por QBO, sin crear una copia. La importación Outlook también prefiere el proyecto de QBO cuando el Bill ya tuvo match fuerte.
 - [x] Pruebas: backend `test-qbo-readonly.js` **17/17**; frontend `test-qbo-bill-matching.js` **14/14**, `test-qbo-project-linking.js` **11/11** y `test-normalized-transactions.js` **18/18**. Suite completa backend y frontend (excepto el fallo preexistente documentado de `test-login-concurrency.js`) en verde.
 - [x] Desplegado: backend `b9acba1` en Render y frontend `66c32b9` en Vercel; health del backend responde `200` y la UI publicada confirma acceso gratuito sin referencias al permiso premium.
+- [x] Corregido el callback OAuth QBO en producción (`1407ead`): `/api/qbo/callback` es la única ruta QBO exenta del JWT global de Cloudflare porque Intuit no puede enviarlo. El callback mantiene `state` aleatorio de un solo uso con TTL, PKCE y validación de `realmId`; todas las rutas que inician conexión o leen datos siguen protegidas. `test-oauth-hardening.js` **43/43**, `test-auth-legacy.js` **31/31**, `test-cf-access.js` **12/12** y suite backend completa en verde. Verificado en vivo: un callback sin JWT llega al handler y un `state` inválido sigue rechazado.
 
 ## 10. ⏳ Pendiente
 
@@ -1765,7 +1766,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
-- [ ] **Validar QuickBooks Projects gratis en producción:** reconectar QBO desde un navegador normal con el único scope contable estándar y ejecutar una sincronización real para confirmar los nombres `Customer/Job`/`ProjectRef`. El navegador integrado de Codex bloqueó el redirect final a `siscon-backend.onrender.com`, por lo que no pudo completarse aquí.
+- [ ] **Validar QuickBooks Projects gratis en producción:** repetir la conexión QBO después del fix `1407ead`, usando el único scope contable estándar, y ejecutar una sincronización real para confirmar los nombres `Customer/Job`/`ProjectRef`.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
 ### Infraestructura / Producción
