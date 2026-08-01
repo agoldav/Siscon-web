@@ -8069,7 +8069,7 @@ async function qboReadCatalogs(force){
 function qboProjectName(value){ return String(value||'').trim(); }
 function qboTransactionProjectRefs(transaction){
   const refs=Array.isArray(transaction&&transaction.projectRefs)
-    ?transaction.projectRefs:(transaction&&transaction.project?[transaction.project]:[]);
+    ?transaction.projectRefs:[transaction&&transaction.project,...((transaction&&transaction.lines)||[]).map(line=>line&&line.project)];
   return refs.map(ref=>({id:String(ref&&ref.id||''),name:qboProjectName(ref&&ref.name)}))
     .filter(ref=>ref.id||ref.name)
     .filter((ref,index,all)=>all.findIndex(other=>(ref.id&&other.id===ref.id)||(!ref.id&&!other.id&&other.name===ref.name))===index);
@@ -8095,24 +8095,35 @@ function qboResolveProject(transaction,projectCatalog){
   const id=ref.id||String(catalogProject&&catalogProject.id||'');
   const name=qboProjectName(catalogProject&&catalogProject.name||ref.name);
   const byId=id?projects.filter(project=>String(project.qboProjectId||'')===id):[];
-  if(byId.length===1)return {status:'matched',project:byId[0],id,name:name||qboProjectName(byId[0].name),refs};
-  if(byId.length>1)return {status:'ambiguous',project:null,id,name,refs};
   const byName=name?projects.filter(project=>qboProjectName(project.name)===name):[];
-  if(byName.length===1)return {status:'matched',project:byName[0],id,name,refs};
+  // Los nombres de proyecto son iguales en QBO y Siscon. Si un ID guardado apunta a
+  // otro proyecto, es un vínculo obsoleto: el nombre exacto gana y el ID anterior se limpia.
+  if(byName.length===1)return {status:'matched',project:byName[0],id,name,refs,staleProjects:byId.filter(project=>project!==byName[0])};
   if(byName.length>1)return {status:'ambiguous',project:null,id,name,refs};
+  // El ID estable solo sirve como fallback cuando QBO no entregó ningún nombre.
+  // Nunca debe imponerse sobre un nombre distinto y mover una factura al proyecto equivocado.
+  if(!name&&byId.length===1)return {status:'matched',project:byId[0],id,name:qboProjectName(byId[0].name),refs,staleProjects:[]};
+  if(!name&&byId.length>1)return {status:'ambiguous',project:null,id,name,refs};
   return {status:'unresolved',project:null,id,name,refs};
 }
 function qboApplyProjectLink(record,resolution){
   const before=JSON.stringify([record.qboProjectRefs||[],record.qboProjectId||'',record.qboProjectName||'',record.qboProjectMatchStatus||'']);
+  let projectChanged=false;
+  (resolution.staleProjects||[]).forEach(project=>{
+    if(String(project.qboProjectId||'')===String(resolution.id||'')){
+      project.qboProjectId='';project.qboProjectName='';projectChanged=true;
+    }
+  });
   record.qboProjectRefs=resolution.refs||[];
   record.qboProjectId=resolution.id||'';
   record.qboProjectName=resolution.name||'';
   record.qboProjectMatchStatus=resolution.status;
   if(resolution.status==='matched'&&resolution.project){
+    if(String(resolution.project.qboProjectId||'')!==String(resolution.id||'')||qboProjectName(resolution.project.qboProjectName)!==qboProjectName(resolution.name||resolution.project.name))projectChanged=true;
     resolution.project.qboProjectId=resolution.id||resolution.project.qboProjectId||'';
     resolution.project.qboProjectName=resolution.name||resolution.project.name||'';
   }
-  return before!==JSON.stringify([record.qboProjectRefs||[],record.qboProjectId||'',record.qboProjectName||'',record.qboProjectMatchStatus||'']);
+  return projectChanged||before!==JSON.stringify([record.qboProjectRefs||[],record.qboProjectId||'',record.qboProjectName||'',record.qboProjectMatchStatus||'']);
 }
 function qboMoveRecord(record,sourceProject,targetProject,collection){
   if(!targetProject||sourceProject===targetProject)return false;

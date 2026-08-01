@@ -56,11 +56,22 @@ ok('CustomerRef se acepta cuando su ID es un Customer/Job del catálogo',
   sandbox.qboResolveProject({ customer: { id: 'P10', name: 'Cliente padre' } }, catalog).status === 'matched');
 ok('CustomerRef de un cliente que no es proyecto no se usa',
   sandbox.qboResolveProject({ customer: { id: 'C1', name: 'Condominio Roble' } }, catalog).status === 'none');
+ok('Invoice usa ProjectRef de línea aunque no exista ProjectRef en cabecera',
+  sandbox.qboResolveProject({ lines: [{ project: { id: 'P10', name: 'Condominio Roble' } }] }, catalog).project === proyectoA);
+ok('Invoice usa Customer/Job de línea y descarta el cliente padre de cabecera',
+  sandbox.qboResolveProject({ customer: { id: 'C1', name: 'Cliente padre' }, lines: [{ customer: { id: 'P10', name: 'Condominio Roble' } }] }, catalog).project === proyectoA);
+
+proyectoB.qboProjectId = 'P10';
+proyectoB.qboProjectName = 'Condominio Roble';
+const staleResolution = sandbox.qboResolveProject({ project: { id: 'P10', name: 'Condominio Roble' } }, catalog);
+ok('el nombre exacto gana sobre un qboProjectId obsoleto de otro proyecto',
+  staleResolution.status === 'matched' && staleResolution.project === proyectoA && staleResolution.staleProjects[0] === proyectoB);
 
 const record = { id: 'F1', qboId: 'Q1' };
 proyectoB.invClient.push(record);
-sandbox.qboApplyProjectLink(record, invoiceMatch);
+sandbox.qboApplyProjectLink(record, staleResolution);
 ok('se guarda el ID estable del proyecto de QuickBooks', record.qboProjectId === 'P10' && proyectoA.qboProjectId === 'P10');
+ok('al aplicar el vínculo se limpia el qboProjectId obsoleto', proyectoB.qboProjectId === '');
 ok('la misma factura se reubica sin crear otra copia',
   sandbox.qboMoveRecord(record, proyectoB, proyectoA, 'invClient') && proyectoB.invClient.length === 0 && proyectoA.invClient.length === 1);
 
