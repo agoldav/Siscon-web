@@ -1775,6 +1775,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] QuickBooks y Outlook quedan desconectados: se eliminan tokens/cachés/estados OAuth del proceso y se guarda `manualReconnectRequired` en Supabase para impedir que variables históricas de Render vuelvan a conectar silenciosamente tras un reinicio. Un OAuth manual exitoso elimina el bloqueo.
 - [x] Las pestañas anteriores al reinicio quedan protegidas por `appResetId`: cualquier intento de escritura desde una sesión obsoleta recibe `409 app_reset_reload_required` hasta recargar, evitando reintroducir datos borrados.
 - [x] Desplegado: backend `05efb23` y frontend `c01805d`. Reinicio ejecutado en producción y verificado en vivo: **0 proyectos**, montos **$0.00**, QuickBooks **Sin conectar**, Outlook **Sin conectar** y los cinco usuarios/perfiles visibles se conservaron. Suite backend completa y prueba específica `test-app-reset.js` en verde.
+- [x] Corregida la vista obsoleta en Safari (`5ea0e3b`): una respuesta válida del servidor con **0 proyectos** ya no activa el fallback histórico de `localStorage`. El estado vacío de Supabase ahora es autoritativo en login, bootstrap e invitaciones; prueba `test-empty-server-state.js` en verde y deploy de Vercel confirmado.
 
 ## 10. ⏳ Pendiente
 
