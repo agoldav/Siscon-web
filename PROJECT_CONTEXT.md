@@ -1770,6 +1770,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] La lista visible de proyectos también se actualiza: cada Customer/Job activo de QBO se enlaza por `qboProjectId` o nombre exacto; si no existe en Siscon, se crea una sola vez como proyecto base con el mismo nombre y su cliente. Si el nombre cambia en QBO, el proyecto ya enlazado adopta el nombre exacto en Siscon. Los proyectos locales ausentes de QBO no se eliminan.
 - [x] La lectura de pagos se separó en `GET /api/qbo/payments` para no agotar el timeout del proxy gratuito. `Payment` y `BillPayment` se consultan con concurrencia acotada y reintento corto; el frontend los combina con Invoice/Bill antes de enlazarlos al mismo proyecto y documento sin duplicidad. Pruebas QBO: frontend **9/9** y backend **25/25**.
 
+### Sesión 2026-08-01 (reinicio completo para pruebas)
+- [x] Se añadió un reinicio administrativo protegido por rol y confirmación literal. Limpia todas las tablas operativas normalizadas, invitaciones pendientes, cachés, documentos, proyectos, transacciones, catálogos, mensajes, notificaciones y solicitudes, conservando usuarios de Auth, perfiles/roles, configuración técnica, auditoría, migraciones y backups cifrados.
+- [x] QuickBooks y Outlook quedan desconectados: se eliminan tokens/cachés/estados OAuth del proceso y se guarda `manualReconnectRequired` en Supabase para impedir que variables históricas de Render vuelvan a conectar silenciosamente tras un reinicio. Un OAuth manual exitoso elimina el bloqueo.
+- [x] Las pestañas anteriores al reinicio quedan protegidas por `appResetId`: cualquier intento de escritura desde una sesión obsoleta recibe `409 app_reset_reload_required` hasta recargar, evitando reintroducir datos borrados.
+- [x] Desplegado: backend `05efb23` y frontend `c01805d`. Reinicio ejecutado en producción y verificado en vivo: **0 proyectos**, montos **$0.00**, QuickBooks **Sin conectar**, Outlook **Sin conectar** y los cinco usuarios/perfiles visibles se conservaron. Suite backend completa y prueba específica `test-app-reset.js` en verde.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
