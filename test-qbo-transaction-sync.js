@@ -74,10 +74,12 @@ const paymentsSecond = sandbox.qboSyncPayments(paymentSnapshot);
 ok('repetir sync de pagos tampoco duplica', paymentsSecond.imported === 0 && project.payments.length === 2);
 
 console.log('\nInterfaz y dirección de datos:');
-ok('el botón ejecuta la sincronización completa y no imprime SVG como texto',
-  /data-qbo-project-sync="1" onclick="qboFullSync\(this\)"/.test(html) && !/textContent='<svg[^']*Sync QBO'/.test(html));
+ok('solo el botón global ejecuta la sincronización completa',
+  (html.match(/onclick="qboFullSync\(this\)"/g)||[]).length===1 &&
+  /id="qbo-sync-btn"[^>]*onclick="qboFullSync\(this\)"/.test(html) &&
+  !/data-qbo-project-sync/.test(html) && !/>Sync (?:QBO|Proveedores|Clientes|Productos|Impuestos)</.test(html));
 ok('el frontend consume Payment y BillPayment sin publicar a QBO',
-  /snapshot\.payments/.test(html) && /snapshot\.billPayments/.test(html) &&
+  /qboRead\('\/api\/qbo\/payments'\)/.test(html) && /snapshot\.payments/.test(html) && /snapshot\.billPayments/.test(html) &&
   !/app\.post\('\/api\/qbo\/transactions'/.test(html));
 
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);

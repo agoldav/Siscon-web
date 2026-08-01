@@ -3078,12 +3078,7 @@ async function openSettings(){
           <button onclick="qboTestConnection()" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">↻ Probar conexión</button>
           <!-- VUL-003: Botón "Guardar token" eliminado — refresh_token nunca sale del servidor (FASE 1) -->
         </div>
-        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-          <button onclick="qboFetchVendors()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">Sync Proveedores</button>
-          <button onclick="qboFetchCustomers()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">Sync Clientes</button>
-          <button onclick="qboFetchItems()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">Sync Productos</button>
-          <button onclick="qboFetchTaxCodes()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">Sync Impuestos</button>
-        </div>
+        <div style="font-size:10px;color:var(--t3);margin-top:8px">El botón <strong>QB ↻</strong> de la barra superior importa facturas, pagos y catálogos desde QuickBooks.</div>
         ${SYS.qbo&&SYS.qbo.vendorCache&&SYS.qbo.vendorCache.length?`<div style="font-size:10px;color:var(--grn);margin-top:5px">✓ ${SYS.qbo.vendorCache.length} proveedores · ${(SYS.qbo.customerCache||[]).length} clientes · ${(SYS.qbo.itemCache||[]).length} productos en caché</div>`:''}
         ${SYS.qbo&&SYS.qbo.projectCatalogStatus==='customer-jobs'
           ?`<div style="font-size:10px;color:var(--grn);margin-top:5px">✓ ${(SYS.qbo.projectCache||[]).length} proyectos QBO disponibles mediante acceso gratuito</div>`
@@ -6546,10 +6541,7 @@ function renderOCForm(){
                   <span style="flex:1">${v.name}</span>
                   <span style="font-size:10px;padding:1px 7px;border-radius:10px;${v.currency==='USD'?'background:rgba(13,153,255,.14);color:var(--acc)':'background:rgba(29,184,122,.13);color:var(--grn)'}">${v.currency}</span>
                 </div>`).join('')}
-                <div style="padding:5px 12px;font-size:10px;color:var(--t3);border-top:1px solid var(--border);display:flex;align-items:center;gap:6px">
-                  <span>No ves tu proveedor?</span>
-                  <button onmousedown="qboFetchVendors()" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer">↻ Sync QBO</button>
-                </div>
+                <div style="padding:5px 12px;font-size:10px;color:var(--t3);border-top:1px solid var(--border)">Si falta un proveedor, usa <strong>QB ↻</strong> en la barra superior.</div>
               </div>
             </div>
           </div>
@@ -6833,10 +6825,7 @@ function ocFilterVendors(q){
       <span style="flex:1">${v.name}</span>
       <span style="font-size:10px;padding:1px 7px;border-radius:10px;${v.currency==='USD'?'background:rgba(13,153,255,.14);color:var(--acc)':'background:rgba(29,184,122,.13);color:var(--grn)'}">${v.currency}</span>
     </div>`
-  ).join('') + `<div style="padding:5px 12px;font-size:10px;color:var(--t3);border-top:1px solid var(--border);display:flex;align-items:center;gap:6px">
-    <span>¿No ves tu proveedor?</span>
-    <button onmousedown="qboFetchVendors()" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer">↻ Sync QBO</button>
-  </div>`;
+  ).join('') + `<div style="padding:5px 12px;font-size:10px;color:var(--t3);border-top:1px solid var(--border)">Si falta un proveedor, usa <strong>QB ↻</strong> en la barra superior.</div>`;
   drop.style.display = 'block';
 }
 
@@ -8057,7 +8046,9 @@ async function qboRead(path){
 }
 async function qboReadTransactions(force){
   if(!force&&_qboTransactionsCache)return _qboTransactionsCache;
-  _qboTransactionsCache=await qboRead('/api/qbo/transactions');
+  const documents=await qboRead('/api/qbo/transactions');
+  const paymentData=await qboRead('/api/qbo/payments');
+  _qboTransactionsCache={...documents,payments:paymentData.payments||[],billPayments:paymentData.billPayments||[]};
   return _qboTransactionsCache;
 }
 async function qboReadCatalogs(force){
@@ -9007,7 +8998,6 @@ function renderGenericList(type){
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn-add" onclick="newGenericTxn('${type}')">+ Nuevo</button>
         ${type==='proveedor'?`<button id="btn-refresh-mail" class="btn-refresh-mail" onclick="msForceScanQuiet()" title="Escanear buzón de facturas">${MAIL_ICON} Refrescar</button>`:''}
-        ${type==='proveedor'&&qboConfigured()?`<button data-qbo-project-sync="1" onclick="qboFullSync(this)" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer" title="Importar facturas y pagos desde QuickBooks y verificar su proyecto">Sync QBO</button>`:''}
         <button class="btn-history" onclick="showLogModal('${def.label}',curProj.id)">Log</button>
         ${txnSortSelect(`renderGenericList('${type}')`)}
       </div>
@@ -12882,11 +12872,13 @@ function compareImport(){
 async function qboFullSync(btn){
   if(!qboConfigured()) return;
   const btnEl=btn||document.getElementById('qbo-sync-btn');
-  const projectButton=!!(btnEl&&btnEl.dataset&&btnEl.dataset.qboProjectSync);
-  if(btnEl){ btnEl.disabled=true; btnEl.textContent=projectButton?'Sincronizando…':'QB ↻…'; }
+  if(btnEl){ btnEl.disabled=true; btnEl.textContent='QB ↻…'; }
   let imported=0, updated=0, importedPayments=0;
   try{
-    const [snapshot,catalogs]=await Promise.all([qboReadTransactions(true),qboReadCatalogs(true)]);
+    // Evita una ráfaga de diez lecturas simultáneas contra Intuit: primero se traen
+    // transacciones (incluidos Payment/BillPayment) y luego los catálogos.
+    const snapshot=await qboReadTransactions(true);
+    const catalogs=await qboReadCatalogs(true);
     const qboInvs=snapshot.invoices||[];
     const qboProjects=catalogs.projects||[];
     const nextVendors=(catalogs.vendors||[]).filter(v=>v.active);
@@ -13002,7 +12994,7 @@ async function qboFullSync(btn){
       showToast(msg.join(' · '));
     }
   }catch(e){ console.warn('qboFullSync error',e); addNotif('Error QB sync: '+e.message); }
-  finally{ if(btnEl){ btnEl.disabled=false; btnEl.textContent=projectButton?'Sync QBO':'QB ↻'; } }
+  finally{ if(btnEl){ btnEl.disabled=false; btnEl.textContent='QB ↻'; } }
 }
 
 // ════════════════════════════════════════════════════════════
