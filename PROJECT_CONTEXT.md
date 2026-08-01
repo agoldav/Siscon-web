@@ -1786,6 +1786,16 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Pruebas: proyecto QBO **21/21**, sincronización transaccional **20/20**, deduplicación **15/15**, conexión **9/9** y persistencia normalizada **18/18**. Suite frontend completa en verde salvo el fallo preexistente documentado de `test-login-concurrency.js`.
 - [x] Publicado en `main`: frontend `48c74b7`; Vercel reportó despliegue exitoso y el bundle de `app.sisconcr.com` contiene la nueva política. La ejecución del lote inicial en datos reales queda pendiente de iniciar sesión en la app y pulsar **QB ↻** una vez.
 
+### Sesión 2026-08-01 (moneda, costo e IVA de Bills QBO multiproyecto)
+> Cambio solicitado y autorizado sobre la sincronización QBO completada. Se mantiene estrictamente QuickBooks → Siscon y no se agregó ninguna ruta de escritura hacia Intuit.
+- [x] Se normaliza `ExchangeRate` de QBO para colones: QBO entrega USD/CRC (por ejemplo `0.002197802`) y Siscon guarda CRC/USD (aprox. `455`). La factura CRC por ₡56,500 pasa a aproximadamente **$124.18**, no a millones de dólares. La misma normalización se aplica a Bills, Invoices y pagos.
+- [x] El costo real de cada proyecto usa, para Bills QBO, exclusivamente el subtotal de sus líneas asignadas al proyecto más el IVA QBO distribuido entre esas líneas. El IVA usa primero las tasas de compra (`PurchaseTaxRateList`) y el total tributario autoritativo del Bill.
+- [x] Un Bill con líneas para varios proyectos se conserva como una sola factura lógica y aparece una vez en cada proyecto involucrado. Cada copia muestra la factura completa; las líneas ajenas quedan atenuadas en gris con la nota `Proyecto: "nombre"` y no suman al costo del proyecto visible.
+- [x] Los `BillPayment` se ligan a todas las copias de la factura multiproyecto y se reparten proporcionalmente por el costo de líneas+IVA de cada proyecto. El match Outlook↔QBO reconoce esas copias como una factura lógica, adjunta el PDF a todas y conserva las líneas/asignaciones locales cuando el Bill pertenece a un solo proyecto.
+- [x] Migración idempotente: el siguiente **QB ↻** reconstruye las copias multiproyecto anteriores como parte del lote base ya tramitado y sin exigir casas. Los documentos posteriores continúan exigiendo asignación por casa.
+- [x] Pruebas: backend completo en verde; QBO backend **26/26**; frontend transaccional **26/26**, proyectos **22/22**, deduplicación **16/16**, conexión **9/9** y persistencia transaccional **18/18**. La suite frontend conserva únicamente el fallo preexistente de `test-login-concurrency.js` (11/12).
+- [x] Publicado en `main`: backend `49750b2` y frontend `e6cf55d`; Vercel reportó despliegue exitoso y `/health` del backend responde `200`. La resincronización real queda pendiente porque, tras renovar Cloudflare Access, la app solicitó nuevamente el login interno de Siscon.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1810,7 +1820,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
-- [ ] **Ejecutar y validar el lote inicial QBO corregido:** iniciar sesión en producción, pulsar una vez el único botón **QB ↻** y confirmar que cada factura con proyecto queda en su proyecto, sin casas y tramitada; que las facturas sin proyecto no aparecen; y que cobros/pagos quedan ligados a su documento.
+- [ ] **Ejecutar y validar la resincronización QBO corregida:** iniciar sesión en producción y pulsar una vez el único botón **QB ↻**. Confirmar asignación por proyecto, Bills multiproyecto con líneas ajenas en gris, conversión CRC, costo de líneas+IVA y pagos ligados; las facturas del lote base deben quedar sin casas y tramitadas.
 - [ ] **Carga posterior de casas desde Excel:** el usuario entregará por proyecto las listas de tipos de casa y sus líneas de materiales, más la lista de números de casa y tipo correspondiente. Importarlas automáticamente solo cuando entregue cada archivo e instrucciones.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
