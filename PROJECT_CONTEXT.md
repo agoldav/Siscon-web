@@ -1733,12 +1733,13 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Pruebas nuevas: backend `test-qbo-readonly.js` **13/13**; frontend `test-qbo-bill-matching.js` **14/14**. Todas las demás suites backend/frontend pasan salvo `test-login-concurrency.js`, que ya falla en `HEAD` por buscar `function openSettings` aunque la función real es `async function openSettings` (fallo preexistente y fuera de este alcance).
 
 ### Sesión 2026-08-01 (QuickBooks Projects → proyectos Siscon)
-> Código implementado y verificado localmente; todavía sin commit/deploy, activación del permiso premium ni prueba contra la compañía QBO de producción.
+> Implementado, probado y desplegado en producción sin permisos premium ni cargos adicionales de Intuit.
 - [x] El adaptador conserva el `ProjectRef` real de QuickBooks: en cabecera para `Invoice` y por línea para `Bill`. Las referencias repetidas al mismo proyecto se consolidan; una factura de compra repartida entre varios proyectos queda ambigua y no se mueve automáticamente.
-- [x] Catálogo de proyectos mediante una operación GraphQL fija de solo lectura (`projectManagementProjects`), paginada y definida exclusivamente en el backend. Aunque GraphQL usa POST, el documento enviado solo contiene `query`; no existe ruta ni código de mutation. Activación controlada por `QBO_PROJECTS_ENABLED` para no romper el OAuth existente si el permiso premium aún no está habilitado.
+- [x] Ruta gratuita definitiva: el catálogo de proyectos se obtiene con el REST contable estándar desde `Customer` con `Job=true`; si ese catálogo no trae proyectos, se usa directamente el nombre incluido en `ProjectRef`. Se eliminaron el GraphQL premium, `QBO_PROJECTS_ENABLED` y el scope `project-management.project`; OAuth solicita únicamente `com.intuit.quickbooks.accounting`.
 - [x] El vínculo se resuelve exclusivamente por nombre exacto de proyecto y luego queda estabilizado con `qboProjectId`. Ya no se infiere el proyecto de una factura a cliente por el nombre del cliente.
 - [x] Una factura existente en otro proyecto o en Sin clasificar se reubica como el mismo objeto al proyecto indicado por QBO, sin crear una copia. La importación Outlook también prefiere el proyecto de QBO cuando el Bill ya tuvo match fuerte.
-- [x] Pruebas: backend `test-qbo-readonly.js` **17/17**; frontend `test-qbo-bill-matching.js` **14/14** y `test-qbo-project-linking.js` **10/10**. Suite completa backend y frontend (excepto el fallo preexistente documentado de `test-login-concurrency.js`) en verde.
+- [x] Pruebas: backend `test-qbo-readonly.js` **17/17**; frontend `test-qbo-bill-matching.js` **14/14**, `test-qbo-project-linking.js` **11/11** y `test-normalized-transactions.js` **18/18**. Suite completa backend y frontend (excepto el fallo preexistente documentado de `test-login-concurrency.js`) en verde.
+- [x] Desplegado: backend `b9acba1` en Render y frontend `66c32b9` en Vercel; health del backend responde `200` y la UI publicada confirma acceso gratuito sin referencias al permiso premium.
 
 ## 10. ⏳ Pendiente
 
@@ -1764,7 +1765,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
-- [ ] **Activar QuickBooks Projects en producción:** requiere Partner tier Silver o superior, habilitar el permiso restringido `project-management.project` en Intuit Developer, configurar `QBO_PROJECTS_ENABLED=true` en Render, desplegar este código y reconectar QuickBooks para emitir un token con el scope nuevo.
+- [ ] **Validar QuickBooks Projects gratis en producción:** reconectar QBO desde un navegador normal con el único scope contable estándar y ejecutar una sincronización real para confirmar los nombres `Customer/Job`/`ProjectRef`. El navegador integrado de Codex bloqueó el redirect final a `siscon-backend.onrender.com`, por lo que no pudo completarse aquí.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
 ### Infraestructura / Producción
