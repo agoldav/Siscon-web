@@ -31,7 +31,9 @@ vm.runInContext([
   'qboIsAutoImportedTransaction', 'qboRemoveRecord', 'qboApplyImportPolicy',
   'qboSyncProjectCatalog',
   'qboTextKey', 'qboVendorKey', 'qboBillAmount', 'qboBillMatch', 'qboFindBestBillMatch', 'qboBillAsRecord',
-  'qboAmountToUSD', 'qboApplyBillMatch', 'qboSyncVendorBills', 'qboPaymentAllocations', 'qboSyncPayments',
+  'qboAppExchangeRate', 'qboAmountToUSD', 'qboLineSourceAmount', 'qboTaxCodePct', 'qboBillLineTaxAmounts',
+  'qboResolveBillLineProject', 'qboBillProjectSlices', 'qboBillLinesForSlice',
+  'qboApplyBillMatch', 'qboApplyBillSlice', 'qboSyncVendorBills', 'qboPaymentAllocations', 'qboSyncPayments',
 ].map(extractFunction).join('\n'), sandbox);
 
 let pass = 0, fail = 0;
@@ -41,6 +43,8 @@ function ok(name, condition) {
 }
 
 const catalog = [{ id: 'P10', name: 'Condominio Roble' }];
+ok('normaliza ExchangeRate QBO USD/CRC a CRC/USD',
+  Math.abs(sandbox.qboAppExchangeRate('CRC',0.002197802)-455)<0.01 && Math.abs(sandbox.qboAmountToUSD(56500,'CRC',0.002197802)-124.18)<0.02);
 console.log('Proyectos QBO:');
 const projectCatalogFirst = sandbox.qboSyncProjectCatalog([
   {id:'P10',name:'Condominio Roble',status:'ACTIVE',customerId:'C1'},
@@ -70,6 +74,15 @@ ok('el lote inicial queda tramitado sin exigir casa',
 const second = sandbox.qboSyncVendorBills([qboBill], catalog);
 ok('repetir sync no crea duplicados', second.imported === 0 && project.billVendor.length === 1);
 
+const outlookLocal={id:'OUTLOOK-1',num:'FP-OUTLOOK',invoiceNumber:'OUT-50',party:'Proveedor Outlook',date:'2026-08-01',
+  currencyBill:'USD',totalUSD:50,createdBy:'Outlook',lines:[{desc:'Detalle OCR',qty:1,price:50,assign:[{houseId:'H1',qty:1}]}]};
+project.billVendor.push(outlookLocal);
+const outlookQbo={...qboBill,id:'B-OUT',docNumber:'OUT-50',total:50,subtotal:50,vendor:{id:'V-OUT',name:'Proveedor Outlook'},
+  lines:[{id:'L-OUT',amount:50,quantity:1,unitPrice:50,description:'Detalle QBO',customer:{id:'P10',name:'Condominio Roble'}}]};
+sandbox.qboSyncVendorBills([outlookQbo],catalog);
+ok('un match simple de Outlook conserva sus líneas y asignaciones locales',
+  outlookLocal.qboId==='B-OUT' && outlookLocal.lines[0].desc==='Detalle OCR' && outlookLocal.lines[0].assign[0].houseId==='H1');
+
 const nonProjectBill={...qboBill,id:'B-NP',docNumber:'G-NP',project:null,projectRefs:[],lines:[{amount:20,quantity:1,unitPrice:20,description:'Sin proyecto'}]};
 const skipped=sandbox.qboSyncVendorBills([nonProjectBill], catalog);
 ok('un Bill sin proyecto se omite y nunca va a Sin clasificar',
@@ -84,6 +97,26 @@ sandbox.qboSyncVendorBills([incrementalBill], catalog, {initialImport:false});
 const incremental=project.billVendor.find(b=>b.qboId==='B2');
 ok('un Bill posterior queda pendiente de asignar por línea',
   incremental && incremental.qboImportBatch==='incremental' && incremental.houseAssignmentRequired===true && incremental._pending===true);
+
+const secondProject=sandbox.projects.find(p=>p.qboProjectId==='P20');
+sandbox.SYS.qbo={taxCodeCache:[{id:'T13',rate:13}]};
+const multiProjectBill={
+  id:'BM',docNumber:'MULTI-1',txnDate:'2026-08-01',currency:'USD',exchangeRate:1,total:339,subtotal:300,totalTax:39,balance:339,
+  paymentStatus:'Pendiente de Pago',vendor:{id:'V2',name:'Proveedor Multi'},projectRefs:[{id:'P10'},{id:'P20'}],
+  lines:[
+    {id:'L1',amount:100,quantity:1,unitPrice:100,description:'Línea Roble',customer:{id:'P10',name:'Condominio Roble'},project:{id:'P10'},taxCode:{id:'T13'}},
+    {id:'L2',amount:200,quantity:1,unitPrice:200,description:'Línea P20',customer:{id:'P20',name:'Proyecto Renombrado'},project:{id:'P20'},taxCode:{id:'T13'}},
+  ],
+};
+const multiSync=sandbox.qboSyncVendorBills([multiProjectBill],[...catalog,{id:'P20',name:'Proyecto Renombrado'}],{initialImport:true});
+const multiA=project.billVendor.find(b=>b.qboId==='BM'),multiB=secondProject.billVendor.find(b=>b.qboId==='BM');
+ok('un Bill multiproyecto se replica una vez en cada proyecto involucrado',
+  multiSync.imported===2 && multiA && multiB && multiA.id!==multiB.id);
+ok('cada copia conserva la factura completa y activa solo las líneas de su proyecto',
+  multiA.lines.length===2 && multiB.lines.length===2 && multiA.lines.filter(l=>l.qboProjectActive).length===1 && multiB.lines.filter(l=>l.qboProjectActive).length===1);
+ok('el costo por proyecto suma su línea y su IVA sin duplicar el total documental',
+  Math.abs(multiA.qboProjectTotalUSD-113)<0.001 && Math.abs(multiB.qboProjectTotalUSD-226)<0.001 &&
+  Math.abs(multiA.qboProjectTotalUSD+multiB.qboProjectTotalUSD-339)<0.001);
 
 project.billVendor.push({ id: 'LOCAL1', num: 'FP-LOCAL', invoiceNumber: 'LOCAL-9', party: 'Otro', date: '2026-08-01', totalUSD: 25, currencyBill: 'USD' });
 sandbox.qboSyncVendorBills([qboBill], catalog);
@@ -100,13 +133,17 @@ const paymentsFirst = sandbox.qboSyncPayments(paymentSnapshot);
 ok('importa el cobro de cliente y el pago al proveedor', paymentsFirst.imported === 2 && project.payments.length === 2);
 ok('cada pago queda ligado al documento local correspondiente',
   project.payments.some(p => p.refInvoiceId === 'INVLOCAL' && p.paymentDirection === 'received') &&
-  project.payments.some(p => p.refBillId === 'qbo-bill-B1' && p.paymentDirection === 'paid'));
+  project.payments.some(p => p.refBillId === 'qbo-bill-B1-P10' && p.paymentDirection === 'paid'));
 const paymentsSecond = sandbox.qboSyncPayments(paymentSnapshot);
 ok('repetir sync de pagos tampoco duplica', paymentsSecond.imported === 0 && project.payments.length === 2);
 project.payments.push({id:'OLD-PAY',createdBy:'QBO Import',qboPaymentId:'OLD',paymentDirection:'received',refInvoiceId:'REMOVED'});
 const paymentsCleaned=sandbox.qboSyncPayments(paymentSnapshot);
 ok('elimina solo pagos QBO cuyo documento ya no pertenece a un proyecto',
   paymentsCleaned.removed===1 && !project.payments.some(p=>p.id==='OLD-PAY'));
+const multiPayments=sandbox.qboSyncPayments({payments:[],billPayments:[{id:'BPM',txnDate:'2026-08-01',currency:'USD',exchangeRate:1,vendor:{name:'Proveedor Multi'},linkedTransactions:[{txnId:'BM',txnType:'Bill',amount:339}]}]});
+ok('el pago de un Bill multiproyecto se liga proporcionalmente a cada copia',
+  multiPayments.imported===2 && project.payments.some(p=>p.refBillId===multiA.id&&Math.abs(p.totalUSD-113)<0.001) &&
+  secondProject.payments.some(p=>p.refBillId===multiB.id&&Math.abs(p.totalUSD-226)<0.001));
 
 console.log('\nInterfaz y dirección de datos:');
 ok('solo el botón global ejecuta la sincronización completa',
@@ -121,7 +158,8 @@ ok('el botón global reemplaza todos los catálogos QBO y confirma sus cantidade
   /SYS\.qbo\.itemCache=nextItems/.test(html) && /SYS\.qbo\.projectCache=qboProjects/.test(html) &&
   /nextItems\.length\} materiales/.test(html) && /nextCustomers\.length\} clientes/.test(html) &&
   /qboProjects\.length\} proyectos/.test(html) && /nextVendors\.length\} proveedores/.test(html) &&
-  /qboSyncProjectCatalog\(qboProjects,nextCustomers\)/.test(html));
+  /qboSyncProjectCatalog\(qboProjects,nextCustomers\)/.test(html) &&
+  /code\.purchaseTaxRates/.test(html));
 ok('el primer lote se marca por compañía y los posteriores exigen asignación de casa',
   /initialProjectTransactionImportCompletedAt/.test(html) && /initialProjectTransactionImportRealmId/.test(html) &&
   /qboImportBatch:initialImport\?'initial':'incremental'/.test(html) && /houseAssignmentRequired:!initialImport/.test(html));

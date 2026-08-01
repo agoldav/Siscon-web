@@ -55,6 +55,8 @@ ok('número distinto nunca enlaza aunque monto/proveedor coincidan',
   sandbox.qboBillMatch(outlook, { ...qbo, invoiceNumber: '001000046' }).score === 0);
 ok('dos candidatos con la misma evidencia quedan ambiguos',
   sandbox.qboFindBestBillMatch(outlook, [{ id: 1, bill: qbo }, { id: 2, bill: { ...qbo, qboId: '82' } }]).status === 'ambiguous');
+ok('copias multiproyecto del mismo qboId se tratan como una sola factura lógica',
+  sandbox.qboFindBestBillMatch(outlook, [{ id: 1, bill: qbo }, { id: 2, bill: { ...qbo } }]).status === 'matched');
 ok('un candidato fuerte único se enlaza',
   sandbox.qboFindBestBillMatch(outlook, [{ id: 1, bill: qbo }]).status === 'matched');
 
@@ -62,13 +64,13 @@ console.log('\nCableado sin duplicidad:');
 ok('Outlook usa el matcher fuerte antes de crear la factura',
   /const localMatch=qboFindBestBillMatch\(outlookProbe/.test(html));
 ok('Outlook adjunta el PDF al registro existente',
-  /if\(localMatch\.status==='matched'\)[\s\S]{0,1400}msAttachPendingPdf\(existingProject,existing,bill\)/.test(html));
+  /if\(localMatch\.status==='matched'\)[\s\S]{0,1800}logicalCopies\.forEach\(row=>msAttachPendingPdf/.test(html));
 ok('Outlook busca duplicados en todos los proyectos, no solo en la carpeta destino',
   /projects\.forEach\(candidateProject=>\(candidateProject\.billVendor\|\|\[\]\)/.test(html));
 ok('QBO enlaza sobre billVendor existente',
-  /function qboSyncVendorBills[\s\S]{0,2600}qboApplyBillMatch\(result\.match\.bill/.test(html));
+  /function qboSyncVendorBills[\s\S]{0,5200}qboFindBestBillMatch\(qboBillAsRecord\(qb\),candidates\)[\s\S]{0,900}qboApplyBillSlice\(row\.bill/.test(html));
 ok('la sincronización importa Bills nuevos solo después de descartar coincidencias',
-  /function qboSyncVendorBills[\s\S]{0,6000}else \{[\s\S]{0,3000}billVendor\.push\(newBill\)/.test(html));
+  /function qboSyncVendorBills[\s\S]{0,6500}if\(row\)[\s\S]{0,1800}else\{[\s\S]{0,1800}billVendor\.push\(newBill\)/.test(html));
 ok('la sincronización marca las facturas locales ausentes del proyecto QBO sin borrarlas',
   /qboProjectPresence=next/.test(html) && /No se encuentra en el proyecto/.test(html));
 ok('la UI no ofrece acciones de envío o sincronización hacia QBO',
