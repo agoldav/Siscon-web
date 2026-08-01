@@ -1715,6 +1715,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Migración ejecutada en Supabase `siscon-pm-prod`; secretos configurados en Render y GitHub Actions; backend desplegado en Render con commit `68734e1`.
 - [x] Primera ejecución manual del workflow completada exitosamente (`Backup cifrado a Dropbox #1`, commit `98144a0`).
 
+### Sesión 2026-07-31 (VUL-045 — directorio único de usuarios)
+- [x] **Supabase Auth/profiles queda como directorio canónico** para Usuarios, Mensajes, Tareas y selectores de transacciones. La caché común se carga desde `GET /api/auth/directory`.
+- [x] La pestaña Tareas guarda nuevos asignados con el UUID real de Auth y lo indexa en `tasks.assignee_id`; los ids numéricos históricos de `SYS.users` siguen siendo legibles como compatibilidad.
+- [x] Ajustes → Usuarios muestra la misma lista de cuentas reales que Mensajes; se eliminó el segundo flujo activo de registros RRHH para evitar listas divergentes. Pruebas: `test-unified-directory.js` (9/9), `test-project-collections.js` (22/22), sintaxis frontend/backend OK.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1731,7 +1736,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > Payments, así que la app no puede procesar cobros.
 
 ### Próxima sesión (2026-07-17+)
-- [~] **Supabase Auth real** — Login ✅, **gestión de usuarios ✅ Fase 1**, **RLS ✅ activado** (cierra el hueco de la anon key; ver sesión 2026-07-20). **Falta:** sincronizar `SYS.users` ↔ Auth para que los usuarios aparezcan en Mensajes/avatares (hoy la mensajería usa el directorio local, con ids numéricos vs uuid de Auth — hacer con cuidado). El email automático de invitaciones **no aplica al flujo actual**: el Administrador crea usuarios directamente y el acceso ocurre por Microsoft/Cloudflare Access. Nota: RLS solo protege acceso directo; los roles se siguen aplicando en el backend (no hay políticas por-rol porque todo va por service_role).
+- [x] **Supabase Auth real** — Login ✅, **gestión de usuarios ✅ Fase 1**, **RLS ✅ activado** y **directorio único Auth/profiles ✅** para Usuarios, Mensajes, Tareas y selectores. El email automático de invitaciones **no aplica al flujo actual**: el Administrador crea usuarios directamente y el acceso ocurre por Microsoft/Cloudflare Access. Los ids numéricos históricos de `SYS.users` se conservan solo como compatibilidad de lectura. Nota: RLS solo protege acceso directo; los roles se siguen aplicando en el backend (no hay políticas por-rol porque todo va por service_role).
 - [ ] **Invitar usuarios** — Para que colaboren en tiempo real (gestión de usuarios en la app)
 - [ ] **Ajustes finales** — UI, validaciones, seguridad (refactor de código, testing, optimizaciones)
 

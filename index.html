@@ -2959,8 +2959,12 @@ async function bootstrapCloudflareAuth(){
 }
 
 // ========== SETTINGS ==========
-function openSettings(){
+async function openSettings(){
   if(currentUser&&currentUser.role!=='Administrador'){alert('Solo el administrador tiene acceso a los ajustes del sistema.');return;}
+  // La lista activa de personas se obtiene de Supabase Auth/profiles, igual que Mensajes.
+  // `SYS.users` queda únicamente como compatibilidad de lectura para datos históricos.
+  if(currentUser&&typeof msgLoadDirectory==='function') await msgLoadDirectory();
+  const unifiedUsers=directoryUsers();
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">Ajustes del Sistema <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div class="settings-section">
@@ -2993,25 +2997,17 @@ function openSettings(){
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Usuarios</div>
-      <div style="font-size:11px;color:var(--t3);margin-bottom:8px">El <strong>acceso/login</strong> se gestiona con cuentas reales de Supabase (invitación por link). Esta lista es el <strong>directorio de RRHH</strong> (datos como cédula/salario); no controla el inicio de sesión.</div>
-      <button onclick="openUsersModal()" style="background:var(--acc);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:11px;cursor:pointer;margin-bottom:10px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 9a2.5 2.5 0 1 0 0-5"/><path d="M15 14.5c2.4.4 4 2.3 4 5.5"/></svg> Cuentas de acceso (login)</button>
-      ${SYS.users.map(u=>`
+      <div style="font-size:11px;color:var(--t3);margin-bottom:8px">Esta es la <strong>lista única de usuarios activos</strong>. Las cuentas de Supabase Auth/profiles alimentan el login, Mensajes y Tareas; ya no se mantiene un segundo directorio para esas funciones.</div>
+      <button onclick="openUsersModal()" style="background:var(--acc);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:11px;cursor:pointer;margin-bottom:10px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 9a2.5 2.5 0 1 0 0-5"/><path d="M15 14.5c2.4.4 4 2.3 4 5.5"/></svg> Gestionar usuarios</button>
+      ${unifiedUsers.map(u=>`
         <div class="user-row" style="position:relative">
-          <div class="user-avatar" style="background:${u.color}20;color:${u.color}">${esc(u.name.split(' ').map(w=>w[0]).join('').slice(0,2))}</div>
+          <div class="user-avatar" style="background:${u.color||'#2d8cf0'}20;color:${u.color||'#2d8cf0'}">${esc((u.name||'Usuario').split(' ').map(w=>w[0]).join('').slice(0,2))}</div>
           <div style="flex:1">
-            <div class="user-name">${esc(u.name)}</div>
-            <div class="user-role">${u.role}${u.email?' · '+u.email:''}</div>
+            <div class="user-name">${esc(u.name||u.email||'Usuario')}</div>
+            <div class="user-role">${esc(u.role||'Regular')}${u.email?' · '+esc(u.email):''}</div>
           </div>
-          ${u.username!=='admin'?`
-          <div style="position:relative">
-            <button onclick="toggleUserMenu(${u.id},event)" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;border-radius:5px" title="Opciones">⋮</button>
-            <div id="umenu-${u.id}" style="display:none;position:absolute;right:0;top:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.25);z-index:900;min-width:130px;overflow:hidden">
-              <div onclick="editUser(${u.id})" style="padding:9px 14px;font-size:12px;cursor:pointer;color:var(--t1)" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">Editar</div>
-              <div onclick="deleteUser(${u.id})" style="padding:9px 14px;font-size:12px;cursor:pointer;color:var(--red)" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">Eliminar</div>
-            </div>
-          </div>`:''}
-        </div>`).join('')}
-      <button class="btn-add" style="margin-top:8px;font-size:11px;padding:6px 12px" onclick="addUserModal()">+ Agregar registro (RRHH)</button>
+        </div>`).join('')||'<div style="color:var(--t3);font-size:12px">No se encontraron cuentas activas.</div>'}
+      <div style="font-size:10px;color:var(--t3);margin-top:8px">Los registros antiguos de SYS.users se conservan como compatibilidad de datos, pero no se usan para seleccionar usuarios nuevos.</div>
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Correo de Facturas (Outlook / Microsoft)</div>
@@ -8702,7 +8698,7 @@ function openGenericTxn(type,id){
 function txnPartyField(def){
   if(def.partySrc==='user'){
     return `<select style="width:100%;font-size:12px" onchange="txnState.party=this.value">
-      ${SYS.users.map(u=>`<option${txnState.party===u.name?' selected':''}>${esc(u.name)}</option>`).join('')}
+      ${directoryUsers().map(u=>`<option${txnState.party===u.name?' selected':''}>${esc(u.name||u.email||'Usuario')}</option>`).join('')}
     </select>`;
   }
   let datalist='';
@@ -12685,6 +12681,11 @@ function renderReportBody(){
 let msgConvsCache=[];
 let msgThreadCache={};
 let msgDirectory=[];
+// Directorio único de cuentas reales (Supabase Auth + profiles). Mensajes lo alimenta y
+// Tareas/Usuarios lo reutilizan; la lista local SYS.users solo se consulta como fallback para
+// filas históricas que todavía guardan ids numéricos.
+let appDirectory=[];
+let appDirectoryReady=false;
 let msgCurConvId=null;
 let msgSearchTerm='', msgNCType='dm';
 let msgPendingAttach=[];                 // adjuntos preparados para el mensaje en edición
@@ -12717,8 +12718,23 @@ function msgStartPolling(){
 function msgStopPolling(){ if(msgPollIv){ clearInterval(msgPollIv); msgPollIv=null; } }
 
 async function msgLoadDirectory(){
-  try{ const d=await apiFetch('GET','/api/auth/directory'); msgDirectory=d.users||[]; }
+  try{
+    const d=await apiFetch('GET','/api/auth/directory');
+    msgDirectory=Array.isArray(d.users)?d.users:[];
+    appDirectory=msgDirectory.slice();
+    appDirectoryReady=true;
+    if(typeof curTab!=='undefined'&&curTab==='tareas'&&typeof renderTareas==='function'&&curProj) renderTareas();
+  }
   catch(e){ console.warn('msgLoadDirectory',e); }
+}
+
+function directoryUsers(){
+  return appDirectoryReady ? appDirectory : (SYS.users||[]);
+}
+function directoryUser(id){
+  const active=appDirectory.find(u=>String(u.id)===String(id));
+  if(active)return active;
+  return (SYS.users||[]).find(u=>String(u.id)===String(id));
 }
 async function msgLoadConvs(){
   if(!currentUser) return;
@@ -13286,7 +13302,7 @@ const TASK_PRIOR_COLOR={Alta:'var(--red)',Media:'var(--amb)',Baja:'var(--t2)'};
 let taskSort='status', taskSortDir=1, taskView='tablero';
 
 function taskList(){ if(!curProj.tasks)curProj.tasks=[]; return curProj.tasks; }
-function taskUser(id){ return (SYS.users||[]).find(u=>String(u.id)===String(id)); }
+function taskUser(id){ return directoryUser(id); }
 function taskUserName(id){ const u=taskUser(id); return u?u.name:''; }
 function taskUserColor(id){ const u=taskUser(id); return u?u.color:'var(--t3)'; }
 function taskHouseNum(id){ const h=(curProj.houses||[]).find(x=>String(x.id)===String(id)); return h?esc(h.num):''; }
@@ -13296,7 +13312,7 @@ function taskAdd(status){ taskModal(null,status); }
 function taskModal(editId,presetStatus){
   const t=editId?taskList().find(x=>x.id===editId):null;
   const houseOpts=(curProj.houses||[]).map(h=>`<option value="${h.id}"${t&&String(t.houseId)===String(h.id)?' selected':''}>${esc(h.num)}</option>`).join('');
-  const userOpts=(SYS.users||[]).map(u=>`<option value="${u.id}"${t&&String(t.assigneeId)===String(u.id)?' selected':''}>${esc(u.name)}</option>`).join('');
+  const userOpts=directoryUsers().map(u=>`<option value="${u.id}"${t&&String(t.assigneeId)===String(u.id)?' selected':''}>${esc(u.name||u.email||'Usuario')}</option>`).join('');
   const curStatus=t?t.status:(presetStatus||'Pendiente');
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">${editId?'Editar tarea':'Nueva tarea'} <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
@@ -13409,7 +13425,7 @@ function renderTareas(){
         const over=taskOverdue(t);
         return `<tr style="${t.status==='Completado'?'opacity:.55':''}">
           <td style="font-size:12px;max-width:280px"><div style="font-weight:600;color:var(--t1);cursor:pointer" onclick="taskModal('${t.id}')">${(t.title||'').replace(/</g,'&lt;')}</div>${t.desc?`<div style="font-size:10.5px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px">${(t.desc||'').replace(/</g,'&lt;')}</div>`:''}</td>
-          <td><select class="cell-select" onchange="taskSet('${t.id}','assigneeId',this.value,true)"><option value="">— Sin asignar —</option>${(SYS.users||[]).map(u=>`<option value="${u.id}"${String(t.assigneeId)===String(u.id)?' selected':''}>${esc(u.name)}</option>`).join('')}</select></td>
+          <td><select class="cell-select" onchange="taskSet('${t.id}','assigneeId',this.value,true)"><option value="">— Sin asignar —</option>${directoryUsers().map(u=>`<option value="${u.id}"${String(t.assigneeId)===String(u.id)?' selected':''}>${esc(u.name||u.email||'Usuario')}</option>`).join('')}</select></td>
           <td style="font-size:11px;color:var(--t2)">${taskHouseNum(t.houseId)||'—'}</td>
           <td><input type="date" class="cell-input" style="${over?'color:var(--red)':''}" value="${t.due||''}" onchange="taskSet('${t.id}','due',this.value,true)"/></td>
           <td><select class="cell-select" style="color:${TASK_PRIOR_COLOR[t.priority]}" onchange="taskSet('${t.id}','priority',this.value,true)">${TASK_PRIOR.map(pr=>`<option${t.priority===pr?' selected':''}>${pr}</option>`).join('')}</select></td>
