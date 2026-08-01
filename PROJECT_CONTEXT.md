@@ -1727,7 +1727,12 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Próxima sesión (2026-07-17+)
 - [~] **Supabase Auth real** — Login ✅, **gestión de usuarios ✅ Fase 1**, **RLS ✅ activado** (cierra el hueco de la anon key; ver sesión 2026-07-20). **Falta:** (a) **email automático** de invitaciones (hoy se comparte link a mano — backend `invite-user` tiene el envío como TODO; requiere proveedor SMTP o el de Supabase); (b) **sincronizar `SYS.users` ↔ Auth** para que los invitados aparezcan en Mensajes/avatares (hoy la mensajería usa el directorio local, con ids numéricos vs uuid de Auth — hacer con cuidado). Nota: RLS solo protege acceso directo; los roles se siguen aplicando en el backend (no hay políticas por-rol porque todo va por service_role).
-- [ ] **Backups automáticos** — A Dropbox (integración con Dropbox API OAuth)
+- [~] **Backups automáticos** — código listo: exportación comprimida + AES-256-GCM, endpoint interno
+  protegido para GitHub Actions, workflow cada 6 horas, log `backups_log` y limpieza de los 10 últimos.
+  **Pendiente de configuración externa para cerrar producción:** `DROPBOX_REFRESH_TOKEN`,
+  `DROPBOX_CLIENT_ID`, `DROPBOX_CLIENT_SECRET`, `BACKUP_ENCRYPTION_KEY` e `INTERNAL_BACKUP_SECRET`
+  en Render; el mismo `INTERNAL_BACKUP_SECRET` como secret de GitHub Actions; y ejecutar
+  `siscon-backend/migration-backups-log.sql` en Supabase.
 - [ ] **Invitar usuarios** — Para que colaboren en tiempo real (gestión de usuarios en la app)
 - [ ] **Ajustes finales** — UI, validaciones, seguridad (refactor de código, testing, optimizaciones)
 
