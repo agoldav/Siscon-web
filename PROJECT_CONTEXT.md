@@ -1764,6 +1764,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Pruebas locales: backend QBO **21/21**, vínculo de proyectos **13/13**, deduplicación Outlook↔QBO **15/15** y sincronización transaccional **9/9**.
 - [x] Cambios publicados en `main`: backend `5965406` y frontend `678bc41`. El frontend nuevo se verificó activo detrás de Cloudflare y `/health` del backend responde `200`.
 - [x] Validación en vivo: tras un `502` transitorio del backend durante el despliegue, una nueva ejecución de **Sync QBO** terminó correctamente, importó **2 facturas nuevas**, actualizó **8 registros** y dejó la app en estado **Guardado**. No se ejecutó ninguna escritura hacia QuickBooks.
+- [x] Corregido el destino incorrecto 116↔Dor (`de9ce67`, `d32f9dc`, `1d065b2`): el adaptador conserva referencias de proyecto de cabecera y línea, el nombre exacto gana sobre un `qboProjectId` obsoleto y una referencia sin nombre puede vincularse una sola vez desde **Sin clasificar**. Esa asignación guarda el `ProjectRef` estable en el proyecto local; las siguientes facturas con el mismo ID se clasifican automáticamente. La lista sin clasificar ahora muestra número, cliente/proveedor, fecha, monto y ProjectRef.
+- [x] Validación real con la compañía de prueba: el REST contable devolvió el ProjectRef `808402993` sin nombre (el nombre pertenece a la API Projects premium). Se vinculó gratuitamente a **Dor** y quedaron guardadas allí la factura a cliente **1001** por **$2,500.00** y la factura de proveedor **00100001010000073216** de **Polycenter S.A. USD** por **$883.11**, ambas con marca **✓ QBO**. Se recargó la aplicación y ambas persistieron. No hubo escrituras hacia QuickBooks.
 
 ## 10. ⏳ Pendiente
 
