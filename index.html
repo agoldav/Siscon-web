@@ -3551,7 +3551,7 @@ function renderDashList(sorted){
     const realSpent=projSpent(p);
     const prog=p.area>0?Math.round(p.areaInstalled/p.area*100):0;
     const budgeted=p.types.reduce((s,t)=>s+((getCatTotal(t)||t.budget||0)*p.houses.filter(h=>h.typeId===t.id).length),0);
-    const facturado=(p.invClient||[]).filter(x=>x.status!=='Anulada').reduce((s,x)=>s+(x.amount||0),0);
+    const facturado=projBilled(p);
     const projPending=Object.keys(TXN_DEFS).reduce((s,k)=>s+(p[TXN_DEFS[k].key]||[]).filter(x=>x._pending).length,0);
     const cells=visCols.map(c=>'<div style="text-align:left">'+cellVal(c,p,realSpent,prog,budgeted,facturado,projPending)+'</div>').join('');
     return '<div style="display:grid;grid-template-columns:'+tplCols+';gap:14px;padding:11px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;align-items:center" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'" onclick="openProj('+p.id+')">'
@@ -3726,6 +3726,7 @@ function renderBreadcrumb(){
 // de los recibos de venta que retiran inventario. Nunca suma el total documental.
 function projSpent(p){
   if(!p)return 0;
+  if(p.qboCostAuthoritative&&Number.isFinite(Number(p.qboReportedCostUSD)))return Math.max(0,Number(p.qboReportedCostUSD));
   if(p.billVendor && p.billVendor.length){
     return p.billVendor.filter(b=>b.status!=='Anulada').reduce((s,b)=>s+(b.qboId
       ?Number(b.qboProjectSubtotalUSD??b.subtotalUSD??0)
@@ -3735,11 +3736,28 @@ function projSpent(p){
   return (p.houses||[]).reduce((s,h)=>s+(h.spent||0),0);
 }
 function projSpentBreakdown(p){
-  return (p&&p.billVendor||[]).filter(b=>b.status!=='Anulada').reduce((out,b)=>{
+  const out=(p&&p.billVendor||[]).filter(b=>b.status!=='Anulada').reduce((out,b)=>{
     const amount=b.qboId?Number(b.qboProjectSubtotalUSD??b.subtotalUSD??0):(Number(b.subtotalUSD)||0);
-    if(b.qboEntity==='SalesReceipt')out.inventoryCogs+=amount;else out.vendorBills+=amount;
+    if(b.qboEntity==='SalesReceipt'){
+      out.inventoryCogs+=amount;out.inventoryReceipts++;
+      if(b.qboCostPending)out.pendingInventoryReceipts++;
+    }else out.vendorBills+=amount;
     return out;
-  },{vendorBills:0,inventoryCogs:0});
+  },{vendorBills:0,inventoryCogs:0,inventoryReceipts:0,pendingInventoryReceipts:0});
+  out.otherQboCosts=p&&p.qboCostAuthoritative
+    ?Number(p.qboReportedCostUSD||0)-out.vendorBills-out.inventoryCogs:0;
+  return out;
+}
+// Ingreso contable del proyecto: las facturas QBO del lote inicial no tienen casas,
+// pero sí tienen subtotal autoritativo. El IVA no es ingreso y se mantiene separado.
+function projInvoiceRevenueUSD(invoice){
+  if(!invoice||invoice.status==='Anulada')return 0;
+  if(Object.prototype.hasOwnProperty.call(invoice,'subtotalUSD')){
+    const subtotal=Number(invoice.subtotalUSD);if(Number.isFinite(subtotal))return Math.max(0,subtotal);
+  }
+  const total=Number(invoice.totalUSD),tax=Number(invoice.ivaUSD);
+  if(Number.isFinite(total))return Math.max(0,total-(Number.isFinite(tax)?tax:0));
+  return 0;
 }
 function getCatTotal(typeObj){
   if(!typeObj.categories)return 0;
@@ -3863,7 +3881,7 @@ function renderMetric(){
       </div>
       <div class="pm-band" style="gap:26px;align-items:flex-start">
         ${efld('Presupuesto',fmt(p.budget),p.budget,'budget','number','130px')}
-        ${ro('Costo Real',fmt(realSpent),'',`Facturas sin IVA ${fmt(spentBreakdown.vendorBills)} + inventario FIFO ${fmt(spentBreakdown.inventoryCogs)}`)}
+        ${ro('Costo Real',fmt(realSpent),'',`Facturas sin IVA ${fmt(spentBreakdown.vendorBills)} + ${spentBreakdown.inventoryReceipts} recibo(s) QBO FIFO ${fmt(spentBreakdown.inventoryCogs)}${Math.abs(spentBreakdown.otherQboCosts)>0.005?' + otros costos/ajustes QBO '+fmt(spentBreakdown.otherQboCosts):''}${spentBreakdown.pendingInventoryReceipts?' · '+spentBreakdown.pendingInventoryReceipts+' pendiente(s) de costo':''}`)}
         ${ro('Disponible',fmt(avail),avail>=0?'grn':'red')}
         ${efld('Precio de Venta',fmt(p.salePrice),p.salePrice,'salePrice','number','130px')}
         ${utilCell}
@@ -8080,10 +8098,15 @@ async function qboReadTransactions(force){
   const documents=await qboRead('/api/qbo/transactions');
   const paymentData=await qboRead('/api/qbo/payments');
   const inventoryData=await qboRead('/api/qbo/inventory-costs');
+  let projectCostData={projectCosts:[],reportErrors:[]};
+  try{projectCostData=await qboRead('/api/qbo/project-costs');}
+  catch(error){projectCostData={projectCosts:[],reportErrors:[String(error.message||error)]};}
   _qboTransactionsCache={...documents,
     payments:paymentData.payments||[],billPayments:paymentData.billPayments||[],
     salesReceipts:inventoryData.salesReceipts||[],unresolvedInventoryCosts:Number(inventoryData.unresolvedCosts)||0,
-    inventoryCostErrors:inventoryData.reportErrors||[]};
+    inventoryCostErrors:inventoryData.reportErrors||[],projectFinancials:inventoryData.projectFinancials||[],
+    projectFinancialsReportCount:Number(inventoryData.projectFinancialsReportCount)||0,
+    projectCosts:projectCostData.projectCosts||[],projectCostErrors:projectCostData.reportErrors||[]};
   return _qboTransactionsCache;
 }
 async function qboReadCatalogs(force){
@@ -8246,6 +8269,37 @@ function qboSyncProjectCatalog(qboProjects,qboCustomers){
     imported++;
   });
   return {imported,updated,ambiguous};
+}
+
+function qboApplyProjectFinancials(rows,reportCount,projectCostRows){
+  const incomeAvailable=Number(reportCount)>0,costAvailable=Array.isArray(projectCostRows)&&projectCostRows.length>0;
+  if(incomeAvailable)projects.forEach(project=>{
+    project.qboIncomeAuthoritative=false;delete project.qboReportedIncomeUSD;
+  });
+  if(costAvailable)projects.forEach(project=>{
+    project.qboCostAuthoritative=false;delete project.qboReportedCostUSD;delete project.qboReceiptCosts;
+  });
+  const resolveProject=row=>{
+    const id=String(row.id||''),name=qboProjectName(row.name);
+    let matches=id?projects.filter(project=>String(project.qboProjectId||'')===id):[];
+    if(matches.length!==1&&name)matches=projects.filter(project=>qboProjectName(project.name)===name);
+    return matches.length===1?matches[0]:null;
+  };
+  let applied=0,unmatched=0,costApplied=0,costUnmatched=0;
+  if(incomeAvailable)(rows||[]).forEach(row=>{
+    const project=resolveProject(row);if(!project){unmatched++;return;}
+    project.qboReportedIncomeUSD=Math.max(0,Number(row.income)||0);
+    project.qboIncomeAuthoritative=true;project.qboFinancialsSource='ProfitAndLoss';
+    project.qboFinancialsSyncedAt=new Date().toISOString();applied++;
+  });
+  if(costAvailable)(projectCostRows||[]).forEach(row=>{
+    const project=resolveProject(row);if(!project){costUnmatched++;return;}
+    project.qboReportedCostUSD=Math.max(0,Number(row.cost)||0);
+    project.qboReceiptCosts=Array.isArray(row.receiptCosts)?row.receiptCosts:[];
+    project.qboCostAuthoritative=true;project.qboCostSource='GeneralLedgerProject';
+    project.qboFinancialsSyncedAt=new Date().toISOString();costApplied++;
+  });
+  return {applied,unmatched,available:incomeAvailable,costApplied,costUnmatched,costAvailable};
 }
 
 function qboTextKey(value){
@@ -8580,21 +8634,33 @@ function qboSalesReceiptProjectSlices(receipt,projectCatalog){
   });
   const grouped=[...groups.values()];
   const cogsTotal=Math.max(0,Number(receipt&&receipt.cogsTotal)||0);
+  let auditedGroups=0;
+  grouped.forEach(group=>{
+    const audits=group.project&&Array.isArray(group.project.qboReceiptCosts)?group.project.qboReceiptCosts:[];
+    const audit=audits.find(row=>String(row.qboId||'')===String(receipt&&receipt.id||'')||
+      (String(row.docNumber||'')===String(receipt&&receipt.docNumber||'')&&
+       (!row.txnDate||!receipt.txnDate||String(row.txnDate)===String(receipt.txnDate))));
+    if(audit){group.costUSD=Math.max(0,Number(audit.cost)||0);group.costSource='GeneralLedgerProject';auditedGroups++;}
+  });
   const assignedTotal=grouped.reduce((sum,group)=>sum+group.costUSD,0);
-  if(grouped.length===1&&cogsTotal>0)grouped[0].costUSD=cogsTotal;
-  else if(assignedTotal>0&&cogsTotal>0&&lineResolutions.length&&lineResolutions.every(resolution=>resolution.status==='matched')){
+  if(!auditedGroups&&grouped.length===1&&cogsTotal>0)grouped[0].costUSD=cogsTotal;
+  else if(!auditedGroups&&assignedTotal>0&&cogsTotal>0&&lineResolutions.length&&lineResolutions.every(resolution=>resolution.status==='matched')){
     const scale=cogsTotal/assignedTotal;grouped.forEach(group=>{group.costUSD*=scale;});
   }
-  return grouped.filter(group=>group.costUSD>0).map(group=>({...group,lineResolutions,projectCount:grouped.length,documentCostUSD:cogsTotal}));
+  // El documento debe ser visible aunque el reporte de COGS falle temporalmente.
+  // En ese caso se importa con costo pendiente ($0), nunca con un costo estimado.
+  const documentCostUSD=auditedGroups===grouped.length?grouped.reduce((sum,group)=>sum+group.costUSD,0):cogsTotal;
+  return grouped.map(group=>({...group,lineResolutions,projectCount:grouped.length,documentCostUSD}));
 }
 function qboSalesReceiptLinesForSlice(receipt,slice,existingLines){
   const activeIndexes=new Set(slice.lineIndexes||[]),previousById=new Map((existingLines||[]).map(line=>[String(line.qboLineId||''),line]));
   const rawLines=receipt&&receipt.lines||[];
   const rawActiveTotal=rawLines.reduce((sum,line,index)=>sum+(activeIndexes.has(index)?Math.max(0,Number(line.fifoCost)||0):0),0);
-  const activeScale=rawActiveTotal>0?slice.costUSD/rawActiveTotal:1;
+  const activeScale=rawActiveTotal>0?slice.costUSD/rawActiveTotal:1,activeCount=activeIndexes.size||1;
   return rawLines.map((line,index)=>{
     const previous=previousById.get(String(line.id||''))||{},resolution=slice.lineResolutions[index]||{};
-    const active=activeIndexes.has(index),rawCost=Math.max(0,Number(line.fifoCost)||0),cost=active?rawCost*activeScale:rawCost;
+    const active=activeIndexes.has(index),rawCost=Math.max(0,Number(line.fifoCost)||0);
+    const cost=active?(rawActiveTotal>0?rawCost*activeScale:Math.max(0,Number(slice.costUSD)||0)/activeCount):rawCost;
     const qty=Number(line.quantity)||1,projectName=resolution.project&&resolution.project.name||resolution.name||'';
     return {productId:String(line.item&&line.item.id||''),desc:String(line.item&&line.item.name||line.description||'Material de inventario'),
       qty,price:qty?cost/qty:cost,discPct:0,assign:Array.isArray(previous.assign)?previous.assign:[],ivaRate:0,qboTaxUSD:0,
@@ -8603,7 +8669,7 @@ function qboSalesReceiptLinesForSlice(receipt,slice,existingLines){
   });
 }
 function qboApplySalesReceiptSlice(local,receipt,slice,initialImport){
-  const before=JSON.stringify(local),documentCost=Math.max(0,Number(receipt.cogsTotal)||0);
+  const before=JSON.stringify(local),documentCost=Math.max(0,Number(slice.documentCostUSD??receipt.cogsTotal)||0);
   local.qboId=String(receipt.id||'');local.qboEntity='SalesReceipt';local.type='proveedor';
   local.num='RV-QB-'+String(receipt.docNumber||receipt.id||'');local.invoiceNumber=String(receipt.docNumber||receipt.id||'');
   local.party='Inventario QuickBooks';local.date=String(receipt.txnDate||'');local.status='Aplicado';
@@ -8612,7 +8678,7 @@ function qboApplySalesReceiptSlice(local,receipt,slice,initialImport){
   local.qboProjectSubtotalUSD=slice.costUSD;local.qboProjectTaxUSD=0;local.qboProjectTotalUSD=slice.costUSD;
   local.qboDocumentSubtotalUSD=documentCost;local.qboDocumentTaxUSD=0;local.qboDocumentTotalUSD=documentCost;
   local.qboDocumentTotal=Number(receipt.total)||0;local.qboSalesAmountUSD=qboAmountToUSD(receipt.total,receipt.currency,receipt.exchangeRate);
-  local.qboCostSource=String(receipt.cogsSource||'');local.qboMultiProject=slice.projectCount>1;
+  local.qboCostSource=String(slice.costSource||receipt.cogsSource||'');local.qboCostPending=!(slice.costSource||documentCost>0);delete local.qboCostReadError;local.qboMultiProject=slice.projectCount>1;
   local.qboAllProjectRefs=qboTransactionProjectRefs(receipt);local.qboProjectPresence='present';delete local.qboPresenceMessage;
   local.notes=String(receipt.privateNote||'');local.appliedToHouses=!!local.appliedToHouses;
   if(!local.createdAt)local.createdAt=new Date().toLocaleDateString('es-CR');if(!local.createdBy)local.createdBy='QBO Import';
@@ -8627,10 +8693,18 @@ function qboSyncSalesReceipts(receipts,projectCatalog,options){
   for(const receipt of (receipts||[])){
     const qboId=String(receipt.id||''),slices=qboSalesReceiptProjectSlices(receipt,projectCatalog);
     const exactRows=locals.filter(row=>String(row.record.qboId||'')===qboId);
-    if(!(Number(receipt.cogsTotal)>0)){
-      unresolvedCost++;exactRows.forEach(row=>seen.add(`${qboId}|${String(row.project.id)}`));continue;
-    }
+    const hasVerifiedCost=slices.length>0&&slices.every(slice=>slice.costSource==='GeneralLedgerProject'||Number(slice.documentCostUSD)>0);
+    if(!hasVerifiedCost)unresolvedCost++;
     if(!slices.length){skippedNonProject++;continue;}
+    // Si antes hubo un costo contable verificado, una falla transitoria de reportes
+    // no debe reemplazarlo por cero. Los recibos nuevos sí quedan visibles a $0 con alerta.
+    if(!hasVerifiedCost&&exactRows.some(row=>Number(row.record.qboProjectSubtotalUSD)>0)){
+      exactRows.forEach(row=>{
+        seen.add(`${qboId}|${String(row.project.id)}`);
+        if(!row.record.qboCostReadError){row.record.qboCostReadError=true;updated++;}
+      });
+      continue;
+    }
     const usedRows=new Set();
     for(const slice of slices){
       const key=`${qboId}|${String(slice.project.id)}`;seen.add(key);
@@ -9349,6 +9423,9 @@ function renderTxnSub(){ if(curTxnTab==='oc') renderOCList(); else renderGeneric
 function renderGenericList(type){
   const def=TXN_DEFS[type];
   const arr=txnSortArr(txnArr(type),t=>t.party||t.client,t=>t.date||t.createdAt,t=>t.status,t=>t.num,t=>(t.lines&&t.lines[0]&&t.lines[0].desc)||'');
+  const inventoryReceipts=type==='proveedor'?arr.filter(tx=>tx.qboEntity==='SalesReceipt'):[];
+  const inventoryCogs=inventoryReceipts.reduce((sum,tx)=>sum+(Number(tx.qboProjectSubtotalUSD)||0),0);
+  const pendingInventoryCogs=inventoryReceipts.filter(tx=>tx.qboCostPending).length;
   txnBodyEl().innerHTML=`
     <div class="th-row">
       <div class="th-title">${TXN_TABS.find(t=>t[0]===type)[1]} (${arr.length})</div>
@@ -9359,6 +9436,11 @@ function renderGenericList(type){
         ${txnSortSelect(`renderGenericList('${type}')`)}
       </div>
     </div>
+    ${type==='proveedor'?`<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px;padding:9px 12px;border:1px solid ${pendingInventoryCogs?'rgba(212,148,26,.35)':'rgba(29,184,122,.28)'};border-radius:8px;background:${pendingInventoryCogs?'rgba(212,148,26,.08)':'rgba(29,184,122,.06)'};font-size:11px;color:var(--t2)">
+      <strong style="color:var(--t1)">Recibos de venta QBO: ${inventoryReceipts.length}</strong>
+      <span>COGS FIFO aplicado al proyecto: <strong style="color:var(--grn)">${fmt(inventoryCogs)}</strong></span>
+      ${pendingInventoryCogs?`<span style="color:var(--amb)">⚠ ${pendingInventoryCogs} recibo(s) visible(s) todavía sin costo contable disponible</span>`:''}
+    </div>`:''}
     ${arr.length===0?`<div style="color:var(--t3);font-size:13px;padding:30px;text-align:center">No hay registros. Crea uno con "+ Nuevo".</div>`:''}
     ${arr.map(tx=>{
       const isCRCTx = tx.currencyBill==='CRC';
@@ -9369,7 +9451,7 @@ function renderGenericList(type){
       const qboDocumentCost=Number(tx.qboDocumentSubtotalUSD??qboProjectCost);
       const amountDisplay = type==='proveedor'&&tx.qboId
         ?`<span style="font-size:12px;font-weight:600;color:var(--grn)">Total ${fmt(qboProjectCost)} de ${fmt(qboDocumentCost)}</span>
-          <span style="font-size:10px;color:var(--t3)">${tx.qboEntity==='SalesReceipt'?'COGS FIFO de inventario':`sin IVA${Number(tx.qboProjectTaxUSD)>0?' · IVA informativo '+fmt(Number(tx.qboProjectTaxUSD)):''}`}</span>`
+          <span style="font-size:10px;color:${tx.qboCostPending?'var(--amb)':'var(--t3)'}">${tx.qboEntity==='SalesReceipt'?(tx.qboCostPending?'⚠ COGS pendiente de lectura QBO':'COGS FIFO de inventario'):`sin IVA${Number(tx.qboProjectTaxUSD)>0?' · IVA informativo '+fmt(Number(tx.qboProjectTaxUSD)):''}`}</span>`
         :isCRCTx
         ? `<span style="font-size:12px;font-weight:600;color:var(--org)">₡${totalCRCdisp.toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
            <span style="font-size:10px;color:var(--t3)">${fmt(totalUSDdisp)} USD</span>`
@@ -9384,7 +9466,7 @@ function renderGenericList(type){
           ${txnBadge(tx.status)}
           ${amountDisplay}
         </div>
-        <span class="qbo-badge${tx.qboId?'':' pending'}">${def.qbo?(tx.qboId?(tx.qboEntity==='SalesReceipt'?'✓ RECIBO QBO':'✓ QBO'):'⏳ QBO'):'Interno'}</span>
+        <span class="qbo-badge${tx.qboId&&!tx.qboCostPending?'':' pending'}">${def.qbo?(tx.qboId?(tx.qboEntity==='SalesReceipt'?(tx.qboCostPending?'⚠ RECIBO QBO':'✓ RECIBO QBO'):'✓ QBO'):'⏳ QBO'):'Interno'}</span>
         <div style="position:relative">
           <button onclick="event.stopPropagation();txnListMenuToggle('${tx.id}',event)" style="background:transparent;border:none;color:var(--t3);font-size:16px;cursor:pointer;padding:2px 6px" title="Opciones">⋮</button>
           <div id="txn-dd-${tx.id}" style="display:none;position:absolute;right:0;top:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);z-index:200;min-width:130px;box-shadow:0 4px 16px rgba(0,0,0,.4)">
@@ -11331,7 +11413,10 @@ function routeSendWhatsApp(){
 const CASH_WINDOWS={'1w':[1,'Próxima semana'],'2w':[2,'Próximas 2 semanas'],'3w':[3,'Próximas 3 semanas'],'1m':[4.3,'Próximo mes'],'3m':[13,'Próximos 3 meses'],'6m':[26,'Próximos 6 meses'],'12m':[52,'Próximos 12 meses']};
 function projActive(p){ return p.status!=='Terminado'; }
 function projGastado(p){ return projSpent(p); }
-function projBilled(p){ return p.houses.reduce((s,h)=>s+houseBilling(p,h).montoFact,0); }
+function projBilled(p){
+  if(p&&p.qboIncomeAuthoritative&&Number.isFinite(Number(p.qboReportedIncomeUSD)))return Math.max(0,Number(p.qboReportedIncomeUSD));
+  return (p&&p.invClient||[]).reduce((sum,invoice)=>sum+projInvoiceRevenueUSD(invoice),0);
+}
 function projPendienteGasto(p){ return Math.max(0,(p.budget||0)-projGastado(p)); }
 function projUnbilled(p){ return Math.max(0,projGastado(p)-projBilled(p)); }
 // ===== Recuperación de dinero (gastado vs facturado) =====
@@ -13271,7 +13356,7 @@ async function qboFullSync(btn){
     const qboProjects=catalogs.projects||[];
     const activeRealm=String(SYS.qbo&&SYS.qbo.realmId||'');
     const initialImport=!SYS.qbo.initialProjectTransactionImportCompletedAt||String(SYS.qbo.initialProjectTransactionImportRealmId||'')!==activeRealm;
-    const billAllocationMigration=Number(SYS.qbo.projectBillAllocationPolicyVersion||0)<3;
+    const billAllocationMigration=Number(SYS.qbo.projectBillAllocationPolicyVersion||0)<4;
     const nextVendors=(catalogs.vendors||[]).filter(v=>v.active);
     const nextCustomers=(catalogs.customers||[]).filter(c=>c.active);
     const nextItems=(catalogs.items||[]).filter(i=>i.active).map(i=>({...i,price:i.unitPrice||0}));
@@ -13297,6 +13382,11 @@ async function qboFullSync(btn){
     const projectSync=qboSyncProjectCatalog(qboProjects,nextCustomers);
     importedProjects=projectSync.imported;updated+=projectSync.updated;
     if(projectSync.ambiguous)addNotif(`QB: ${projectSync.ambiguous} proyecto(s) con nombre duplicado en Siscon; no se enlazaron.`);
+    const financialSync=qboApplyProjectFinancials(snapshot.projectFinancials||[],snapshot.projectFinancialsReportCount,snapshot.projectCosts||[]);
+    updated+=financialSync.applied+financialSync.costApplied;
+    if(financialSync.available&&financialSync.unmatched)addNotif(`QB: ${financialSync.unmatched} columna(s) financiera(s) no correspondían a un proyecto Siscon y se omitieron.`);
+    if(financialSync.costAvailable&&financialSync.costUnmatched)addNotif(`QB: ${financialSync.costUnmatched} costo(s) contable(s) no correspondían a un proyecto Siscon y se omitieron.`);
+    if((snapshot.projectCostErrors||[]).length)addNotif(`QB: no se pudo auditar el costo exacto de ${snapshot.projectCostErrors.length} proyecto(s); se conservó su último costo verificado.`);
 
     // Migración controlada: la política actual nunca conserva transacciones QBO
     // sin proyecto en "Sin clasificar". Solo se retiran copias automáticas sin PDF;
@@ -13338,6 +13428,7 @@ async function qboFullSync(btn){
         const before=JSON.stringify([inv.qboId||'',inv.consecutivo||'',inv.qboDocumentTotal??null,inv.qboBalance??null,inv.qboCurrency||'',inv.qboExchangeRate??null,inv.qboTaxTotal??null,inv.qboLastUpdatedAt||'',inv.status||'',inv.subtotalUSD||0,inv.ivaUSD||0,inv.totalUSD||0]);
         if(consecVal)inv.consecutivo=consecVal;
         if(qid)inv.qboId=qid;
+        inv.qboEntity='Invoice';
         inv.qboDocumentTotal=qi.total;inv.qboBalance=qi.balance;inv.qboCurrency=qi.currency;
         inv.qboExchangeRate=qi.exchangeRate;inv.exchangeRate=qboAppExchangeRate(qi.currency,qi.exchangeRate);inv.qboTaxTotal=qi.totalTax;inv.qboLastUpdatedAt=qi.lastUpdatedAt||'';
         inv.currency=qi.currency||inv.currency||'USD';
@@ -13369,7 +13460,7 @@ async function qboFullSync(btn){
       const subtotalUSD=qboAmountToUSD(qi.subtotal,qi.currency,qi.exchangeRate);
       const ivaUSD=qboAmountToUSD(qi.totalTax,qi.currency,qi.exchangeRate);
       const newInv={
-        id:'qbo-imp-'+qid, qboId:qid, num:doc, consecutivo:consecVal,
+        id:'qbo-imp-'+qid, qboId:qid, qboEntity:'Invoice', num:doc, consecutivo:consecVal,
         client:clientName, currency:qi.currency||'USD', exchangeRate:qboAppExchangeRate(qi.currency,qi.exchangeRate),
         dateInv:qi.txnDate||'', dateDue:qi.dueDate||qi.txnDate||'',
         houseLines:[], manualLines:lines,
@@ -13419,7 +13510,7 @@ async function qboFullSync(btn){
       SYS.qbo.initialProjectTransactionImportCompletedAt=new Date().toISOString();
       SYS.qbo.initialProjectTransactionImportRealmId=activeRealm;
     }
-    SYS.qbo.projectBillAllocationPolicyVersion=3;
+    SYS.qbo.projectBillAllocationPolicyVersion=4;
 
     saveData();
     if(curTab==='txn')renderTxnSub();

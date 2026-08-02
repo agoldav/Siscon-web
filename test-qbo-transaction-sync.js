@@ -29,13 +29,14 @@ vm.createContext(sandbox);
 vm.runInContext([
   'qboProjectName', 'qboTransactionProjectRefs', 'qboResolveProject', 'qboBindProjectId', 'qboApplyProjectLink', 'qboMoveRecord',
   'qboIsAutoImportedTransaction', 'qboRemoveRecord', 'qboApplyImportPolicy',
-  'qboSyncProjectCatalog',
+  'qboSyncProjectCatalog', 'qboApplyProjectFinancials',
   'qboTextKey', 'qboVendorKey', 'qboBillAmount', 'qboBillMatch', 'qboFindBestBillMatch', 'qboBillAsRecord',
   'qboAppExchangeRate', 'qboAmountToUSD', 'qboLineSourceAmount', 'qboTaxCodePct', 'qboBillLineTaxAmounts',
   'qboResolveBillLineProject', 'qboBillProjectSlices', 'qboBillLinesForSlice',
   'qboApplyBillMatch', 'qboApplyBillSlice', 'qboSyncVendorBills',
   'qboSalesReceiptProjectSlices', 'qboSalesReceiptLinesForSlice', 'qboApplySalesReceiptSlice', 'qboSyncSalesReceipts',
   'qboPaymentAllocations', 'qboSyncPayments', 'projSpent', 'projSpentBreakdown',
+  'projInvoiceRevenueUSD', 'projBilled',
 ].map(extractFunction).join('\n'), sandbox);
 
 let pass = 0, fail = 0;
@@ -57,6 +58,18 @@ ok('enlaza el proyecto existente e importa el proyecto QBO faltante',
 const projectCatalogSecond = sandbox.qboSyncProjectCatalog([{id:'P20',name:'Proyecto Renombrado',status:'ACTIVE',customerId:'C2'}], []);
 ok('repetir el catálogo no duplica y conserva el nombre exacto de QBO',
   projectCatalogSecond.imported===0 && sandbox.projects.filter(p=>p.qboProjectId==='P20').length===1 && sandbox.projects.find(p=>p.qboProjectId==='P20').name==='Proyecto Renombrado');
+const financialSync=sandbox.qboApplyProjectFinancials([
+  {id:'P10',name:'Condominio Roble',income:30578.44,cost:16699.32},
+  {id:'P20',name:'Proyecto Renombrado',income:2500,cost:883.11},
+],2,[
+  {id:'P10',name:'Condominio Roble',cost:16699.32,receiptCosts:[{qboId:'SR1',docNumber:'RV-1',txnDate:'2026-08-01',cost:90}]},
+  {id:'P20',name:'Proyecto Renombrado',cost:883.11,receiptCosts:[]},
+]);
+ok('aplica los totales contables autoritativos de QBO al proyecto exacto',
+  financialSync.applied===2 && financialSync.costApplied===2 && project.qboIncomeAuthoritative===true && project.qboCostAuthoritative===true &&
+  project.qboReportedIncomeUSD===30578.44 && project.qboReportedCostUSD===16699.32 &&
+  sandbox.projBilled(project)===30578.44 && sandbox.projSpent(project)===16699.32);
+project.qboCostAuthoritative=false;
 
 const qboBill = {
   id: 'B1', docNumber: 'G-100', txnDate: '2026-08-01', currency: 'USD', exchangeRate: 1,
@@ -123,6 +136,11 @@ ok('el costo por proyecto conserva neto e IVA separados sin duplicar el total do
   Math.abs(multiA.qboDocumentSubtotalUSD-300)<0.001 && Math.abs(multiA.qboDocumentTotalUSD-339)<0.001);
 ok('Costo Real usa el neto sin IVA de cada slice QBO',
   Math.abs(sandbox.projSpent({billVendor:[multiA,multiB]})-300)<0.001);
+ok('los indicadores de ingreso suman facturas QBO sin casas y excluyen IVA',
+  Math.abs(sandbox.projBilled({invClient:[
+    {qboId:'IQ1',subtotalUSD:30578.44,ivaUSD:3975.20,totalUSD:34553.64,status:'Emitida',houseLines:[]},
+    {qboId:'IQ2',subtotalUSD:50,ivaUSD:6.5,totalUSD:56.5,status:'Anulada',houseLines:[]},
+  ]})-30578.44)<0.001);
 
 console.log('\nRecibos de venta y COGS FIFO:');
 const receipt={id:'SR1',docNumber:'RV-1',txnDate:'2026-08-01',currency:'USD',exchangeRate:1,total:0,cogsTotal:90,
@@ -139,9 +157,18 @@ ok('el recibo queda en el proyecto, tramitado y con sus costos FIFO por línea',
 const receiptSecond=sandbox.qboSyncSalesReceipts([receipt],catalog,{initialImport:true});
 ok('repetir el sync de recibos no duplica el gasto',
   receiptSecond.imported===0 && project.billVendor.filter(b=>b.qboEntity==='SalesReceipt'&&b.qboId==='SR1').length===1);
+const verifiedReceiptCosts=project.qboReceiptCosts;project.qboReceiptCosts=[];
 const receiptWithoutReport=sandbox.qboSyncSalesReceipts([{...receipt,cogsTotal:0,cogsSource:'unavailable'}],catalog,{initialImport:true});
 ok('un fallo temporal del reporte no borra un COGS previamente verificado',
-  receiptWithoutReport.unresolvedCost===1 && project.billVendor.includes(receiptLocal));
+  receiptWithoutReport.unresolvedCost===1 && project.billVendor.includes(receiptLocal) &&
+  receiptLocal.qboProjectSubtotalUSD===90 && receiptLocal.qboCostReadError===true);
+project.qboReceiptCosts=verifiedReceiptCosts;
+const unresolvedReceipt={...receipt,id:'SR2',docNumber:'RV-2',cogsTotal:0,cogsSource:'unavailable',
+  lines:receipt.lines.map(line=>({...line,fifoCost:0}))};
+const unresolvedFirst=sandbox.qboSyncSalesReceipts([receipt,unresolvedReceipt],catalog,{initialImport:true});
+const unresolvedLocal=project.billVendor.find(b=>b.qboEntity==='SalesReceipt'&&b.qboId==='SR2');
+ok('un recibo nuevo queda visible aunque QBO no entregue todavía su COGS',
+  unresolvedFirst.imported===1 && unresolvedLocal && unresolvedLocal.qboCostPending===true && unresolvedLocal.qboProjectSubtotalUSD===0);
 
 project.billVendor.push({ id: 'LOCAL1', num: 'FP-LOCAL', invoiceNumber: 'LOCAL-9', party: 'Otro', date: '2026-08-01', totalUSD: 25, currencyBill: 'USD' });
 sandbox.qboSyncVendorBills([qboBill], catalog);
@@ -193,9 +220,23 @@ ok('el botón global reemplaza todos los catálogos QBO y confirma sus cantidade
 ok('el primer lote se marca por compañía y los posteriores exigen asignación de casa',
   /initialProjectTransactionImportCompletedAt/.test(html) && /initialProjectTransactionImportRealmId/.test(html) &&
   /qboImportBatch:initialImport\?'initial':'incremental'/.test(html) && /houseAssignmentRequired:!initialImport/.test(html));
-ok('la política de costo v3 usa facturas sin IVA y agrega COGS FIFO',
-  /projectBillAllocationPolicyVersion\|\|0\)<3/.test(html) && /projectBillAllocationPolicyVersion=3/.test(html) &&
-  /qboProjectSubtotalUSD\?\?b\.subtotalUSD/.test(html) && /Facturas sin IVA/.test(html) && /inventario FIFO/.test(html));
+ok('la política de costo v4 usa facturas sin IVA y COGS auditado por proyecto',
+  /projectBillAllocationPolicyVersion\|\|0\)<4/.test(html) && /projectBillAllocationPolicyVersion=4/.test(html) &&
+  /qboProjectSubtotalUSD\?\?b\.subtotalUSD/.test(html) && /Facturas sin IVA/.test(html) && /recibo\(s\) QBO FIFO/.test(html));
+ok('los indicadores financieros usan el subtotal de invClient aunque la factura QBO no tenga casas',
+  /function projInvoiceRevenueUSD\(invoice\)/.test(html) && /function projBilled\(p\)\{/.test(html) &&
+  /const facturado=projBilled\(p\)/.test(html));
+ok('el resumen financiero QBO aplica ingresos y costo contable por ID o nombre exacto',
+  /function qboApplyProjectFinancials\(rows,reportCount,projectCostRows\)/.test(html) &&
+  /qboIncomeAuthoritative&&Number\.isFinite\(Number\(p\.qboReportedIncomeUSD\)\)/.test(html) &&
+  /qboCostAuthoritative&&Number\.isFinite\(Number\(p\.qboReportedCostUSD\)\)/.test(html) &&
+  /otros costos\/ajustes QBO/.test(html));
+ok('el frontend consulta el General Ledger filtrado por proyecto y aplica su COGS exacto al recibo',
+  /qboRead\('\/api\/qbo\/project-costs'\)/.test(html) &&
+  /group\.costSource='GeneralLedgerProject'/.test(html) && /slice\.documentCostUSD\?\?receipt\.cogsTotal/.test(html));
+ok('Facturas de Proveedores muestra y contabiliza explícitamente los Recibos de venta QBO',
+  /Recibos de venta QBO: \$\{inventoryReceipts\.length\}/.test(html) && /qboCostPending/.test(html) &&
+  /El documento debe ser visible aunque el reporte de COGS falle/.test(html));
 ok('la lista explica el monto aplicado frente al documento completo',
   /Total \$\{fmt\(qboProjectCost\)\} de \$\{fmt\(qboDocumentCost\)\}/.test(html) &&
   /Proyecto: "\$\{esc\(l\.qboLineProjectName/.test(html) && /esta línea no suma/.test(html));
