@@ -11423,12 +11423,16 @@ function projUnbilled(p){ return Math.max(0,projGastado(p)-projBilled(p)); }
 function getProjectRecoveryData(p){
   const spent=projGastado(p), billed=projBilled(p);
   const saleH=(p.houses||[]).reduce((s,h)=>{const t=(p.types||[]).find(x=>x.id===h.typeId);return s+(t?(t.salePrice||0):0);},0);
+  const budgetH=(p.houses||[]).reduce((s,h)=>{const t=(p.types||[]).find(x=>x.id===h.typeId);return s+(t?(t.budget||0):0);},0);
   const sale=saleH||(p.salePrice||0);
-  const pend=Math.max(0,spent-billed);
+  const budget=budgetH||(p.budget||0);
+  const ratio=budget>0?sale/budget:1;
+  const shouldBill=spent*ratio;
+  const pend=Math.max(0,shouldBill-billed);
   const porFacturar=Math.max(0,sale-billed);
-  return {spent,billed,sale,pend,porFacturar,
-    pctRaw: spent>0?Math.round(billed/spent*100):null,
-    pct: spent>0?Math.min(100,billed/spent*100):0};
+  return {spent,billed,sale,budget,shouldBill,pend,porFacturar,
+    pctRaw: shouldBill>0?Math.min(100,Math.round(billed/shouldBill*100)):null,
+    pct: shouldBill>0?Math.min(100,billed/shouldBill*100):0};
 }
 function recoveryBarHtml(r){
   return `<div style="height:14px;background:var(--border2);border-radius:7px;overflow:hidden;display:flex" title="Del gasto: verde = ya facturado (recuperado), ámbar = pendiente por recuperar">
@@ -11462,12 +11466,12 @@ function projectRecoveryCardHtml(p){
 }
 function globalRecoveryCardHtml(list){
   const s=dstats();
-  const rows=(list||[]).map(p=>({p, r:getProjectRecoveryData(p)}));
-  const agg=rows.reduce((a,x)=>({spent:a.spent+x.r.spent,billed:a.billed+x.r.billed,sale:a.sale+x.r.sale}),{spent:0,billed:0,sale:0});
+  const rows=(list||[]).filter(projActive).map(p=>({p, r:getProjectRecoveryData(p)}));
+  const agg=rows.reduce((a,x)=>({spent:a.spent+x.r.spent,billed:a.billed+x.r.billed,sale:a.sale+x.r.sale,shouldBill:a.shouldBill+x.r.shouldBill,pend:a.pend+x.r.pend}),{spent:0,billed:0,sale:0,shouldBill:0,pend:0});
   const R={spent:agg.spent,billed:agg.billed,sale:agg.sale,
-    pend:Math.max(0,agg.spent-agg.billed), porFacturar:Math.max(0,agg.sale-agg.billed),
-    pctRaw: agg.spent>0?Math.round(agg.billed/agg.spent*100):null,
-    pct: agg.spent>0?Math.min(100,agg.billed/agg.spent*100):0};
+    pend:agg.pend, porFacturar:Math.max(0,agg.sale-agg.billed),
+    pctRaw: agg.shouldBill>0?Math.min(100,Math.round(agg.billed/agg.shouldBill*100)):null,
+    pct: agg.shouldBill>0?Math.min(100,agg.billed/agg.shouldBill*100):0};
   const det=rows.slice().sort((a,b)=>b.r.pend-a.r.pend);
   return `<div class="chart-card" style="margin-top:14px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
