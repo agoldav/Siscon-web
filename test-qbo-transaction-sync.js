@@ -234,6 +234,8 @@ ok('el resumen financiero QBO aplica ingresos y costo contable por ID o nombre e
 ok('el frontend consulta el General Ledger filtrado por proyecto y aplica su COGS exacto al recibo',
   /qboRead\('\/api\/qbo\/project-costs'\)/.test(html) &&
   /group\.costSource='GeneralLedgerProject'/.test(html) && /slice\.documentCostUSD\?\?receipt\.cogsTotal/.test(html));
+ok('al terminar QB actualiza inmediatamente el dashboard o proyecto visible',
+  /if\(curProj\)\{renderMetric\(\);renderTab\(\);\}\s*else renderDash\(\)/.test(html));
 ok('Facturas de Proveedores muestra y contabiliza explícitamente los Recibos de venta QBO',
   /Recibos de venta QBO: \$\{inventoryReceipts\.length\}/.test(html) && /qboCostPending/.test(html) &&
   /El documento debe ser visible aunque el reporte de COGS falle/.test(html));

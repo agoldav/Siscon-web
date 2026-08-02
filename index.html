@@ -13513,8 +13513,10 @@ async function qboFullSync(btn){
     SYS.qbo.projectBillAllocationPolicyVersion=4;
 
     saveData();
-    if(curTab==='txn')renderTxnSub();
-    else if(!curProj&&dashboardView==='proyectos')renderDash();
+    // Refrescar siempre la vista visible: curTab conserva su valor al volver al
+    // dashboard y antes podía dejar los totales anteriores en pantalla hasta recargar.
+    if(curProj){renderMetric();renderTab();}
+    else renderDash();
     updateBadges();
     const msg=[];
     if(imported)msg.push(`${imported} factura(s) nueva(s)`);
