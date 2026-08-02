@@ -1815,6 +1815,15 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Validación real en producción para **116 Este**: Siscon muestra **Costo Real $16,699.32**, exactamente igual a QBO, desglosado como Bills sin IVA **$15,600.37** + 13 Recibos QBO **$2,370.20** + ajustes contables QBO **-$1,271.25**. Muestra también **Facturado $30,578.44**, igual al ingreso de QBO, y 8 facturas visibles en **Facturas a Cliente**.
 - [x] Publicado: backend `9e05d8e`, `c5a6873`, `6ebf4a2`, `ed0ba2e`, `7934816`, `c41cc75`, `5d46942` y `da6d8a4`; frontend `112c27a` y `9519095`. Pruebas QBO: backend **36/36** y frontend transaccional **43/43**, todas en verde.
 
+### Sesión 2026-08-02 (Recuperación de Dinero — base correcta por utilidad + exclusión de inactivos)
+> Corrección solicitada por el usuario sobre `getProjectRecoveryData`/`globalRecoveryCardHtml`, no era un ítem de la sección Pendiente.
+- [x] **Pendiente por recuperar (por proyecto):** antes comparaba facturado contra gastado crudo, lo que daba >100% cuando ya se había cubierto el costo pero faltaba la utilidad presupuestada. Ahora se calcula "lo que debería estar facturado" = `gastado × (salePrice/budget)` (usando la venta y el presupuesto de costo agregados desde los tipos de casa asignados, sin depender del campo `utilityPct` del proyecto porque ese se deriva de un promedio de `margen` distinto y no cuadra necesariamente con `salePrice`/`budget`). `pend = max(0, deberíaFacturar - facturado)`.
+- [x] **Gráfica general (todos los proyectos):** un proyecto sobre-facturado ya no compensa el pendiente de otro — el total pendiente es la suma de los pendientes individuales ya limpiados a 0, no `Σfacturado - Σgastado`.
+- [x] **Gráfica general excluye proyectos inactivos** (status `Terminado`) vía `projActive()`.
+- [x] **Fix de seguimiento:** el % y la barra del agregado seguían calculándose con el facturado crudo (`billed`), así que el excedente de un proyecto sobre-facturado seguía inflando el % general aunque el monto pendiente ya fuera correcto (podía mostrarse 100% con dinero pendiente real). Se agregó `billedCapped` (facturado topado a lo que correspondía por proyecto) y el agregado usa esa suma para `pct`/`pctRaw`.
+- [x] Verificado con datos sintéticos en Node (sin acceso a las credenciales reales de Supabase) y confirmado visualmente en producción por el usuario tras el primer despliegue.
+- [x] Publicado: frontend `6a9fdb8` y `07e0eb9` en `agoldav/Siscon-web` → Vercel → `app.sisconcr.com`.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
