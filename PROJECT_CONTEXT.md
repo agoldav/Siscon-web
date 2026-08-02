@@ -1800,11 +1800,20 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > Cambio solicitado y aprobado expresamente sobre el mapeo y costo QBO ya completados. La integración continúa estrictamente QuickBooks → Siscon; todas las rutas nuevas son GET y no existe escritura hacia Intuit.
 - [x] Las tarjetas, etiquetas y detalle de Bills multiproyecto muestran **Total $costo-del-proyecto de $total-del-documento**. La factura completa aparece en cada proyecto involucrado; las líneas ajenas quedan en gris, muestran `Proyecto: "nombre"` y no aportan al costo del proyecto visible.
 - [x] **Costo Real** ahora suma el subtotal neto asignado al proyecto, sin IVA, igual que la métrica de costo de QuickBooks. El desglose separa Bills netos y costo FIFO de inventario para que se pueda auditar que no se está sumando la factura completa.
-- [x] Se incorporan los `SalesReceipt`/Recibos de venta ligados a proyectos como movimientos de proveedor **Recibo QBO**. Aunque el valor de venta sea $0, Siscon obtiene por lectura el COGS autoritativo de `GeneralLedgerDetail`, usa `InventoryValuationDetail` como respaldo y distribuye exactamente ese costo FIFO entre las líneas; nunca usa el precio de venta como costo.
+- [x] Se incorporan los `SalesReceipt`/Recibos de venta ligados a proyectos como movimientos de proveedor **Recibo QBO**. Aunque el valor de venta sea $0, Siscon obtiene por lectura el COGS autoritativo de `GeneralLedger`, usa `InventoryValuationDetail` como respaldo y distribuye exactamente ese costo FIFO entre las líneas; nunca usa el precio de venta como costo.
 - [x] Los recibos y Bills con líneas de varios proyectos conservan el documento completo en cada proyecto y solo contabilizan las líneas activas. La primera importación queda tramitada y sin casas; documentos nuevos conservan la política de asignación por casa.
 - [x] El catálogo gratuito de proyectos también reconoce `Customer.IsProject`, además de `Job`, para clasificar transacciones de la experiencia moderna de QuickBooks Projects.
 - [x] El OAuth QBO dejó de depender de `/tmp`: `realmId`, nombre de compañía y `refresh_token` se guardan cifrados con AES-256-GCM dentro de la configuración persistente, nunca se devuelven al navegador y sobreviven a despliegues. El reinicio total sigue eliminando expresamente estas credenciales para exigir reconexión manual.
 - [x] Publicado en `main`: backend `36c69d3` y `7f0413d`; frontend `435a8ca` y `05c83b7`. `/health` responde `200`. Suite backend completa y pruebas QBO frontend en verde; continúa únicamente el fallo preexistente documentado de `test-login-concurrency.js`.
+
+### Sesión 2026-08-02 (conciliación exacta de costos, ingresos y Recibos de venta QBO)
+> Corrección solicitada y aprobada sobre el mapeo financiero QBO ya completado. QuickBooks continúa estrictamente como fuente de solo lectura; todos los endpoints contables agregados son GET.
+- [x] El endpoint inexistente `GeneralLedgerDetail` se sustituyó por el reporte oficial `GeneralLedger`. Siscon consulta el libro mayor filtrado por cada Customer/Job de proyecto y usa ese total como **Costo Real autoritativo**, sin perder el desglose visible de Bills, Recibos de venta y otros ajustes contables de QBO.
+- [x] Todos los `SalesReceipt` relacionados con proyectos aparecen en **Facturas de Proveedores** con insignia **RECIBO QBO**, costo FIFO atribuido por proyecto y sus líneas. Un recibo cuyo reporte falle temporalmente permanece visible a $0 con alerta; un fallo posterior nunca borra un COGS ya verificado.
+- [x] Los ingresos se leen del `ProfitAndLoss` resumido por Customer/Job. Las facturas QBO del lote inicial cuentan aunque no tengan casas, y el dashboard, la ficha del proyecto y Recuperación de Dinero muestran el ingreso contable neto sin IVA.
+- [x] El botón global **QB ↻** actualiza inmediatamente la vista abierta; ya no es necesario recargar para ver los nuevos totales.
+- [x] Validación real en producción para **116 Este**: Siscon muestra **Costo Real $16,699.32**, exactamente igual a QBO, desglosado como Bills sin IVA **$15,600.37** + 13 Recibos QBO **$2,370.20** + ajustes contables QBO **-$1,271.25**. Muestra también **Facturado $30,578.44**, igual al ingreso de QBO, y 8 facturas visibles en **Facturas a Cliente**.
+- [x] Publicado: backend `9e05d8e`, `c5a6873`, `6ebf4a2`, `ed0ba2e`, `7934816`, `c41cc75`, `5d46942` y `da6d8a4`; frontend `112c27a` y `9519095`. Pruebas QBO: backend **36/36** y frontend transaccional **43/43**, todas en verde.
 
 ## 10. ⏳ Pendiente
 
@@ -1830,7 +1839,6 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
-- [ ] **Reconectar una vez y validar la resincronización QBO corregida:** el despliegue anterior perdió el token que todavía vivía en `/tmp`; desde Ajustes, conectar manualmente la compañía deseada y luego pulsar una vez **QB ↻**. Confirmar asignación por proyecto, Bills multiproyecto con líneas ajenas en gris, conversión CRC, costo neto sin IVA, pagos ligados y COGS de Recibos de venta; el lote base debe quedar sin casas y tramitado. La nueva bóveda cifrada conservará esta reconexión en despliegues posteriores.
 - [ ] **Carga posterior de casas desde Excel:** el usuario entregará por proyecto las listas de tipos de casa y sus líneas de materiales, más la lista de números de casa y tipo correspondiente. Importarlas automáticamente solo cuando entregue cada archivo e instrucciones.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
