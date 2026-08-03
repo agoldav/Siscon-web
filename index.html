@@ -4540,7 +4540,7 @@ function ctApplyImportedCatMap(catMap, meta){
         qty:l.qty,
         price:l.price,
         unit:l.unit||'unid',
-        currency:'USD'
+        currency:l.currency||'USD'
       };
     })
   }));
@@ -4703,7 +4703,7 @@ async function ctImportExcelViaClaude(rows, fileName){
   const steps=[{w:85,t:'Identificando tablas…'},{w:90,t:'Separando secciones…'},{w:95,t:'Extrayendo cantidades y precios…'}];
   let si=0;
   const iv=setInterval(()=>{ if(si<steps.length){ const s=steps[si++]; xlsxSetProgress(s.w,s.t); } },900);
-  const prompt='Eres un extractor de datos de cotizaciones/presupuestos de construcción costarricenses. La hoja de Excel convertida a texto tabular puede tener VARIAS TABLAS DISTINTAS una junto a otra en columnas distintas: lista de materiales/productos (con cantidad y precio), mano de obra (operario, ayudante, subcontrato, etc.), gastos extras (alimentación, hospedaje, transporte, andamios, etc.), y resumen. EXTRAE TODAS LAS LÍNEAS CON TOTAL > 0 (no incluyas líneas vacías ni con monto $0.00 o ¢0). Incluso si una línea comienza con un número de cantidad decimal (ej 0.5) debe ser incluida SI el total es > 0. Agrupa las líneas por tipo/sección (categoría). IGNORA SOLO líneas de: palabra "TOTAL" en el descripción, "SUBTOTAL", "IVA", "UTILIDAD", "ADM" como PALABRAS CLAVE (encabezados de metadatos, no items de producto). Detecta la MONEDA así: observa el símbolo en la columna de total — si tiene "¢" es CRC, si tiene "$" es USD. Extrae también: "UTILIDAD PC" (como porcentaje decimal, ej si dice "29%" extrae 29). Devuelve SOLO un JSON válido (sin texto adicional, sin markdown) con esta forma exacta: {"currency":"CRC o USD","area":numero_o_null,"exchangeRate":numero_o_null,"utilityPct":numero_o_null,"categories":{"Materiales":[{"desc":"descripción","qty":numero,"total":monto_total_de_la_línea}],"Mano de Obra":[...],"Extras":[...]}}. Las claves de "categories" pueden ser: "Materiales", "Mano de Obra", "Extras", u otros nombres que identifiques de las secciones reales (NUNCA cambies los nombres de la sección, usa exactamente lo que diga en la hoja). "utilityPct" es el valor de "UTILIDAD PC" si aparece. Si una línea trae precio unitario en vez de total, calcula total=precio×cantidad. Usa punto decimal.\n\nHOJA:\n'+gridText;
+  const prompt='Eres un extractor de datos de cotizaciones/presupuestos de construcción costarricenses. La hoja de Excel convertida a texto tabular puede tener VARIAS TABLAS DISTINTAS una junto a otra en columnas distintas: lista de materiales/productos (con cantidad y precio), mano de obra (operario, ayudante, subcontrato, etc.), gastos extras (alimentación, hospedaje, transporte, andamios, etc.), y resumen. EXTRAE TODAS LAS LÍNEAS CON TOTAL > 0 (no incluyas líneas vacías ni con monto $0.00 o ¢0). Incluso si una línea comienza con un número de cantidad decimal (ej 0.5) debe ser incluida SI el total es > 0. Agrupa las líneas por tipo/sección (categoría). IGNORA SOLO líneas de: palabra "TOTAL" en el descripción, "SUBTOTAL", "IVA", "UTILIDAD", "ADM" como PALABRAS CLAVE (encabezados de metadatos, no items de producto). DETECTA LA MONEDA POR LÍNEA: observa el símbolo en la casilla de precio/total de esa línea — si tiene "¢" es CRC, si tiene "$" es USD. Cada línea puede tener moneda distinta. Extrae también: "UTILIDAD PC" (como porcentaje decimal, ej si dice "29%" extrae 29). Devuelve SOLO un JSON válido (sin texto adicional, sin markdown) con esta forma exacta: {"area":numero_o_null,"exchangeRate":numero_o_null,"utilityPct":numero_o_null,"categories":{"Materiales":[{"desc":"descripción","qty":numero,"total":monto_total_de_la_línea,"currency":"USD o CRC"}],"Mano de Obra":[...],"Extras":[...]}}. Las claves de "categories" pueden ser: "Materiales", "Mano de Obra", "Extras", u otros nombres que identifiques de las secciones reales (NUNCA cambies los nombres de la sección, usa exactamente lo que diga en la hoja). "currency" en CADA línea es según el símbolo $ o ¢ en esa línea. "utilityPct" es el valor de "UTILIDAD PC" si aparece. Si una línea trae precio unitario en vez de total, calcula total=precio×cantidad. Usa punto decimal.\n\nHOJA:\n'+gridText;
   let d;
   try{
     d=await claudeCall({model:'claude-sonnet-4-5',max_tokens:4000,messages:[{role:'user',content:prompt}]});
@@ -4720,15 +4720,16 @@ async function ctImportExcelViaClaude(rows, fileName){
     clearInterval(iv); xlsxSetProgress(100,'Listo'); closeModal();
     if(!data.categories || typeof data.categories!=='object' || !Object.keys(data.categories).length){ alert('No se encontraron líneas en el archivo. Verifica que tenga tablas con productos, cantidades y precios.'); return; }
     const xr=parseFloat(data.exchangeRate)||SYS.exchangeRate||tcGet();
-    const isCRC=(data.currency||'').toUpperCase()==='CRC';
     const catMap={};
     for(const [catName, lines] of Object.entries(data.categories)){
       if(!Array.isArray(lines)) continue;
       const processed=lines.map(l=>{
         const qty=parseFloat(l.qty)||1;
         const totalRaw=parseFloat(l.total)||0;
+        const lineCurrency=(String(l.currency||'USD')).toUpperCase();
+        const isCRC=lineCurrency==='CRC';
         const totalUSD=isCRC?totalRaw/xr:totalRaw;
-        return {name:String(l.desc||'').trim(),qty,price:qty>0?totalUSD/qty:0,unit:'unid'};
+        return {name:String(l.desc||'').trim(),qty,price:qty>0?totalUSD/qty:0,unit:'unid',currency:lineCurrency};
       }).filter(l=>l.name);
       if(processed.length) catMap[catName]=processed;
     }
