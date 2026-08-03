@@ -2842,6 +2842,18 @@ function matsCatalogFind(matId){
   }
   return MATS.find(x=>x.id===matId)||null;
 }
+// Busca por descripción (normalizada) en el catálogo activo (QB o MATS). Exacto primero,
+// si no hay, coincidencia parcial en cualquier dirección. No crea nada, solo busca.
+function ctMatchCatalog(desc){
+  const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+  const target=norm(desc);
+  if(!target) return null;
+  const catalog=matsCatalog();
+  let hit=catalog.find(m=>norm(m.name)===target);
+  if(hit) return hit;
+  hit=catalog.find(m=>{ const n=norm(m.name); return n && (n.includes(target)||target.includes(n)); });
+  return hit||null;
+}
 const DOC_TYPES=['Factura de Gastos','Factura al Cliente','Requisición','Presupuesto','Orden de Compra','Pago Recibido','Fotos','Otro'];
 // Registra un documento subido en cualquier módulo dentro de la pestaña Documentos del proyecto
 function registerDoc(fileName, category, mime, blobId){
