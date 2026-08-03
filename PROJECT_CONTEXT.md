@@ -1890,12 +1890,21 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   archivo…"; ahora un modal con barra real — % de bytes leídos del archivo
   (`FileReader.onprogress`) durante la lectura, y etapas simuladas ("Identificando tablas…",
   "Separando materiales de mano de obra…", etc.) durante el análisis con Claude.
-- ⚠️ **No se pudo probar en navegador real** (la app en producción exige login vía Cloudflare
-  Access + Supabase Auth). Verificado con Node: el archivo real del usuario se lee correctamente
-  con la librería vendorizada y el texto generado para Claude es legible y distingue las columnas.
-  La llamada real a Claude (`claudeCall` → backend → Anthropic) no se ejecutó en esta sesión.
-- [ ] Pendiente: commit + push a `agoldav/Siscon-web` (despliega a producción vía Vercel) — sin
-  hacer todavía, a la espera de aprobación del usuario.
+- [x] **Testeado en producción** (`app.sisconcr.com`): barra de progreso y extracción funcionan correctamente.
+  Usuario probó con archivo real e identificó mejoras necesarias.
+- [x] **Todas las categorías importadas:** Claude ahora extrae Materiales, Mano de Obra, Extras, etc.,
+  cada una como categoría separada con su nombre real.
+- [x] **Filtro de líneas:** solo importa líneas con `total > 0`, ignora filas vacías o $0.00.
+- [x] **Moneda por línea:** cada línea detecta su moneda según símbolo ($ = USD, ¢ = CRC), preserva
+  la moneda original en cada línea del Tipo importado.
+- [x] **Margen desde "UTILIDAD PC":** Claude extrae ese valor como porcentaje entero (29, no 0.29),
+  se usa como Margen (%) en el Tipo; redondeo a 1 decimal para evitar artefactos de floating-point.
+- [x] **% UTILIDAD corregida:** panel superior del proyecto ahora muestra utilidad bruta (ignora Admin
+  e IVA), es igual al Margen (%), no confunde al usuario.
+- [x] **UI reordenada:** panel superior del proyecto ahora muestra en orden: Precio de Venta →
+  Presupuesto → Costo Real → Disponible → Utilidad Real → Salud → Proyección.
+- [x] **Commits + deploy:** 6 commits pusheados a `agoldav/Siscon-web`, todos desplegados a producción
+  vía Vercel (2026-08-03).
 
 ## 10. ⏳ Pendiente
 
