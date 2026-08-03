@@ -2851,6 +2851,7 @@ function ctMatchCatalog(desc){
   const catalog=matsCatalog();
   let hit=catalog.find(m=>norm(m.name)===target);
   if(hit) return hit;
+  if(target.length<4) return null;
   hit=catalog.find(m=>{ const n=norm(m.name); return n && (n.includes(target)||target.includes(n)); });
   return hit||null;
 }
@@ -4149,7 +4150,7 @@ function renderCreateType(){
             </div>
           </div>
           ${isGar&&!billable?`<div style="font-size:10px;color:var(--t3);background:var(--bg3);border-radius:6px;padding:6px 9px;margin-bottom:8px">Garantía no facturable: Utilidad y Costo Administrativo quedan en $0. Activa "Facturable al cliente" para habilitarlos.</div>`:''}
-          <div class="ff"><label>Nombre del Tipo</label><input id="ct-name" value="${ctForm.name||''}" placeholder="Tipo A" onchange="ctForm.name=this.value"/></div>
+          <div class="ff"><label>Nombre del Tipo</label><input id="ct-name" value="${esc(ctForm.name||'')}" placeholder="Tipo A" onchange="ctForm.name=this.value"/></div>
           <div class="ff"><label>Área (m²)</label><input id="ct-area" type="number" value="${ctForm.area||''}" placeholder="85" onchange="ctForm.area=parseFloat(this.value)||0"/></div>
           <div class="ff"><label>Tipo de Cambio (₡/$)</label><input id="ct-xr" type="number" value="${xr}" step="1" onchange="ctForm.exchangeRate=parseFloat(this.value)||SYS.exchangeRate;renderCreateType()"/></div>
           <div class="ff"><label>Presupuesto ($) <span style="font-size:9px;color:var(--t3)">auto</span></label>
@@ -4216,7 +4217,7 @@ function renderCatBlock(cat,ci){
       <div class="cat-drag-handle" draggable="true"
         ondragstart="catDragId='${cat.id}';event.dataTransfer.effectAllowed='move'"
         ondragend="catDragId=null">⠿</div>
-      <input class="cat-name-inp" value="${cat.name}" onchange="ctCategories[${ci}].name=this.value"/>
+      <input class="cat-name-inp" value="${esc(cat.name)}" onchange="ctCategories[${ci}].name=this.value"/>
       <button class="cat-del-btn" onclick="deleteCat('${cat.id}')">✕</button>
     </div>
     <div class="cat-body">
@@ -4237,7 +4238,7 @@ function renderCatBlock(cat,ci){
             ondragstart="lineDragId='${l.id}';lineDragCatId='${cat.id}';event.dataTransfer.effectAllowed='move'"
             ondragend="lineDragId=null;lineDragCatId=null">⠿</div>
           <div class="sel-wrap" style="position:relative">
-            <input class="sel-search-inp" id="ss-${l.id}" value="${name}"
+            <input class="sel-search-inp" id="ss-${l.id}" value="${esc(name)}"
               placeholder="Buscar o escribir material..."
               onfocus="openSelDrop('${l.id}','${cat.id}',${ci},${li})"
               oninput="filterSelDrop('${l.id}',this.value,'${cat.id}',${ci},${li})"
@@ -4588,8 +4589,15 @@ async function ctImportOcrRun(b64,mime,fileName){
   const block=isPdf?{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}}
                    :{type:'image',source:{type:'base64',media_type:mime||'image/jpeg',data:b64}};
   const prompt='Eres un extractor de datos de cotizaciones de materiales de construcción costarricenses. Devuelve SOLO un JSON válido (sin texto adicional, sin markdown) con esta forma exacta: {"currency":"CRC o USD","lines":[{"desc":"descripción del producto","qty":numero,"total":monto_total_de_la_línea}]}. El campo total es el monto final de esa línea (cantidad × precio unitario, ya con cualquier descuento de esa línea aplicado). Usa punto como separador decimal. Ignora líneas de subtotal, IVA o total general.';
+  let d;
   try{
-    const d=await claudeCall({model:'claude-sonnet-4-5',max_tokens:1800,messages:[{role:'user',content:[block,{type:'text',text:prompt}]}]});
+    d=await claudeCall({model:'claude-sonnet-4-5',max_tokens:8000,messages:[{role:'user',content:[block,{type:'text',text:prompt}]}]});
+  }catch(e){
+    clearInterval(_progIv); closeModal();
+    alert('No se pudo leer el documento automáticamente (revisa conexión a la API de Claude). Puedes ingresar los materiales manualmente.');
+    return;
+  }
+  try{
     let txt=(d.content&&d.content.find(c=>c.type==='text')&&d.content.find(c=>c.type==='text').text)||'';
     txt=txt.replace(/```json/gi,'').replace(/```/g,'').trim();
     const m=txt.match(/\{[\s\S]*\}/); if(m)txt=m[0];
@@ -4609,7 +4617,7 @@ async function ctImportOcrRun(b64,mime,fileName){
     ctApplyImportedCatMap({Importado:lines},{typeName,area:0,margen:30,xr,fileName});
   }catch(e){
     clearInterval(_progIv); closeModal();
-    alert('No se pudo leer el documento automáticamente (revisa conexión a la API de Claude). Puedes ingresar los materiales manualmente.');
+    alert('No se pudo interpretar la respuesta (el documento puede ser demasiado largo). Puedes ingresar los materiales manualmente.');
   }
 }
 function ctImportFilePicker(){
@@ -4638,6 +4646,7 @@ function ctParseExcelRows(rows, fileName){
       if(/tipo.*cambio|cambio|exchange|tc\b/.test(key) && val>100) xrMeta=val;
     });
   });
+  const xrDeclaredInFile = xrMeta>0;
   if(!typeName) typeName=fileName.replace(/\.(xlsx?|csv)$/i,'').replace(/[_-]/g,' ').trim()||'Tipo Importado';
   if(!xrMeta) xrMeta=SYS.exchangeRate||tcGet();
 
@@ -4650,8 +4659,8 @@ function ctParseExcelRows(rows, fileName){
       // Buscar columnas clave
       const catIdx=row.findIndex(c=>/categorí|categor|categoria|sección|seccion/.test(c));
       const matIdx=row.findIndex(c=>/material|descripci|item|producto|nombre/.test(c));
-      const qtyIdx=row.findIndex(c=>/cantid|qty|cantidad/.test(c));
-      const priceIdx=row.findIndex(c=>/precio|price|costo|unit/.test(c));
+      const qtyIdx=row.findIndex(c=>/cant|qty/.test(c));
+      const priceIdx=row.findIndex(c=>/precio|price|costo|unit/.test(c) && !/total|importe/.test(c));
       const totalIdx=row.findIndex(c=>/total|importe/.test(c));
       const unitIdx=row.findIndex(c=>/unidad|unit\b|ud\b|und\b/.test(c));
       const curIdx=row.findIndex(c=>/moneda|currency|divisa/.test(c));
@@ -4695,7 +4704,7 @@ function ctParseExcelRows(rows, fileName){
     }
     const unit=String(headers.unit>=0?row[headers.unit]||'':'unid').trim()||'unid';
     const curCell=String(headers.cur>=0?row[headers.cur]||'':'').toUpperCase();
-    const isCRC=curCell==='CRC'||curCell==='₡';
+    const isCRC=curCell==='CRC'||curCell==='₡'||(!curCell&&xrDeclaredInFile);
     const priceUSD=isCRC&&priceRaw>0?priceRaw/xrMeta:priceRaw;
     if(!catMap[lastCat]) catMap[lastCat]=[];
     catMap[lastCat].push({name:matName,qty,price:priceUSD,unit,isCRC,priceOrig:priceRaw});
