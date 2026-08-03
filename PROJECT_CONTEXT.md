@@ -1824,6 +1824,43 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Verificado con datos sintéticos en Node (sin acceso a las credenciales reales de Supabase) y confirmado visualmente en producción por el usuario tras el primer despliegue.
 - [x] Publicado: frontend `6a9fdb8` y `07e0eb9` en `agoldav/Siscon-web` → Vercel → `app.sisconcr.com`.
 
+### Sesión 2026-08-02 (Importar cotización PDF/Excel para crear Tipo de Vivienda)
+> Feature nueva pedida por el usuario (no era un ítem de Pendiente). Diseñada con brainstorming
+> (spec en `docs/superpowers/specs/2026-08-02-importar-cotizacion-tipo-design.md`) y ejecutada
+> con un plan de 6 tareas (`docs/superpowers/plans/2026-08-02-importar-cotizacion-tipo.md`) vía
+> subagent-driven-development, en un worktree aislado (rama `worktree-importar-cotizacion-tipo`).
+- [x] **Botón "Importar" dentro de "Crear Tipo"** (visible solo al crear un Tipo nuevo, no al
+  editar uno existente ni en presupuestos de Garantía): acepta PDF/imagen o Excel/CSV.
+- [x] **PDF/imagen → OCR con Claude** (`ctImportOcr`/`ctImportOcrRun`, mismo proxy `claudeCall`
+  que ya usa el OCR de facturas): extrae líneas `{descripción, cantidad, total}`, calcula precio
+  unitario como `total/cantidad`, convierte ₡→USD con el tipo de cambio cuando corresponde.
+- [x] **Excel/CSV** (`ctParseExcelRows` extendido): además del formato viejo
+  (Categoría/Material/Cantidad/Precio), ahora detecta también columna **Total** para cotizaciones
+  simples (Descripción/Cantidad/Total, sin categoría) y calcula el precio unitario igual que el
+  OCR. Fix incluido: si el Excel no trae columna de Moneda, antes se asumía ₡ por defecto y
+  dividía por el tipo de cambio (dando precios ~500× más bajos); ahora, sin columna de moneda,
+  se asume USD (decisión confirmada con el usuario).
+- [x] **Match contra catálogo de materiales** (`ctMatchCatalog`, exacto y luego parcial
+  normalizado contra `matsCatalog()` — QB Items o `MATS` según lo que esté activo): si una línea
+  matchea, solo se usa el nombre canónico del catálogo (`manualName`) para mostrarla igual que si
+  se hubiera elegido a mano; el precio **siempre** es el del documento, nunca el del catálogo. Si
+  no matchea, se agrega como material nuevo **solo dentro de ese Tipo** — no se escribe nada a
+  QuickBooks ni a ningún catálogo global (QB sigue siendo estrictamente de solo lectura).
+- [x] **Revisión y edición**: las líneas importadas (`ctApplyImportedCatMap`) se cargan
+  directamente en el mismo editor que ya usa "Crear Tipo" manualmente (`ctCategories`), así que
+  revisar/editar antes de guardar es literalmente el formulario normal ya existente — sin
+  pantalla nueva.
+- [x] **Reemplazado** el importador de Excel viejo, standalone, de la lista de Tipos (botón
+  "📥 Importar desde Excel", sin paso de revisión) — la única entrada de importación queda
+  dentro de "Crear Tipo".
+- [x] 5 tareas de implementación con revisión por subagente después de cada una (todas ✅ spec +
+  calidad, sin hallazgos bloqueantes; 3 minors menores documentados y diferidos, no requieren
+  acción). Verificado con scripts de Node aislados por tarea (sin test framework en el proyecto,
+  siguiendo la convención ya establecida) — no se pudo probar en navegador real porque la app en
+  producción exige login con Supabase Auth vía Cloudflare Access.
+- [ ] Pendiente: revisión final de rama completa y publicación (commit + push a
+  `agoldav/Siscon-web` → Vercel) — no desplegado todavía a esta fecha.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1838,10 +1875,6 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 > backend no expone rutas de escritura, no porque el token no pueda escribir. Si el token se filtra, permite
 > operaciones contables de escritura. Mitigación real: custodia del token + rotación. No hay scope de QuickBooks
 > Payments, así que la app no puede procesar cobros.
-
-### Próxima sesión (2026-07-17+)
-- [ ] **Invitar usuarios** — Para que colaboren en tiempo real (gestión de usuarios en la app)
-- [ ] **Ajustes finales** — UI, validaciones, seguridad (refactor de código, testing, optimizaciones)
 
 ### Funcionalidades nuevas acordadas (Paquete 2)
 - (Ambas completadas: Tareas y Mensajes Internos.)
