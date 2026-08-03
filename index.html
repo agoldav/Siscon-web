@@ -4554,26 +4554,69 @@ function ctApplyImportedCatMap(catMap, meta){
 }
 
 // ========== IMPORTAR TIPO DESDE EXCEL ==========
+function xlsxShowProgress(){
+  document.getElementById('modal-inner').innerHTML=`
+    <div style="text-align:center;padding:24px 20px 20px">
+      <div style="font-size:28px;margin-bottom:10px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="21" y2="21"/></svg></div>
+      <div style="font-size:14px;font-weight:600;color:var(--t1);margin-bottom:6px">Importando archivo…</div>
+      <div style="font-size:12px;color:var(--t2);margin-bottom:18px" id="xlsx-progress-sub">Preparando…</div>
+      <div style="background:var(--bg3);border-radius:20px;height:8px;overflow:hidden;margin-bottom:12px">
+        <div id="xlsx-progress-bar" style="height:100%;border-radius:20px;background:linear-gradient(90deg,var(--acc),var(--pur));width:3%;transition:width .25s ease"></div>
+      </div>
+      <div id="xlsx-progress-label" style="font-size:11px;color:var(--t3)">0%</div>
+    </div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function xlsxSetProgress(pct, sub){
+  const bar=document.getElementById('xlsx-progress-bar');
+  const lbl=document.getElementById('xlsx-progress-label');
+  const subEl=document.getElementById('xlsx-progress-sub');
+  const p=Math.max(3,Math.min(100,pct));
+  if(bar) bar.style.width=p+'%';
+  if(lbl) lbl.textContent=Math.round(p)+'%';
+  if(subEl && sub) subEl.textContent=sub;
+}
 async function ctImportExcelFile(file){
   if(!file) return;
-  showToast('Leyendo archivo…');
-  // Cargar SheetJS dinámicamente si no está disponible
+  xlsxShowProgress();
+  // Cargar SheetJS desde el propio dominio (vendorizado en /vendor) si no está disponible.
+  // No se carga desde un CDN externo: el CSP de producción (script-src 'self') lo bloquearía
+  // en silencio (sin alerta visible) y el import fallaba sin dar ningún error al usuario.
   if(typeof XLSX==='undefined'){
-    await new Promise((res,rej)=>{
-      const s=document.createElement('script');
-      s.src='https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
-      s.onload=res; s.onerror=rej;
-      document.head.appendChild(s);
-    });
+    xlsxSetProgress(3,'Cargando librería…');
+    try{
+      await new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src='/vendor/xlsx.full.min.js';
+        s.onload=res; s.onerror=()=>rej(new Error('No se pudo cargar el lector de Excel.'));
+        document.head.appendChild(s);
+      });
+    }catch(err){
+      closeModal();
+      alert('No se pudo cargar el lector de Excel. Revisa tu conexión e inténtalo de nuevo.');
+      return;
+    }
   }
+  xlsxSetProgress(25,'Leyendo archivo…');
   const reader=new FileReader();
+  reader.onprogress=function(e){
+    if(e.lengthComputable) xlsxSetProgress(25+(e.loaded/e.total)*55,'Leyendo archivo…');
+  };
   reader.onload=function(e){
     try{
+      xlsxSetProgress(80,'Procesando datos…');
       const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
       const ws=wb.Sheets[wb.SheetNames[0]];
       const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-      ctParseExcelRows(rows, file.name);
-    }catch(err){ alert('Error al leer el archivo: '+err.message); }
+      ctImportExcelViaClaude(rows, file.name);
+    }catch(err){
+      closeModal();
+      alert('Error al leer el archivo: '+err.message);
+    }
+  };
+  reader.onerror=function(){
+    closeModal();
+    alert('No se pudo leer el archivo.');
   };
   reader.readAsArrayBuffer(file);
 }
@@ -4632,85 +4675,66 @@ function ctImportFilePicked(inp){
     ctImportExcelFile(file);
   }
 }
-function ctParseExcelRows(rows, fileName){
-  // --- Detectar meta: buscar en primeras 10 filas celdas con "área","utilidad","tipo de cambio"
-  let area=0, utilidad=0, xrMeta=0, typeName='';
-  const metaRows=rows.slice(0,10);
-  metaRows.forEach(row=>{
-    row.forEach((cell,ci)=>{
-      const key=(String(cell||'').toLowerCase()).trim();
-      const val=parseFloat(String(row[ci+1]||'').replace(/[^0-9.,]/g,'').replace(',','.'))||0;
-      if(/nombre.*tipo|tipo.*nombre|tipo\s*:/.test(key)) typeName=String(row[ci+1]||'').trim()||typeName;
-      if(/^área|^area|metros|m²/.test(key) && val>0) area=val;
-      if(/utilidad|margen|profit/.test(key) && val>0) utilidad=val;
-      if(/tipo.*cambio|cambio|exchange|tc\b/.test(key) && val>100) xrMeta=val;
-    });
+function ctColLetter(idx){
+  let s='',n=idx;
+  do{ s=String.fromCharCode(65+(n%26))+s; n=Math.floor(n/26)-1; }while(n>=0);
+  return s;
+}
+// Convierte la grilla de celdas (de SheetJS) a texto tabular compacto para enviarle a Claude:
+// cada fila del Excel se convierte en una línea "Fn: Columna=valor | Columna=valor…", omitiendo
+// columnas totalmente vacías en toda la hoja para no desperdiciar tokens. Las hojas reales de
+// proveedores suelen traer varias tablas distintas una junto a otra (materiales, mano de obra,
+// gastos, resumen) sin un encabezado limpio — un heurístico de columnas fijas falla con eso;
+// Claude puede leer el layout completo y distinguir semánticamente cuál tabla es la de materiales.
+function ctGridToText(rows){
+  const maxCol=rows.reduce((m,r)=>Math.max(m,r.length),0);
+  const usedCols=[];
+  for(let c=0;c<maxCol;c++){ if(rows.some(r=>String(r[c]??'').trim()!=='')) usedCols.push(c); }
+  const lines=[];
+  rows.slice(0,400).forEach((row,ri)=>{
+    const parts=usedCols.map(c=>{ const v=String(row[c]??'').trim(); return v?`${ctColLetter(c)}=${v}`:null; }).filter(Boolean);
+    if(parts.length) lines.push(`F${ri+1}: `+parts.join(' | '));
   });
-  const xrDeclaredInFile = xrMeta>0;
-  if(!typeName) typeName=fileName.replace(/\.(xlsx?|csv)$/i,'').replace(/[_-]/g,' ').trim()||'Tipo Importado';
-  if(!xrMeta) xrMeta=SYS.exchangeRate||tcGet();
-
-  // --- Detectar fila de encabezados (primera fila que tenga al menos 3 celdas no vacías y texto)
-  let headerRow=-1, headers={};
-  for(let r=0;r<Math.min(rows.length,15);r++){
-    const row=rows[r].map(c=>String(c||'').toLowerCase().trim());
-    const nonEmpty=row.filter(c=>c.length>1).length;
-    if(nonEmpty>=2){
-      // Buscar columnas clave
-      const catIdx=row.findIndex(c=>/categorí|categor|categoria|sección|seccion/.test(c));
-      const matIdx=row.findIndex(c=>/material|descripci|item|producto|nombre/.test(c));
-      const qtyIdx=row.findIndex(c=>/cant|qty/.test(c));
-      const priceIdx=row.findIndex(c=>/precio|price|costo|unit/.test(c) && !/total|importe/.test(c));
-      const totalIdx=row.findIndex(c=>/total|importe/.test(c));
-      const unitIdx=row.findIndex(c=>/unidad|unit\b|ud\b|und\b/.test(c));
-      const curIdx=row.findIndex(c=>/moneda|currency|divisa/.test(c));
-      if(matIdx>=0||catIdx>=0){
-        headerRow=r;
-        headers={cat:catIdx,mat:matIdx>=0?matIdx:catIdx,qty:qtyIdx,price:priceIdx,total:totalIdx,unit:unitIdx,cur:curIdx};
-        break;
-      }
-    }
+  return lines.join('\n').slice(0,20000);
+}
+async function ctImportExcelViaClaude(rows, fileName){
+  xlsxSetProgress(80,'Analizando con Claude…');
+  const gridText=ctGridToText(rows);
+  const steps=[{w:85,t:'Identificando tablas…'},{w:90,t:'Separando materiales de mano de obra…'},{w:95,t:'Extrayendo cantidades y precios…'}];
+  let si=0;
+  const iv=setInterval(()=>{ if(si<steps.length){ const s=steps[si++]; xlsxSetProgress(s.w,s.t); } },900);
+  const prompt='Eres un extractor de datos de cotizaciones/presupuestos de materiales de construcción costarricenses, a partir de una hoja de Excel convertida a texto tabular. Cada línea representa una fila de la hoja: "Fn: Columna=valor | Columna=valor…" (las letras de columna son las de Excel). LA HOJA PUEDE CONTENER VARIAS TABLAS DISTINTAS UNA JUNTO A LA OTRA en las mismas filas pero columnas distintas (ej: lista de materiales, tabla de mano de obra, gastos extras, resumen de costos). Identifica ÚNICAMENTE la tabla de MATERIALES/PRODUCTOS (nombre, cantidad, precio) e IGNORA POR COMPLETO cualquier fila de: mano de obra (operario, ayudante, subcontrato, chofer, cuadrilla), gastos extras (alimentación, hospedaje, transporte, andamios, seguridad, baño portátil), administración/utilidad/tipo de cambio como línea de producto, o totales/subtotales/resúmenes. Devuelve SOLO un JSON válido (sin texto adicional, sin markdown) con esta forma exacta: {"currency":"CRC o USD","area":numero_o_null,"exchangeRate":numero_o_null,"lines":[{"desc":"descripción del material","qty":numero,"total":monto_total_de_la_línea}]}. Si una fila trae precio unitario en vez de total de línea, calcula total=precio×cantidad. "area" es el área en m² del proyecto si aparece declarada (ej. "AREA:"), si no null. "exchangeRate" es el tipo de cambio ₡/$ si aparece declarado (ej. "Tipo de Cambio"), si no null. Usa punto como separador decimal.\n\nHOJA:\n'+gridText;
+  let d;
+  try{
+    d=await claudeCall({model:'claude-sonnet-4-5',max_tokens:4000,messages:[{role:'user',content:prompt}]});
+  }catch(e){
+    clearInterval(iv); closeModal();
+    alert('No se pudo analizar el archivo automáticamente (revisa conexión a la API de Claude). Puedes ingresar los materiales manualmente.');
+    return;
   }
-  // Si no encontró encabezados, asumir formato simple: col0=categoría col1=material col2=unidad col3=cantidad col4=precio col5=moneda
-  if(headerRow<0){
-    headerRow=0;
-    headers={cat:0,mat:1,qty:3,price:4,total:-1,unit:2,cur:5};
-    // Si col1 vacía y col0 tiene datos, asumir col0=material
-    const firstDataRow=rows.find(r=>r.some(c=>c!==''));
-    if(firstDataRow&&String(firstDataRow[1]||'').trim()==='') headers={cat:-1,mat:0,qty:2,price:3,total:-1,unit:1,cur:4};
+  try{
+    let txt=(d.content&&d.content.find(c=>c.type==='text')&&d.content.find(c=>c.type==='text').text)||'';
+    txt=txt.replace(/```json/gi,'').replace(/```/g,'').trim();
+    const m=txt.match(/\{[\s\S]*\}/); if(m)txt=m[0];
+    const data=JSON.parse(txt);
+    clearInterval(iv); xlsxSetProgress(100,'Listo'); closeModal();
+    if(!Array.isArray(data.lines)||!data.lines.length){ alert('No se encontraron materiales en el archivo. Verifica que tenga una lista de productos con cantidad y precio.'); return; }
+    const xr=parseFloat(data.exchangeRate)||SYS.exchangeRate||tcGet();
+    const isCRC=(data.currency||'').toUpperCase()==='CRC';
+    const lines=data.lines.map(l=>{
+      const qty=parseFloat(l.qty)||1;
+      const totalRaw=parseFloat(l.total)||0;
+      const totalUSD=isCRC?totalRaw/xr:totalRaw;
+      return {name:String(l.desc||'').trim(),qty,price:qty>0?totalUSD/qty:0,unit:'unid'};
+    }).filter(l=>l.name);
+    if(!lines.length){ alert('No se encontraron materiales en el archivo. Verifica que tenga una lista de productos con cantidad y precio.'); return; }
+    const typeName=fileName.replace(/\.(xlsx?|csv)$/i,'').replace(/[_-]/g,' ').trim()||'Tipo Importado';
+    const area=parseFloat(data.area)||0;
+    ctApplyImportedCatMap({Importado:lines},{typeName,area,margen:30,xr,fileName});
+  }catch(e){
+    clearInterval(iv); closeModal();
+    alert('No se pudo interpretar la respuesta (el archivo puede ser demasiado grande o complejo). Puedes ingresar los materiales manualmente.');
   }
-
-  // --- Parsear filas de materiales
-  const catMap={};
-  let lastCat='Materiales';
-  for(let r=headerRow+1;r<rows.length;r++){
-    const row=rows[r];
-    const matName=String(headers.mat>=0?row[headers.mat]||'':'').trim();
-    if(!matName||/^total|^sub.*total|^iva|^imp/i.test(matName)) continue;
-    // Si la línea tiene contenido solo en la columna de categoría y nada en material → es título de categoría
-    const catName=headers.cat>=0&&headers.cat!==headers.mat?String(row[headers.cat]||'').trim():'';
-    if(catName&&!matName.length) { lastCat=catName; continue; }
-    if(catName&&catName===matName) { lastCat=catName; continue; }
-    if(catName) lastCat=catName;
-    const qty=parseFloat(String(row[headers.qty>=0?headers.qty:3]||'0').replace(/[^0-9.,]/g,'').replace(',','.'))||1;
-    let priceRaw;
-    if(headers.price>=0){
-      priceRaw=parseFloat(String(row[headers.price]||'0').replace(/[^0-9.,]/g,'').replace(',','.'))||0;
-    } else if(headers.total>=0){
-      const totalRaw=parseFloat(String(row[headers.total]||'0').replace(/[^0-9.,]/g,'').replace(',','.'))||0;
-      priceRaw=qty>0?totalRaw/qty:0;
-    } else {
-      priceRaw=parseFloat(String(row[4]||'0').replace(/[^0-9.,]/g,'').replace(',','.'))||0;
-    }
-    const unit=String(headers.unit>=0?row[headers.unit]||'':'unid').trim()||'unid';
-    const curCell=String(headers.cur>=0?row[headers.cur]||'':'').toUpperCase();
-    const isCRC=curCell==='CRC'||curCell==='₡'||(!curCell&&xrDeclaredInFile);
-    const priceUSD=isCRC&&priceRaw>0?priceRaw/xrMeta:priceRaw;
-    if(!catMap[lastCat]) catMap[lastCat]=[];
-    catMap[lastCat].push({name:matName,qty,price:priceUSD,unit,isCRC,priceOrig:priceRaw});
-  }
-
-  ctApplyImportedCatMap(catMap,{typeName,area,margen:utilidad,xr:xrMeta,fileName});
 }
 
 function duplicateType(id){

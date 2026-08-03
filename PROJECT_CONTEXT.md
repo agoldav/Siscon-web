@@ -1858,8 +1858,44 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   acción). Verificado con scripts de Node aislados por tarea (sin test framework en el proyecto,
   siguiendo la convención ya establecida) — no se pudo probar en navegador real porque la app en
   producción exige login con Supabase Auth vía Cloudflare Access.
-- [ ] Pendiente: revisión final de rama completa y publicación (commit + push a
-  `agoldav/Siscon-web` → Vercel) — no desplegado todavía a esta fecha.
+- [x] Revisión final de rama y publicación: commit + push a `agoldav/Siscon-web` → Vercel
+  (merge `9e8c197`, 2026-08-03). Desplegado a producción.
+
+### Sesión 2026-08-03 (fix: importar Excel no cargaba nada + extracción vía Claude + barra de progreso)
+> Bug reportado por el usuario al probar en producción el feature de la sesión anterior, con un
+> Excel real de proveedor. Debugueado con `superpowers:systematic-debugging`.
+- [x] **Causa raíz encontrada:** `ctImportExcelFile` cargaba SheetJS dinámicamente desde
+  `cdn.sheetjs.com`; el CSP de producción (`script-src 'self'`, del hardening de seguridad de
+  julio) bloqueaba esa carga **en silencio** — sin alerta, sin error en pantalla. Por eso el
+  toast "Leyendo archivo…" aparecía y no pasaba nada más. Afectaba a **cualquier** Excel, no solo
+  al del usuario.
+- [x] **Fix:** SheetJS vendorizado dentro del propio repo (`siscon-web/vendor/xlsx.full.min.js`),
+  servido desde el mismo dominio (`/vendor/xlsx.full.min.js`) — cumple el CSP existente sin
+  relajarlo, no se tocó `vercel.json`.
+- [x] **Hallazgo adicional (con el Excel real del usuario):** aun arreglada la carga, el
+  heurístico de columnas fijas (buscar encabezados "Descripción/Cantidad/Total") fallaba con este
+  archivo — es una calculadora de precios de proveedor con fórmulas, que trae una tabla de mano de
+  obra pegada a la de materiales en las mismas filas; el heurístico enganchaba los encabezados de
+  la tabla equivocada y producía 3 líneas basura en vez de los ~20 materiales reales. Confirmado
+  corriendo la función real contra el archivo con Node antes de tocar nada.
+- [x] **Decisión del usuario (opción elegida entre 3 presentadas):** reemplazar el heurístico de
+  columnas por extracción vía Claude, igual que ya se hace con PDF/imagen. Se eliminó
+  `ctParseExcelRows`; nueva `ctImportExcelViaClaude` convierte la grilla de celdas a texto
+  tabular compacto (`ctGridToText`: por fila, `Columna=valor`, columnas vacías omitidas) y se lo
+  manda a Claude con instrucciones explícitas de identificar solo la tabla de materiales e ignorar
+  mano de obra/gastos extras/resúmenes que puedan aparecer junto a ella. También extrae `area` y
+  `exchangeRate` de la hoja si están declarados (el meta-parser anterior fallaba con este archivo
+  por una columna de separación entre etiqueta y valor).
+- [x] **Barra de progreso** (pedida por el usuario): antes solo había un toast fijo "Leyendo
+  archivo…"; ahora un modal con barra real — % de bytes leídos del archivo
+  (`FileReader.onprogress`) durante la lectura, y etapas simuladas ("Identificando tablas…",
+  "Separando materiales de mano de obra…", etc.) durante el análisis con Claude.
+- ⚠️ **No se pudo probar en navegador real** (la app en producción exige login vía Cloudflare
+  Access + Supabase Auth). Verificado con Node: el archivo real del usuario se lee correctamente
+  con la librería vendorizada y el texto generado para Claude es legible y distingue las columnas.
+  La llamada real a Claude (`claudeCall` → backend → Anthropic) no se ejecutó en esta sesión.
+- [ ] Pendiente: commit + push a `agoldav/Siscon-web` (despliega a producción vía Vercel) — sin
+  hacer todavía, a la espera de aprobación del usuario.
 
 ## 10. ⏳ Pendiente
 

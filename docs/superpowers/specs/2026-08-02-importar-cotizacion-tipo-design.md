@@ -75,9 +75,17 @@ Función nueva `ctMatchCatalog(desc)`:
   (`catalogName.includes(desc)` o `desc.includes(catalogName)`).
 - Devuelve el item del catálogo o `null`.
 
-Para cada línea parseada (de OCR o Excel): si hay match, `matId = item.id`; si no,
-`manualName = desc` (texto tal cual vino del documento). El precio de la línea es siempre el
-del documento (regla #2 de arquitectura), nunca el del catálogo.
+**Corrección tras revisar el código real:** las líneas de Tipo nunca guardan un `matId`
+persistente de catálogo — `selectMatFromCatalog` (línea ~4301, el mismo selector que ya usa
+el editor manual) siempre hace `l.matId=0; l.manualName=itemName` con el comentario explícito
+"Always store as manualName so it works regardless of QB/local source". El importador sigue
+exactamente ese mismo patrón, no uno nuevo:
+- Si hay match: `matId:0, manualName:<nombre canónico del catálogo>` (no el texto crudo del
+  documento — así la línea se ve y se busca igual que si el usuario la hubiera seleccionado a
+  mano del catálogo).
+- Si no hay match: `matId:0, manualName:<descripción tal cual vino del documento>`.
+- En ambos casos, `price:<precio calculado del documento>` (regla #2 de arquitectura — el
+  catálogo nunca sobrescribe el costo, ni en el match ni fuera de él).
 
 ### 4. Revisión y edición — reutiliza el formulario existente
 
