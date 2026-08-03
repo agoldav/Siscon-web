@@ -4490,7 +4490,8 @@ function saveType(){
   const impuesto=(matCost+utilidad+admin)*0.13;
   const saleEl=document.getElementById('ct-sale');
   const salePrice=saleEl?parseFloat(saleEl.value)||0:matCost+utilidad+admin;
-  const utilPct=salePrice>0?((salePrice-matCost)/salePrice*100):0;
+  const baseSale=matCost+utilidad;
+  const utilPct=baseSale>0?(utilidad/baseSale*100):0;
   const area=parseFloat(document.getElementById('ct-area')?.value)||ctForm.area||0;
   const data={
     name,area,budget:matCost,salePrice,
