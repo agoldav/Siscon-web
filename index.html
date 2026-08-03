@@ -4575,6 +4575,42 @@ async function ctImportExcelFile(file){
   };
   reader.readAsArrayBuffer(file);
 }
+async function ctImportOcr(file){
+  const reader=new FileReader();
+  reader.onload=()=>{ const b64=(reader.result+'').split(',')[1]; ctImportOcrRun(b64,file.type,file.name); };
+  reader.onerror=()=>{ alert('No se pudo leer el archivo.'); };
+  reader.readAsDataURL(file);
+}
+async function ctImportOcrRun(b64,mime,fileName){
+  const _progIv=ocrShowProgress();
+  const isPdf=/pdf/i.test(mime||'');
+  const block=isPdf?{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}}
+                   :{type:'image',source:{type:'base64',media_type:mime||'image/jpeg',data:b64}};
+  const prompt='Eres un extractor de datos de cotizaciones de materiales de construcción costarricenses. Devuelve SOLO un JSON válido (sin texto adicional, sin markdown) con esta forma exacta: {"currency":"CRC o USD","lines":[{"desc":"descripción del producto","qty":numero,"total":monto_total_de_la_línea}]}. El campo total es el monto final de esa línea (cantidad × precio unitario, ya con cualquier descuento de esa línea aplicado). Usa punto como separador decimal. Ignora líneas de subtotal, IVA o total general.';
+  try{
+    const d=await claudeCall({model:'claude-sonnet-4-5',max_tokens:1800,messages:[{role:'user',content:[block,{type:'text',text:prompt}]}]});
+    let txt=(d.content&&d.content.find(c=>c.type==='text')&&d.content.find(c=>c.type==='text').text)||'';
+    txt=txt.replace(/```json/gi,'').replace(/```/g,'').trim();
+    const m=txt.match(/\{[\s\S]*\}/); if(m)txt=m[0];
+    const data=JSON.parse(txt);
+    clearInterval(_progIv); closeModal();
+    if(!Array.isArray(data.lines)||!data.lines.length){ alert('No se encontraron líneas de productos en el documento.'); return; }
+    const xr=SYS.exchangeRate||tcGet();
+    const isCRC=(data.currency||'').toUpperCase()==='CRC';
+    const lines=data.lines.map(l=>{
+      const qty=parseFloat(l.qty)||1;
+      const totalRaw=parseFloat(l.total)||0;
+      const totalUSD=isCRC?totalRaw/xr:totalRaw;
+      return {name:String(l.desc||'').trim(),qty,price:qty>0?totalUSD/qty:0,unit:'unid'};
+    }).filter(l=>l.name);
+    if(!lines.length){ alert('No se encontraron líneas de productos en el documento.'); return; }
+    const typeName=fileName.replace(/\.(pdf|jpe?g|png)$/i,'').replace(/[_-]/g,' ').trim()||'Tipo Importado';
+    ctApplyImportedCatMap({Importado:lines},{typeName,area:0,margen:30,xr,fileName});
+  }catch(e){
+    clearInterval(_progIv); closeModal();
+    alert('No se pudo leer el documento automáticamente (revisa conexión a la API de Claude). Puedes ingresar los materiales manualmente.');
+  }
+}
 function ctParseExcelRows(rows, fileName){
   // --- Detectar meta: buscar en primeras 10 filas celdas con "área","utilidad","tipo de cambio"
   let area=0, utilidad=0, xrMeta=0, typeName='';
