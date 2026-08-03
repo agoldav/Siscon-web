@@ -4737,7 +4737,7 @@ async function ctImportExcelViaClaude(rows, fileName){
     if(!totalLines){ alert('No se encontraron líneas válidas en el archivo.'); return; }
     const typeName=fileName.replace(/\.(xlsx?|csv)$/i,'').replace(/[_-]/g,' ').trim()||'Tipo Importado';
     const area=parseFloat(data.area)||0;
-    const margen=parseFloat(data.utilityPct)||30;
+    const margen=Math.round((parseFloat(data.utilityPct)||30)*10)/10;
     ctApplyImportedCatMap(catMap,{typeName,area,margen,xr,fileName});
   }catch(e){
     clearInterval(iv); closeModal();
