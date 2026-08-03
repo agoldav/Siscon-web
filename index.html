@@ -3893,10 +3893,10 @@ function renderMetric(){
         ${fechaCell}
       </div>
       <div class="pm-band" style="gap:26px;align-items:flex-start">
+        ${efld('Precio de Venta',fmt(p.salePrice),p.salePrice,'salePrice','number','130px')}
         ${efld('Presupuesto',fmt(p.budget),p.budget,'budget','number','130px')}
         ${ro('Costo Real',fmt(realSpent),'',`Facturas sin IVA ${fmt(spentBreakdown.vendorBills)} + ${spentBreakdown.inventoryReceipts} recibo(s) QBO FIFO ${fmt(spentBreakdown.inventoryCogs)}${Math.abs(spentBreakdown.otherQboCosts)>0.005?' + otros costos/ajustes QBO '+fmt(spentBreakdown.otherQboCosts):''}${spentBreakdown.pendingInventoryReceipts?' · '+spentBreakdown.pendingInventoryReceipts+' pendiente(s) de costo':''}`)}
         ${ro('Disponible',fmt(avail),avail>=0?'grn':'red')}
-        ${efld('Precio de Venta',fmt(p.salePrice),p.salePrice,'salePrice','number','130px')}
         ${utilCell}
         <div class="pm-sep" style="margin-left:auto"></div>
         <div class="pm-f"><div class="pm-l">Salud</div>
