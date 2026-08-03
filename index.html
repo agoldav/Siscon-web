@@ -4131,7 +4131,8 @@ function renderCreateType(){
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
       <button class="btn-cancel" onclick="${isGar?`garCancelBudget()`:`showCreate=false;typeEditId=null;renderBreadcrumb();renderTypes()`}">← Volver</button>
       <div class="th-title">${isGar?('Presupuesto · Garantía '+(gw?gw.num:'')+(gw&&gw.house?' · '+gw.house:'')):(typeEditId?'Editar Tipo':'Crear Nuevo Tipo')}${(typeEditId && (curProj.types.find(t=>t.id===typeEditId)||{}).typeLocked)?` <span title="Tipo bloqueado — solicita desbloqueo al administrador" style="font-size:12px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>`:''}</div>
-      ${!isGar?`<button class="btn-history" onclick="showLogModal('Tipos',curProj.id)" style="margin-left:auto">Log</button>`:''}
+      ${(!isGar&&!typeEditId)?`<button class="btn-add" style="margin-left:auto;background:transparent;border:1px solid var(--grn);color:var(--grn)" onclick="ctImportFilePicker()" title="Importar cotización (PDF o Excel)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg> Importar</button><input type="file" id="ct-import-input" accept=".xlsx,.xls,.csv,.pdf,image/*" style="display:none" onchange="ctImportFilePicked(this)"/>`:''}
+      ${!isGar?`<button class="btn-history" onclick="showLogModal('Tipos',curProj.id)" style="${(!isGar&&!typeEditId)?'':'margin-left:auto'}">Log</button>`:''}
     </div>
     <div class="create-layout">
       <div>
@@ -4609,6 +4610,18 @@ async function ctImportOcrRun(b64,mime,fileName){
   }catch(e){
     clearInterval(_progIv); closeModal();
     alert('No se pudo leer el documento automáticamente (revisa conexión a la API de Claude). Puedes ingresar los materiales manualmente.');
+  }
+}
+function ctImportFilePicker(){
+  const inp=document.getElementById('ct-import-input');
+  if(inp){ inp.value=''; inp.click(); }
+}
+function ctImportFilePicked(inp){
+  const file=inp.files&&inp.files[0]; if(!file) return;
+  if(/pdf|image/i.test(file.type||'')||/\.pdf$/i.test(file.name||'')){
+    ctImportOcr(file);
+  } else {
+    ctImportExcelFile(file);
   }
 }
 function ctParseExcelRows(rows, fileName){
