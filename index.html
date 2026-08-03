@@ -4646,7 +4646,7 @@ function ctParseExcelRows(rows, fileName){
     }
     const unit=String(headers.unit>=0?row[headers.unit]||'':'unid').trim()||'unid';
     const curCell=String(headers.cur>=0?row[headers.cur]||'':'').toUpperCase();
-    const isCRC=curCell==='CRC'||curCell==='₡'||(!curCell&&xrMeta>100);
+    const isCRC=curCell==='CRC'||curCell==='₡';
     const priceUSD=isCRC&&priceRaw>0?priceRaw/xrMeta:priceRaw;
     if(!catMap[lastCat]) catMap[lastCat]=[];
     catMap[lastCat].push({name:matName,qty,price:priceUSD,unit,isCRC,priceOrig:priceRaw});
