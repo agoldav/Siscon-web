@@ -4889,6 +4889,7 @@ function renderCasas(){
         <button class="btn-history" onclick="showLogModal('Casas',curProj.id)">Log</button>
         <input id="bulk-count" type="number" min="1" max="200" placeholder="N°" style="width:70px;font-size:12px"/>
         <button class="btn-add" onclick="addHouseBulk()">+ Nueva Casa</button>
+        <button class="btn-add" style="margin-left:auto;background:transparent;border:1px solid var(--grn);color:var(--grn)" onclick="housesImportFilePicker()" title="Importar lista de casas (Excel o PDF)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg> Importar</button><input type="file" id="houses-import-input" accept=".xlsx,.xls,.csv,.pdf" style="display:none" onchange="housesImportFilePicked(this)"/>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">
@@ -5008,6 +5009,175 @@ function updateHouseNum(id,val){
 function updateHouseTypeFromSheet(id,val){
   const h=curProj.houses.find(x=>x.id===id);
   if(h){h.typeId=val?parseInt(val):null; if(h.typeId)h.typeLocked=true; logAction(`Tipo de casa "${h.num}" cambiado`,'log-edit','Casas',null,{typeId:h.typeId}); houseLogAdd(id,'Tipo asignado: '+(h.typeId?(curProj.types.find(t=>t.id===h.typeId)||{}).name:'—'),''); syncProjectFromHouses(curProj); saveData(); renderCasas(); renderMetric();}
+}
+
+// ========== IMPORTAR CASAS DESDE EXCEL/PDF ==========
+function housesImportFilePicker(){
+  const inp=document.getElementById('houses-import-input');
+  if(inp)inp.click();
+}
+function housesImportFilePicked(inp){
+  const file=inp.files&&inp.files[0]; if(!file) return;
+  if(/pdf/i.test(file.type||'')||/\.pdf$/i.test(file.name||'')){
+    housesImportPDF(file);
+  } else {
+    housesImportExcel(file);
+  }
+}
+async function housesImportExcel(file){
+  if(!file) return;
+  xlsxShowProgress();
+  if(typeof XLSX==='undefined'){
+    xlsxSetProgress(3,'Cargando librería…');
+    try{
+      await new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src='/vendor/xlsx.full.min.js';
+        s.onload=res; s.onerror=()=>rej(new Error('No se pudo cargar el lector de Excel.'));
+        document.head.appendChild(s);
+      });
+    }catch(err){
+      closeModal();
+      alert('No se pudo cargar el lector de Excel. Revisa tu conexión e inténtalo de nuevo.');
+      return;
+    }
+  }
+  xlsxSetProgress(25,'Leyendo archivo…');
+  const reader=new FileReader();
+  reader.onprogress=function(e){
+    if(e.lengthComputable) xlsxSetProgress(25+(e.loaded/e.total)*55,'Leyendo archivo…');
+  };
+  reader.onload=function(e){
+    try{
+      xlsxSetProgress(80,'Procesando datos…');
+      const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      housesImportProcessRows(rows, file.name, false);
+    }catch(err){
+      closeModal();
+      alert('Error al leer el archivo: '+err.message);
+    }
+  };
+  reader.onerror=function(){
+    closeModal();
+    alert('No se pudo leer el archivo.');
+  };
+  reader.readAsArrayBuffer(file);
+}
+async function housesImportPDF(file){
+  const reader=new FileReader();
+  reader.onload=()=>{ const b64=(reader.result+'').split(',')[1]; housesImportPDFRun(b64,file.name); };
+  reader.onerror=()=>{ alert('No se pudo leer el archivo.'); };
+  reader.readAsDataURL(file);
+}
+async function housesImportPDFRun(b64,fileName){
+  const _progIv=ocrShowProgress();
+  const prompt='Eres un extractor de datos de listas de casas. Devuelve SOLO un JSON válido (sin texto adicional, sin markdown) con esta forma exacta: {"houses":[{"num":"número o descripción de la casa","type":"nombre exacto del tipo de vivienda"}]}. Extrae TODAS las filas que tengan número de casa y tipo de vivienda. El nombre del tipo debe coincidir EXACTAMENTE con el nombre en el documento (no cambies mayúsculas/minúsculas). Si una fila está incompleta, no la incluyas. Ejemplo: {"houses":[{"num":"1","type":"Tipo A"},{"num":"2","type":"Tipo B"}]}.';
+  let d;
+  try{
+    d=await claudeCall({model:'claude-sonnet-4-5',max_tokens:4000,messages:[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},{type:'text',text:prompt}]}]});
+  }catch(e){
+    clearInterval(_progIv); closeModal();
+    alert('No se pudo leer el documento automáticamente (revisa conexión a la API de Claude). Puedes ingresar los datos manualmente.');
+    return;
+  }
+  try{
+    let txt=(d.content&&d.content.find(c=>c.type==='text')&&d.content.find(c=>c.type==='text').text)||'';
+    txt=txt.replace(/```json/gi,'').replace(/```/g,'').trim();
+    const m=txt.match(/\{[\s\S]*\}/); if(m)txt=m[0];
+    const data=JSON.parse(txt);
+    clearInterval(_progIv); closeModal();
+    if(!Array.isArray(data.houses)||!data.houses.length){ alert('No se encontraron casas en el documento.'); return; }
+    housesImportProcessRows(data.houses.map(h=>[String(h.num||'').trim(),String(h.type||'').trim()]), fileName, true);
+  }catch(e){
+    clearInterval(_progIv); closeModal();
+    alert('No se pudo interpretar la respuesta (error: '+e.message+'). Puedes ingresar los datos manualmente.');
+  }
+}
+function housesImportProcessRows(rows, fileName, fromPDF){
+  if(!curProj)return;
+  xlsxSetProgress(90,'Validando tipos…');
+  const p=curProj;
+  const importData=[];
+  const errors=[];
+  const typeMap=new Map(p.types.map(t=>[t.name.toLowerCase().trim(),t]));
+  let startRow=0;
+  if(!fromPDF){
+    if(rows.length>0){
+      const firstRow=rows[0]||[];
+      const h1=String(firstRow[0]||'').toLowerCase(), h2=String(firstRow[1]||'').toLowerCase();
+      if(h1.includes('número')||h1.includes('casa')||h2.includes('tipo')){
+        startRow=1;
+      }
+    }
+  }
+  for(let i=startRow;i<rows.length;i++){
+    const row=rows[i];
+    if(!Array.isArray(row)){
+      if(!row||typeof row!=='object') continue;
+      const keys=Object.keys(row);
+      if(keys.length<2) continue;
+      row=[row[keys[0]]||'',row[keys[1]]||''];
+    }
+    const num=String(row[0]||'').trim();
+    const typeName=String(row[1]||'').trim();
+    if(!num||!typeName){
+      if(num||typeName) errors.push(`Fila ${i+1}: número o tipo incompleto`);
+      continue;
+    }
+    const typeKey=typeName.toLowerCase().trim();
+    const type=typeMap.get(typeKey);
+    if(!type){
+      errors.push(`Fila ${i+1}: tipo "${typeName}" no existe en la app`);
+      continue;
+    }
+    importData.push({num,type});
+  }
+  xlsxSetProgress(100,'Validación completa');
+  setTimeout(()=>closeModal(),300);
+  if(errors.length>0){
+    let msg='No se puede hacer la importación.\n\nErrores encontrados:\n';
+    msg+=errors.slice(0,10).join('\n');
+    if(errors.length>10) msg+='\n… y '+(errors.length-10)+' errores más.';
+    alert(msg);
+    return;
+  }
+  if(importData.length===0){
+    alert('No se encontraron casas válidas en el archivo.');
+    return;
+  }
+  housesApplyImported(importData);
+}
+function housesApplyImported(importData){
+  const p=curProj;
+  const typeMap=new Map(p.types.map(t=>[t.name.toLowerCase().trim(),t]));
+  const created=[];
+  for(const item of importData){
+    const type=typeMap.get(item.type.toLowerCase().trim());
+    if(!type) continue;
+    const newH={
+      id:Date.now()+Math.random()*1000000|0,
+      num:item.num,
+      typeId:type.id,
+      typeLocked:true,
+      status:'Sin iniciar',
+      areaInstalled:0,
+      ganttStart:p.houses.length*14,
+      ganttDur:30,
+      spent:0,
+      purchases:[]
+    };
+    p.houses.push(newH);
+    created.push(`Casa ${item.num} (Tipo: ${type.name})`);
+    logAction(`Casa "${newH.num}" importada`,'log-create','Casas',null,{num:newH.num,typeId:newH.typeId});
+  }
+  curProj.lastActivity=Date.now();
+  syncProjectFromHouses(p);
+  saveData();
+  renderCasas();
+  renderMetric();
+  alert(`✓ ${created.length} casa(s) importada(s):\n\n${created.join('\n')}`);
 }
 
 // ========== HOUSE PANEL ==========
