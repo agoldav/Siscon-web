@@ -5132,7 +5132,7 @@ function housesImportProcessRows(rows, fileName, fromPDF){
       errors.push(`Fila ${i+1}: tipo "${typeName}" no existe en la app`);
       continue;
     }
-    importData.push({num,type});
+    importData.push({num,typeName});
   }
   xlsxSetProgress(100,'Validación completa');
   setTimeout(()=>closeModal(),300);
@@ -5154,7 +5154,7 @@ function housesApplyImported(importData){
   const typeMap=new Map(p.types.map(t=>[t.name.toLowerCase().trim(),t]));
   const created=[];
   for(const item of importData){
-    const type=typeMap.get(item.type.toLowerCase().trim());
+    const type=typeMap.get(item.typeName.toLowerCase().trim());
     if(!type) continue;
     const newH={
       id:Date.now()+Math.random()*1000000|0,
