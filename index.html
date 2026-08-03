@@ -4700,16 +4700,16 @@ function ctGridToText(rows){
 async function ctImportExcelViaClaude(rows, fileName){
   xlsxSetProgress(80,'Analizando con Claude…');
   const gridText=ctGridToText(rows);
-  const steps=[{w:85,t:'Identificando tablas…'},{w:90,t:'Separando materiales de mano de obra…'},{w:95,t:'Extrayendo cantidades y precios…'}];
+  const steps=[{w:85,t:'Identificando tablas…'},{w:90,t:'Separando secciones…'},{w:95,t:'Extrayendo cantidades y precios…'}];
   let si=0;
   const iv=setInterval(()=>{ if(si<steps.length){ const s=steps[si++]; xlsxSetProgress(s.w,s.t); } },900);
-  const prompt='Eres un extractor de datos de cotizaciones/presupuestos de materiales de construcción costarricenses, a partir de una hoja de Excel convertida a texto tabular. Cada línea representa una fila de la hoja: "Fn: Columna=valor | Columna=valor…" (las letras de columna son las de Excel). LA HOJA PUEDE CONTENER VARIAS TABLAS DISTINTAS UNA JUNTO A LA OTRA en las mismas filas pero columnas distintas (ej: lista de materiales, tabla de mano de obra, gastos extras, resumen de costos). Identifica ÚNICAMENTE la tabla de MATERIALES/PRODUCTOS (nombre, cantidad, precio) e IGNORA POR COMPLETO cualquier fila de: mano de obra (operario, ayudante, subcontrato, chofer, cuadrilla), gastos extras (alimentación, hospedaje, transporte, andamios, seguridad, baño portátil), administración/utilidad/tipo de cambio como línea de producto, o totales/subtotales/resúmenes. Devuelve SOLO un JSON válido (sin texto adicional, sin markdown) con esta forma exacta: {"currency":"CRC o USD","area":numero_o_null,"exchangeRate":numero_o_null,"lines":[{"desc":"descripción del material","qty":numero,"total":monto_total_de_la_línea}]}. Si una fila trae precio unitario en vez de total de línea, calcula total=precio×cantidad. "area" es el área en m² del proyecto si aparece declarada (ej. "AREA:"), si no null. "exchangeRate" es el tipo de cambio ₡/$ si aparece declarado (ej. "Tipo de Cambio"), si no null. Usa punto como separador decimal.\n\nHOJA:\n'+gridText;
+  const prompt='Eres un extractor de datos de cotizaciones/presupuestos de construcción costarricenses. La hoja de Excel convertida a texto tabular puede tener VARIAS TABLAS DISTINTAS una junto a otra en columnas distintas: lista de materiales/productos (con cantidad y precio), mano de obra (operario, ayudante, subcontrato, etc.), gastos extras (alimentación, hospedaje, transporte, andamios, etc.), y resumen. EXTRAE TODAS LAS LÍNEAS ÚTILES de cada tabla/sección, agrupadas por tipo (categoria). IGNORA SOLO líneas de: totales/subtotales, IVA, administración/utilidad como línea de producto (si aparecen como número solo en una columna), porcentajes de utilidad/ADM que NO sean un item de línea. Devuelve SOLO un JSON válido (sin texto adicional, sin markdown) con esta forma exacta: {"currency":"CRC o USD","area":numero_o_null,"exchangeRate":numero_o_null,"categories":{"Materiales":[{"desc":"descripción","qty":numero,"total":monto_total_de_la_línea}],"Mano de Obra":[...],"Extras":[...]}}. Las claves de "categories" pueden ser: "Materiales", "Mano de Obra", "Extras", u otros nombres que identifiques de las secciones reales (NUNCA cambies los nombres de la sección, usa exactamente lo que diga en la hoja). Si una línea trae precio unitario en vez de total, calcula total=precio×cantidad. "area" es el área en m² si aparece (ej. "AREA:"). "exchangeRate" es ₡/$ si aparece (ej. "Tipo de Cambio"). Usa punto decimal.\n\nHOJA:\n'+gridText;
   let d;
   try{
     d=await claudeCall({model:'claude-sonnet-4-5',max_tokens:4000,messages:[{role:'user',content:prompt}]});
   }catch(e){
     clearInterval(iv); closeModal();
-    alert('No se pudo analizar el archivo automáticamente (revisa conexión a la API de Claude). Puedes ingresar los materiales manualmente.');
+    alert('No se pudo analizar el archivo automáticamente (revisa conexión a la API de Claude). Puedes ingresar los datos manualmente.');
     return;
   }
   try{
@@ -4718,22 +4718,28 @@ async function ctImportExcelViaClaude(rows, fileName){
     const m=txt.match(/\{[\s\S]*\}/); if(m)txt=m[0];
     const data=JSON.parse(txt);
     clearInterval(iv); xlsxSetProgress(100,'Listo'); closeModal();
-    if(!Array.isArray(data.lines)||!data.lines.length){ alert('No se encontraron materiales en el archivo. Verifica que tenga una lista de productos con cantidad y precio.'); return; }
+    if(!data.categories || typeof data.categories!=='object' || !Object.keys(data.categories).length){ alert('No se encontraron líneas en el archivo. Verifica que tenga tablas con productos, cantidades y precios.'); return; }
     const xr=parseFloat(data.exchangeRate)||SYS.exchangeRate||tcGet();
     const isCRC=(data.currency||'').toUpperCase()==='CRC';
-    const lines=data.lines.map(l=>{
-      const qty=parseFloat(l.qty)||1;
-      const totalRaw=parseFloat(l.total)||0;
-      const totalUSD=isCRC?totalRaw/xr:totalRaw;
-      return {name:String(l.desc||'').trim(),qty,price:qty>0?totalUSD/qty:0,unit:'unid'};
-    }).filter(l=>l.name);
-    if(!lines.length){ alert('No se encontraron materiales en el archivo. Verifica que tenga una lista de productos con cantidad y precio.'); return; }
+    const catMap={};
+    for(const [catName, lines] of Object.entries(data.categories)){
+      if(!Array.isArray(lines)) continue;
+      const processed=lines.map(l=>{
+        const qty=parseFloat(l.qty)||1;
+        const totalRaw=parseFloat(l.total)||0;
+        const totalUSD=isCRC?totalRaw/xr:totalRaw;
+        return {name:String(l.desc||'').trim(),qty,price:qty>0?totalUSD/qty:0,unit:'unid'};
+      }).filter(l=>l.name);
+      if(processed.length) catMap[catName]=processed;
+    }
+    const totalLines=Object.values(catMap).reduce((s,l)=>s+l.length,0);
+    if(!totalLines){ alert('No se encontraron líneas válidas en el archivo.'); return; }
     const typeName=fileName.replace(/\.(xlsx?|csv)$/i,'').replace(/[_-]/g,' ').trim()||'Tipo Importado';
     const area=parseFloat(data.area)||0;
-    ctApplyImportedCatMap({Importado:lines},{typeName,area,margen:30,xr,fileName});
+    ctApplyImportedCatMap(catMap,{typeName,area,margen:30,xr,fileName});
   }catch(e){
     clearInterval(iv); closeModal();
-    alert('No se pudo interpretar la respuesta (el archivo puede ser demasiado grande o complejo). Puedes ingresar los materiales manualmente.');
+    alert('No se pudo interpretar la respuesta (error: '+e.message+'). Puedes ingresar los datos manualmente.');
   }
 }
 
