@@ -4246,7 +4246,7 @@ function renderCatBlock(cat,ci){
               style="font-size:11px;width:100%"/>
             <div class="sel-dropdown" id="sd-${l.id}">
               ${!(SYS.qbo&&SYS.qbo.itemCache&&SYS.qbo.itemCache.length)?`<div style="padding:4px 10px;font-size:9px;color:var(--amb);background:rgba(212,148,26,.08);border-bottom:1px solid var(--border)">⚠ Lista temporal — sincroniza QuickBooks para obtener precios actualizados</div>`:''}
-              <div class="sel-opt manual-opt" onmousedown="setManualMat('${l.id}','${cat.id}',${ci},${li},document.getElementById('ss-${l.id}').value)">✎ Usar "${name||'...'}" como texto libre</div>
+              <div class="sel-opt manual-opt" onmousedown="setManualMat('${l.id}','${cat.id}',${ci},${li},document.getElementById('ss-${l.id}').value)">✎ Usar "${esc(name||'...')}" como texto libre</div>
               ${matsCatalog().filter(m=>!name||m.name.toLowerCase().includes(name.toLowerCase())).slice(0,40).map(m=>`
                 <div class="sel-opt${l.matId===m.id?' selected':''}" onmousedown="selectMatFromCatalog('${l.id}','${cat.id}',${ci},${li},'${String(m.id).replace(/'/g,"\\'")}','${m.name.replace(/'/g,"\\'")}',${m.price})">${m.name} — ${fmt(m.price)}</div>`).join('')}
             </div>
