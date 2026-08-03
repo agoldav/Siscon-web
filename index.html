@@ -4515,6 +4515,44 @@ function saveType(){
   renderMetric(); renderBreadcrumb(); renderTypes();
 }
 
+// ========== IMPORTAR TIPO (cotización PDF/Excel) ==========
+// Arma ctCategories/ctForm a partir de un catMap ya parseado (de Excel o de OCR) y abre
+// el formulario normal de Crear Tipo, pre-llenado, para revisión/edición antes de guardar.
+// No escribe a ningún catálogo global: si una línea matchea, solo cambia manualName al
+// nombre canónico del catálogo; el precio siempre es el del documento.
+function ctApplyImportedCatMap(catMap, meta){
+  const catNames=Object.keys(catMap);
+  const totalLines=catNames.reduce((s,k)=>s+catMap[k].length,0);
+  if(!totalLines){ alert('No se encontraron materiales en el archivo. Verifica que el formato tenga columnas de Descripción/Material, Cantidad y Precio o Total.'); return; }
+  let matchedCount=0;
+  const p=curProj;
+  const newId=Date.now();
+  const categories=catNames.map((catName,ci)=>({
+    id:'c-'+newId+'-'+ci,
+    name:catName,
+    lines:catMap[catName].map((l,li)=>{
+      const hit=ctMatchCatalog(l.name);
+      if(hit) matchedCount++;
+      return {
+        id:'l-'+newId+'-'+ci+'-'+li,
+        matId:0,
+        manualName: hit ? hit.name : l.name,
+        qty:l.qty,
+        price:l.price,
+        unit:l.unit||'unid',
+        currency:'USD'
+      };
+    })
+  }));
+  showCreate=true; typeEditId=null; ctIVA=false;
+  ctForm={name:meta.typeName||'Tipo Importado',area:meta.area||0,budget:0,salePrice:0,utilityPct:0,
+    margen:meta.margen||30,adminPct:2,notes:'',color:COLORS_LIST[(p?p.types.length:0)%COLORS_LIST.length],
+    utilidad:'',exchangeRate:meta.xr||SYS.exchangeRate||tcGet()};
+  ctCategories=categories;
+  renderBreadcrumb(); renderCreateType();
+  showToast(`✓ ${totalLines} línea(s) importada(s) desde "${meta.fileName||'archivo'}". ${matchedCount} coincidieron con el catálogo.`);
+}
+
 // ========== IMPORTAR TIPO DESDE EXCEL ==========
 function ctImportExcelPicker(){
   const inp=document.getElementById('ct-excel-input');
