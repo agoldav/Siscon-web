@@ -4019,8 +4019,6 @@ function renderTypes(){
       <div class="th-title">Tipos de Vivienda</div>
       <div style="display:flex;gap:8px">
         <button class="btn-history" onclick="showLogModal('Tipos',curProj.id)">Log</button>
-        <button class="btn-add" style="background:transparent;border:1px solid var(--grn);color:var(--grn)" onclick="ctImportExcelPicker()" title="Importar tipo desde archivo Excel"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg> Importar desde Excel</button>
-        <input type="file" id="ct-excel-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="ctImportExcelFile(this)"/>
         <button class="btn-add" onclick="openCreateType(null)">+ Crear Tipo</button>
       </div>
     </div>
@@ -4554,12 +4552,8 @@ function ctApplyImportedCatMap(catMap, meta){
 }
 
 // ========== IMPORTAR TIPO DESDE EXCEL ==========
-function ctImportExcelPicker(){
-  const inp=document.getElementById('ct-excel-input');
-  if(inp){ inp.value=''; inp.click(); }
-}
-async function ctImportExcelFile(inp){
-  const file=inp.files&&inp.files[0]; if(!file) return;
+async function ctImportExcelFile(file){
+  if(!file) return;
   showToast('Leyendo archivo…');
   // Cargar SheetJS dinámicamente si no está disponible
   if(typeof XLSX==='undefined'){
@@ -4609,11 +4603,12 @@ function ctParseExcelRows(rows, fileName){
       const matIdx=row.findIndex(c=>/material|descripci|item|producto|nombre/.test(c));
       const qtyIdx=row.findIndex(c=>/cantid|qty|cantidad/.test(c));
       const priceIdx=row.findIndex(c=>/precio|price|costo|unit/.test(c));
+      const totalIdx=row.findIndex(c=>/total|importe/.test(c));
       const unitIdx=row.findIndex(c=>/unidad|unit\b|ud\b|und\b/.test(c));
       const curIdx=row.findIndex(c=>/moneda|currency|divisa/.test(c));
       if(matIdx>=0||catIdx>=0){
         headerRow=r;
-        headers={cat:catIdx,mat:matIdx>=0?matIdx:catIdx,qty:qtyIdx,price:priceIdx,unit:unitIdx,cur:curIdx};
+        headers={cat:catIdx,mat:matIdx>=0?matIdx:catIdx,qty:qtyIdx,price:priceIdx,total:totalIdx,unit:unitIdx,cur:curIdx};
         break;
       }
     }
@@ -4621,10 +4616,10 @@ function ctParseExcelRows(rows, fileName){
   // Si no encontró encabezados, asumir formato simple: col0=categoría col1=material col2=unidad col3=cantidad col4=precio col5=moneda
   if(headerRow<0){
     headerRow=0;
-    headers={cat:0,mat:1,qty:3,price:4,unit:2,cur:5};
+    headers={cat:0,mat:1,qty:3,price:4,total:-1,unit:2,cur:5};
     // Si col1 vacía y col0 tiene datos, asumir col0=material
     const firstDataRow=rows.find(r=>r.some(c=>c!==''));
-    if(firstDataRow&&String(firstDataRow[1]||'').trim()==='') headers={cat:-1,mat:0,qty:2,price:3,unit:1,cur:4};
+    if(firstDataRow&&String(firstDataRow[1]||'').trim()==='') headers={cat:-1,mat:0,qty:2,price:3,total:-1,unit:1,cur:4};
   }
 
   // --- Parsear filas de materiales
@@ -4640,7 +4635,15 @@ function ctParseExcelRows(rows, fileName){
     if(catName&&catName===matName) { lastCat=catName; continue; }
     if(catName) lastCat=catName;
     const qty=parseFloat(String(row[headers.qty>=0?headers.qty:3]||'0').replace(/[^0-9.,]/g,'').replace(',','.'))||1;
-    const priceRaw=parseFloat(String(row[headers.price>=0?headers.price:4]||'0').replace(/[^0-9.,]/g,'').replace(',','.'))||0;
+    let priceRaw;
+    if(headers.price>=0){
+      priceRaw=parseFloat(String(row[headers.price]||'0').replace(/[^0-9.,]/g,'').replace(',','.'))||0;
+    } else if(headers.total>=0){
+      const totalRaw=parseFloat(String(row[headers.total]||'0').replace(/[^0-9.,]/g,'').replace(',','.'))||0;
+      priceRaw=qty>0?totalRaw/qty:0;
+    } else {
+      priceRaw=parseFloat(String(row[4]||'0').replace(/[^0-9.,]/g,'').replace(',','.'))||0;
+    }
     const unit=String(headers.unit>=0?row[headers.unit]||'':'unid').trim()||'unid';
     const curCell=String(headers.cur>=0?row[headers.cur]||'':'').toUpperCase();
     const isCRC=curCell==='CRC'||curCell==='₡'||(!curCell&&xrMeta>100);
@@ -4649,74 +4652,7 @@ function ctParseExcelRows(rows, fileName){
     catMap[lastCat].push({name:matName,qty,price:priceUSD,unit,isCRC,priceOrig:priceRaw});
   }
 
-  const catNames=Object.keys(catMap);
-  if(catNames.length===0){ alert('No se encontraron materiales en el archivo. Verifica que el formato tenga columnas de Categoría, Material, Cantidad y Precio.'); return; }
-
-  // --- Mostrar modal de vista previa
-  const totalLines=catNames.reduce((s,k)=>s+catMap[k].length,0);
-  const totalCost=catNames.reduce((s,k)=>s+catMap[k].reduce((ss,l)=>ss+l.qty*l.price,0),0);
-  document.getElementById('modal-inner').innerHTML=`
-    <div style="background:var(--bg2);border-radius:12px;padding:24px;max-width:700px;width:95vw;max-height:80vh;display:flex;flex-direction:column;gap:14px">
-      <div style="font-size:16px;font-weight:700;color:var(--t1)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><rect x="5.5" y="4" width="13" height="17" rx="2"/><rect x="9" y="2.3" width="6" height="3" rx="1"/><line x1="8.5" y1="10.5" x2="15.5" y2="10.5"/><line x1="8.5" y1="14.5" x2="15.5" y2="14.5"/><line x1="8.5" y1="18.5" x2="12.5" y2="18.5"/></svg> Vista previa — Importar Tipo</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-        <div class="oc-fld"><div class="oc-fld-label">Nombre del Tipo</div><input id="ct-imp-name" value="${typeName.replace(/"/g,'&quot;')}" style="font-size:12px;width:100%"/></div>
-        <div class="oc-fld"><div class="oc-fld-label">Área (m²)</div><input id="ct-imp-area" type="number" value="${area||0}" style="font-size:12px;width:100%"/></div>
-        <div class="oc-fld"><div class="oc-fld-label">% Utilidad</div><input id="ct-imp-util" type="number" value="${utilidad||0}" step="0.1" style="font-size:12px;width:100%"/></div>
-        <div class="oc-fld"><div class="oc-fld-label">Tipo de Cambio ₡/$</div><input id="ct-imp-xr" type="number" value="${xrMeta}" style="font-size:12px;width:100%"/></div>
-        <div class="oc-fld" style="grid-column:span 2"><div class="oc-fld-label">Resumen</div><div style="font-size:11px;color:var(--t2);padding:5px 0">${catNames.length} categoría(s) · ${totalLines} material(es) · Costo total: <strong style="color:var(--grn)">${fmt(totalCost)}</strong></div></div>
-      </div>
-      <div style="overflow-y:auto;flex:1;min-height:0">
-        ${catNames.map(cat=>`
-          <div style="margin-bottom:10px">
-            <div style="font-size:11px;font-weight:700;color:var(--acc);padding:4px 8px;background:var(--bg3);border-radius:5px;margin-bottom:4px">${cat} <span style="font-weight:400;color:var(--t3)">(${catMap[cat].length} ítems)</span></div>
-            ${catMap[cat].slice(0,5).map(l=>`<div style="font-size:11px;color:var(--t2);padding:2px 8px">• ${l.name} — ${l.qty} ${l.unit} × ${fmt(l.price)} = <strong>${fmt(l.qty*l.price)}</strong></div>`).join('')}
-            ${catMap[cat].length>5?`<div style="font-size:10px;color:var(--t3);padding:2px 8px">…y ${catMap[cat].length-5} más</div>`:''}
-          </div>`).join('')}
-      </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
-        <button class="btn-add" onclick="ctImportConfirm(${JSON.stringify(catMap).split('"').join('&q;')})">✓ Crear Tipo</button>
-      </div>
-    </div>`;
-  // Guardar catMap en variable global para evitar problemas de escape en onclick
-  window._ctImportCatMap=catMap;
-  document.getElementById('modal-inner').querySelector('.btn-add').onclick=()=>ctImportConfirm();
-  document.getElementById('modal').classList.remove('hidden');
-}
-function ctImportConfirm(){
-  const catMap=window._ctImportCatMap; if(!catMap) return;
-  const name=(document.getElementById('ct-imp-name')?.value||'').trim()||'Tipo Importado';
-  const area=parseFloat(document.getElementById('ct-imp-area')?.value)||0;
-  const utilidad=parseFloat(document.getElementById('ct-imp-util')?.value)||0;
-  const xr=parseFloat(document.getElementById('ct-imp-xr')?.value)||SYS.exchangeRate||tcGet();
-  const p=curProj;
-  const newId=Date.now();
-  const categories=Object.entries(catMap).map(([catName,lines],ci)=>({
-    id:'c-'+newId+'-'+ci,
-    name:catName,
-    lines:lines.map((l,li)=>({
-      id:'l-'+newId+'-'+ci+'-'+li,
-      matId:0,
-      manualName:l.name,
-      qty:l.qty,
-      price:l.price,
-      unit:l.unit||'unid',
-      currency:'USD'
-    }))
-  }));
-  const matCost=categories.reduce((s,cat)=>s+cat.lines.reduce((ss,l)=>ss+l.qty*(l.price||0),0),0);
-  const salePrice=matCost+utilidad+(matCost+utilidad)*0.02; // admin 2%
-  const newType={
-    id:newId, name, area, color:COLORS_LIST[p.types.length%COLORS_LIST.length],
-    budget:matCost, salePrice, utilityPct:matCost>0?utilidad/matCost*100:0,
-    exchangeRate:xr, margen:0, utilidad, adminPct:2,
-    categories, notes:'Importado desde Excel'
-  };
-  p.types.push(newType);
-  logAction(`Tipo "${name}" creado desde Excel`,'log-create','Tipos',null,{name,area,matCost});
-  saveData(); closeModal(); delete window._ctImportCatMap;
-  renderMetric(); renderBreadcrumb(); renderTypes();
-  showToast(`✓ Tipo "${name}" creado con ${categories.length} categoría(s)`);
+  ctApplyImportedCatMap(catMap,{typeName,area,margen:utilidad,xr:xrMeta,fileName});
 }
 
 function duplicateType(id){
