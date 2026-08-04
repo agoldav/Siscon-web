@@ -4933,14 +4933,14 @@ function closeCasasColDrop(e){
 }
 
 function h_setAreaFromSheet(id,val){
-  const h=curProj.houses.find(x=>x.id===id);
+  const h=curProj.houses.find(x=>String(x.id)===String(id));
   if(h){h.areaInstalled=val;}
   curProj.areaInstalled=curProj.houses.reduce((s,x)=>s+x.areaInstalled,0);
   renderMetric();
 }
 
 function updateHouseStatusSheet(id,sel){
-  const h=curProj.houses.find(x=>x.id===id);
+  const h=curProj.houses.find(x=>String(x.id)===String(id));
   if(!h)return;
   const before=h.status;
   h.status=sel.value;
@@ -4989,7 +4989,7 @@ function addHouseBulk(){
   syncProjectFromHouses(p); saveData(); renderCasas(); renderMetric();
 }
 function duplicateHouse(id){
-  const h=curProj.houses.find(x=>x.id===id);
+  const h=curProj.houses.find(x=>String(x.id)===String(id));
   if(!h)return;
   const newH={...JSON.parse(JSON.stringify(h)),id:Date.now(),num:h.num+' (copia)',purchases:[],spent:0};
   const idx=curProj.houses.findIndex(x=>x.id===id);
@@ -4999,17 +4999,17 @@ function duplicateHouse(id){
 }
 function deleteHouse(id){
   if(!confirm('¿Eliminar esta casa?'))return;
-  const h=curProj.houses.find(x=>x.id===id);
+  const h=curProj.houses.find(x=>String(x.id)===String(id));
   logAction(`Casa "${h?.num}" eliminada`,'log-delete','Casas',h,null);
   curProj.houses=curProj.houses.filter(h=>h.id!==id);
   renderCasas();
 }
 function updateHouseNum(id,val){
-  const h=curProj.houses.find(x=>x.id===id);
+  const h=curProj.houses.find(x=>String(x.id)===String(id));
   if(h){logAction(`Casa renombrada a "${val}"`,'log-edit','Casas',{num:h.num},{num:val});h.num=val;}
 }
 function updateHouseTypeFromSheet(id,val){
-  const h=curProj.houses.find(x=>x.id===id);
+  const h=curProj.houses.find(x=>String(x.id)===String(id));
   if(h){h.typeId=val?parseInt(val):null; if(h.typeId)h.typeLocked=true; logAction(`Tipo de casa "${h.num}" cambiado`,'log-edit','Casas',null,{typeId:h.typeId}); houseLogAdd(id,'Tipo asignado: '+(h.typeId?(curProj.types.find(t=>t.id===h.typeId)||{}).name:'—'),''); syncProjectFromHouses(curProj); saveData(); renderCasas(); renderMetric();}
 }
 
@@ -5155,11 +5155,12 @@ function housesApplyImported(importData){
   const p=curProj;
   const typeMap=new Map(p.types.map(t=>[t.name.toLowerCase().trim(),t]));
   const created=[];
+  let _idOffset=0;
   for(const item of importData){
     const type=typeMap.get(item.typeName.toLowerCase().trim());
     if(!type) continue;
     const newH={
-      id:Date.now()+Math.random()*1000000|0,
+      id:Date.now()+(_idOffset++),
       num:item.num,
       typeId:type.id,
       typeLocked:true,
@@ -5229,7 +5230,7 @@ function setupHPResize(){
 }
 
 function renderHPBody(){
-  const h=curProj.houses.find(x=>x.id===curHouseId);
+  const h=curProj.houses.find(x=>String(x.id)===String(curHouseId));
   if(!h)return;
   const t=h.typeId?curProj.types.find(x=>x.id===h.typeId):null;
   if(t&&!t.categories) t.categories=defaultCategories();
@@ -5456,7 +5457,7 @@ function selectHPMat(matId,name,price){
 
 // Buy all materials checkbox
 function buyAllMaterials(houseId,checked){
-  const h=curProj.houses.find(x=>x.id===houseId);
+  const h=curProj.houses.find(x=>String(x.id)===String(houseId));
   const t=h.typeId?curProj.types.find(x=>x.id===h.typeId):null;
   if(!t||!t.categories)return;
   const allBudgeted=t.categories.flatMap(cat=>cat.lines.filter(l=>l.matId||l.manualName));
@@ -5504,13 +5505,13 @@ function setupHPColResize(){
 }
 
 function h_setArea(id,val){
-  const h=curProj.houses.find(x=>x.id===id);
+  const h=curProj.houses.find(x=>String(x.id)===String(id));
   if(h){h.areaInstalled=parseFloat(val)||0;}
   curProj.areaInstalled=curProj.houses.reduce((s,x)=>s+x.areaInstalled,0);
   renderMetric();
 }
 function h_setStatus(id,sel){
-  const h=curProj.houses.find(x=>x.id===id);
+  const h=curProj.houses.find(x=>String(x.id)===String(id));
   if(h){
     const before=h.status;
     h.status=sel.value;
@@ -5544,7 +5545,7 @@ function hpQtyValidate(inp, maxQty, houseId, lineId){
   }
 }
 function updateHousePurchase(houseId,lineId,field,val){
-  const h=curProj.houses.find(x=>x.id===houseId);
+  const h=curProj.houses.find(x=>String(x.id)===String(houseId));
   if(!h)return;
   let pu=h.purchases.find(x=>x.lineId===lineId);
   if(!pu){pu={lineId,matId:0,qty:0,price:0};h.purchases.push(pu);}
@@ -5557,7 +5558,7 @@ function updateHousePurchase(houseId,lineId,field,val){
 }
 
 function removeUnbudgeted(houseId,key){
-  const h=curProj.houses.find(x=>x.id===houseId);
+  const h=curProj.houses.find(x=>String(x.id)===String(houseId));
   if(!h)return;
   h.purchases=h.purchases.filter(p=>p.lineId!==key&&p.matId!==key);
   h.spent=h.purchases.reduce((s,p)=>s+p.qty*p.price,0);
@@ -5575,10 +5576,10 @@ function addHouseExpense(houseId){
   const finalPrice=price>0?price:(selPrice||0);
   requestAuth({
     title:'Material fuera de presupuesto',
-    detail:'agregar el material "'+matName+'" ('+qty+' × '+fmt(finalPrice)+') fuera de presupuesto a '+ (curProj.houses.find(x=>x.id===houseId)||{}).num,
+    detail:'agregar el material "'+matName+'" ('+qty+' × '+fmt(finalPrice)+') fuera de presupuesto a '+ (curProj.houses.find(x=>String(x.id)===String(houseId))||{}).num,
     logHouseId:houseId,
     onApprove:(reason)=>{
-      const h=curProj.houses.find(x=>x.id===houseId);
+      const h=curProj.houses.find(x=>String(x.id)===String(houseId));
       const lineId='manual-'+Date.now();
       h.purchases.push({lineId,matId:selId||0,manualName:selId?'':matName,qty,price:finalPrice,note:reason});
       h.spent=h.purchases.reduce((s,p)=>s+p.qty*(p.price||0),0);
@@ -5590,11 +5591,11 @@ function addHouseExpense(houseId){
 }
 
 function updateHouseName(val){
-  const h=curProj.houses.find(x=>x.id===curHouseId);
+  const h=curProj.houses.find(x=>String(x.id)===String(curHouseId));
   if(h) h.num=val;
 }
 function updateHouseType(val){
-  const h=curProj.houses.find(x=>x.id===curHouseId);
+  const h=curProj.houses.find(x=>String(x.id)===String(curHouseId));
   if(h){h.typeId=val?parseInt(val):null; if(h.typeId)h.typeLocked=true; renderHPBody();}
 }
 function saveHP(){
@@ -5771,13 +5772,13 @@ function renderGantt(){
 
 function startDrag(e,id,mode){
   e.preventDefault();
-  const h=curProj.houses.find(x=>x.id===id);
+  const h=curProj.houses.find(x=>String(x.id)===String(id));
   ganttDragSt={id,mode,startX:e.clientX,initStart:h.ganttStart,initDur:h.ganttDur};
 }
 function onGanttMove(e){
   if(!ganttDragSt)return;
   const {id,mode,startX,initStart,initDur}=ganttDragSt;
-  const h=curProj.houses.find(x=>x.id===id);
+  const h=curProj.houses.find(x=>String(x.id)===String(id));
   const dDays=Math.round((e.clientX-startX)/DAY_PX);
   if(mode==='move')h.ganttStart=Math.max(0,initStart+dDays);
   else h.ganttDur=Math.max(1,initDur+dDays);
@@ -6609,7 +6610,7 @@ function renderOCList(){
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(oc.vendorName||'— Sin proveedor —')}</div>
           <div style="font-size:10px;color:var(--t2);margin-top:2px">
-            ${oc.houseIds&&oc.houseIds.length ? 'Casas: '+oc.houseIds.map(id=>{const h=p.houses.find(x=>x.id===id);return h?esc(h.num):'?';}).join(', ') : oc.bodegaMode?'Bodega':'Sin casas'}
+            ${oc.houseIds&&oc.houseIds.length ? 'Casas: '+oc.houseIds.map(id=>{const h=p.houses.find(x=>String(x.id)===String(id));return h?esc(h.num):'?';}).join(', ') : oc.bodegaMode?'Bodega':'Sin casas'}
             ${oc.proforma ? ' · Proforma: '+esc(oc.proforma) : ''}
           </div>
         </div>
@@ -6635,7 +6636,7 @@ function renderOCList(){
 
 // ========== FORMULARIO OC ==========
 function ocFromHouse(houseId){
-  const p=curProj; const h=p.houses.find(x=>x.id===houseId); if(!h)return;
+  const p=curProj; const h=p.houses.find(x=>String(x.id)===String(houseId)); if(!h)return;
   const t=h.typeId?p.types.find(x=>x.id===h.typeId):null;
   const xr=t&&t.exchangeRate||p.exchangeRate||SYS.exchangeRate;
 
@@ -7207,7 +7208,7 @@ function ocRenderResumenBody(body){
         map[key].total+=line.qty;
         map[key].totalValue+=line.qty*(line.price||0)*(1-(line.discPct||0)/100);
         map[key].ivaValue+=line.qty*(line.price||0)*(1-(line.discPct||0)/100)*ocLineIVARate(line);
-        const h=curProj.houses.find(h=>h.id===hid);
+        const h=curProj.houses.find(h=>String(h.id)===String(hid));
         map[key].houses.push((h?esc(h.num):'?')+': '+line.qty);
       }
     });
@@ -7352,8 +7353,8 @@ function ocRefreshTotals(){
   st.totalUSD=totUSD; st.ivaUSD=ivaUSD;
 
   const isRes=(st.activeTab==='resumen'||!st.activeTab);
-  const labelSub=st.bodegaMode?'Subtotal Bodega':isRes?'Subtotal':'Subtotal '+((curProj.houses.find(h=>h.id===st.activeTab)?.num)||'');
-  const labelMain=st.bodegaMode?'Total Bodega':isRes?'Total OC':'Total '+(curProj.houses.find(h=>h.id===st.activeTab)?.num||'');
+  const labelSub=st.bodegaMode?'Subtotal Bodega':isRes?'Subtotal':'Subtotal '+((curProj.houses.find(h=>String(h.id)===String(st.activeTab))?.num)||'');
+  const labelMain=st.bodegaMode?'Total Bodega':isRes?'Total OC':'Total '+(curProj.houses.find(h=>String(h.id)===String(st.activeTab))?.num||'');
 
   const el=(id)=>document.getElementById(id);
   if(el('oc-tot-label-sub')) el('oc-tot-label-sub').textContent=labelSub;
@@ -7662,7 +7663,7 @@ function showPendingAuthPopup(reqId){
   }
 
   if(req.type==='vb-extra-material'){
-    const vhName=req.houseName||(curProj&&curProj.houses?((curProj.houses.find(h=>h.id===req.houseId)||{}).num||req.houseId):'Casa');
+    const vhName=req.houseName||(curProj&&curProj.houses?((curProj.houses.find(h=>String(h.id)===String(req.houseId))||{}).num||req.houseId):'Casa');
     document.getElementById('modal-inner').innerHTML=`
       <div class="modal-title" style="color:var(--amb)">⚠ Solicitud de material fuera de lista (Factura de Gasto)
         <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
@@ -7688,7 +7689,7 @@ function showPendingAuthPopup(reqId){
   }
 
   // Solicitud de material extra (comportamiento original)
-  const hName=req.houseId==='all'?'Todas las casas':(curProj&&curProj.houses?((curProj.houses.find(h=>h.id===req.houseId)||{}).num||req.houseId):'Casa');
+  const hName=req.houseId==='all'?'Todas las casas':(curProj&&curProj.houses?((curProj.houses.find(h=>String(h.id)===String(req.houseId))||{}).num||req.houseId):'Casa');
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--amb)">⚠ Solicitud de material fuera de presupuesto
       <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
@@ -8006,7 +8007,7 @@ function ocGeneratePDF(oc){
   const isCRC=oc.vendorCurrency==='CRC'&&!oc.showUSD;
   const sym=v=>isCRC?('₡'+(v*(oc.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})):fmt(v);
   let rows='';
-  (oc.houseIds||[]).forEach(hid=>{ const h=p.houses.find(x=>x.id===hid);
+  (oc.houseIds||[]).forEach(hid=>{ const h=p.houses.find(x=>String(x.id)===String(hid));
     (oc.lines[hid]||[]).forEach(l=>{ rows+=`<tr><td>${h?esc(h.num):''}</td><td>${l.manualName||''}</td><td class="r">${l.qty}</td><td class="r">${sym(l.price||0)}</td><td class="r">${sym((l.qty||0)*(l.price||0))}</td></tr>`; }); });
   (oc.bodegaLines||[]).forEach(l=>{ rows+=`<tr><td>Bodega</td><td>${l.name||''}</td><td class="r">${l.qty}</td><td class="r">${sym(l.price||0)}</td><td class="r">${sym((l.qty||0)*(l.price||0))}</td></tr>`; });
   const css='*{font-family:Segoe UI,system-ui,sans-serif;box-sizing:border-box}body{padding:28px;color:#1a2332}h1{font-size:20px;color:#0d99ff}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}th,td{border:1px solid #e2e2e2;padding:6px 9px;text-align:left}th{background:#f4f6fa}td.r,th.r{text-align:right}';
@@ -9996,7 +9997,7 @@ function getHouseRecovery(houseId, p){
   // Facturado: suma de monto neto facturado a cliente por esta casa en facturas no anuladas
   let billed=0;
   const invoices=[];
-  const h=p.houses.find(x=>x.id===houseId);
+  const h=p.houses.find(x=>String(x.id)===String(houseId));
   const t=h&&h.typeId?p.types.find(x=>x.id===h.typeId):null;
   (p.invClient||[]).filter(inv=>inv.status!=='Anulada').forEach(inv=>{
     (inv.houseLines||[]).forEach(l=>{
@@ -10034,7 +10035,7 @@ function houseBilling(p,h){
 // Actualiza estatus de casas según facturación (req. 15)
 // Fix 19: marca casa como "Iniciado" si aún estaba "Sin iniciar"
 function markHouseMovement(p,houseId){
-  const h=p.houses.find(x=>x.id===houseId); if(!h)return;
+  const h=p.houses.find(x=>String(x.id)===String(houseId)); if(!h)return;
   if(h.status==='Sin iniciar') h.status='Iniciado';
 }
 
@@ -10057,7 +10058,7 @@ function syncHousePaymentStatus(p, invId){
   // Casas relacionadas a la factura
   const houseIds=(inv.houseLines||[]).map(l=>l.houseId).filter(Boolean);
   houseIds.forEach(hid=>{
-    const h=p.houses.find(x=>x.id===hid); if(!h)return;
+    const h=p.houses.find(x=>String(x.id)===String(hid)); if(!h)return;
     if(paidPct>=99.9){ h.status='Pagado'; }
     else if(paidPct>0){
       h.status='Pagado Parcial';
@@ -10126,7 +10127,7 @@ function ciAvailHouses(){
   });
 }
 function ciAutoDesc(line){
-  const h=curProj.houses.find(x=>x.id===line.houseId);
+  const h=curProj.houses.find(x=>String(x.id)===String(line.houseId));
   return `${line.productName} - Casa Número ${h?h.num.replace(/[^0-9A-Za-z]/g,'').replace(/^Casa/i,'')||h.num:'?'} - % de Avance: ${line.pct}%`;
 }
 function ciShowHousePicker(e){
@@ -10141,7 +10142,7 @@ function ciPickHouse(houseId){
   const picker=document.getElementById('ci-house-picker'); if(picker)picker.style.display='none';
   const p=curProj;
   if(ciState.houseLines.some(l=>l.houseId===houseId)) return;
-  const h=p.houses.find(x=>x.id===houseId); if(!h||!h.typeId) return;
+  const h=p.houses.find(x=>String(x.id)===String(houseId)); if(!h||!h.typeId) return;
   const prev=houseBilledPct(p,houseId,ciState.id);
   if(prev>=100){ alert('Esta casa ya está facturada al 100%.'); return; }
   const pendPct=Math.round((100-prev)*100)/100;
@@ -10158,7 +10159,7 @@ function ciAddHouse(){
 function ciRemoveHouse(idx){ ciState.houseLines.splice(idx,1); renderClientInvForm(); }
 function ciChangeHouse(idx,newHouseId){
   const p=curProj;
-  const h=p.houses.find(x=>x.id===newHouseId); if(!h)return;
+  const h=p.houses.find(x=>String(x.id)===String(newHouseId)); if(!h)return;
   const line=ciState.houseLines[idx];
   line.houseId=newHouseId;
   line.prevPct=houseBilledPct(p,newHouseId,ciState.id);
@@ -10199,14 +10200,14 @@ function ciDelManual(i){ ciState.manualLines.splice(i,1); renderClientInvForm();
 
 // importes USD
 function ciHouseLineUSD(line){
-  const p=curProj; const h=p.houses.find(x=>x.id===line.houseId); if(!h)return 0;
+  const p=curProj; const h=p.houses.find(x=>String(x.id)===String(line.houseId)); if(!h)return 0;
   const t=p.types.find(x=>x.id===h.typeId); if(!t)return 0;
   const qty=ciHouseQty(line);
   if(line.customTarifa!=null) return Math.max(0,qty*line.customTarifa);
   return Math.max(0,(line.pct-(line.prevPct||0))/100 * t.salePrice);
 }
 function ciHouseQty(line){
-  const p=curProj; const h=p.houses.find(x=>x.id===line.houseId); if(!h)return 0;
+  const p=curProj; const h=p.houses.find(x=>String(x.id)===String(line.houseId)); if(!h)return 0;
   const t=p.types.find(x=>x.id===h.typeId); if(!t)return 0;
   return Math.round((line.pct-(line.prevPct||0))/100 * t.area * 100)/100;
 }
@@ -10248,7 +10249,7 @@ function renderClientInvForm(){
 
   // chips de casas
   const chips=st.houseLines.map((l,idx)=>{
-    const h=p.houses.find(x=>x.id===l.houseId);
+    const h=p.houses.find(x=>String(x.id)===String(l.houseId));
     const ht=h&&h.typeId?p.types.find(x=>x.id===h.typeId):null;
     const opts=ciAvailHouses().concat(h?[h]:[]).map(ah=>`<option value="${ah.id}"${ah.id===l.houseId?' selected':''}>${esc(ah.num)}</option>`).join('');
     return `<div class="oc-house-chip" style="flex-direction:column;align-items:flex-start;gap:1px;padding:5px 10px 5px 12px">
@@ -10262,7 +10263,7 @@ function renderClientInvForm(){
 
   // líneas de casas
   const houseRows=st.houseLines.map((l,idx)=>{
-    const h=p.houses.find(x=>x.id===l.houseId);
+    const h=p.houses.find(x=>String(x.id)===String(l.houseId));
     const t=h?p.types.find(x=>x.id===h.typeId):null;
     const qty=ciHouseQty(l), tarifaUSD=pricePerM2(t), impUSD=ciHouseLineUSD(l);
     const rec=getHouseRecovery(l.houseId,p);
@@ -10622,9 +10623,9 @@ async function qboCreateInvoice(inv){
   }
 }
 // helpers para QB (no dependen de ciState)
-function ciHouseLineUSDfor(p,line){ const h=p.houses.find(x=>x.id===line.houseId); const t=h&&p.types.find(x=>x.id===h.typeId); return t?Math.max(0,(line.pct-(line.prevPct||0))/100*t.salePrice):0; }
-function ciHouseQtyFor(p,line){ const h=p.houses.find(x=>x.id===line.houseId); const t=h&&p.types.find(x=>x.id===h.typeId); return t?Math.round((line.pct-(line.prevPct||0))/100*t.area*100)/100:0; }
-function pricePerM2for(p,line){ const h=p.houses.find(x=>x.id===line.houseId); const t=h&&p.types.find(x=>x.id===h.typeId); return pricePerM2(t); }
+function ciHouseLineUSDfor(p,line){ const h=p.houses.find(x=>String(x.id)===String(line.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); return t?Math.max(0,(line.pct-(line.prevPct||0))/100*t.salePrice):0; }
+function ciHouseQtyFor(p,line){ const h=p.houses.find(x=>String(x.id)===String(line.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); return t?Math.round((line.pct-(line.prevPct||0))/100*t.area*100)/100:0; }
+function pricePerM2for(p,line){ const h=p.houses.find(x=>String(x.id)===String(line.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); return pricePerM2(t); }
 
 // ---- QuickBooks: traer facturas (QB → app) ----
 async function ciPullFromQB(){
@@ -10829,13 +10830,13 @@ const ID_TYPES=['Cédula Nacional','DIMEX','Pasaporte','Carnet de Refugiado'];
 let _authPending=null;
 function isAdminPwd(pwd){ if(pwdMatches(pwd,SYS.supervisorPasswordHash))return true; return (SYS.users||[]).some(u=>(u.role==='Administrador'||u.role==='Supervisor')&&pwdMatches(pwd,u.passwordHash)); }
 function houseLogAdd(houseId,action,reason){
-  const h=curProj&&curProj.houses.find(x=>x.id===houseId); if(!h)return;
+  const h=curProj&&curProj.houses.find(x=>String(x.id)===String(houseId)); if(!h)return;
   if(!h.log)h.log=[];
   h.log.unshift({ts:new Date().toLocaleString('es-CR'),user:currentUser?currentUser.name:'Sistema',action,reason:reason||''});
   saveData();
 }
 function showHouseLog(houseId){
-  const h=curProj.houses.find(x=>x.id===houseId); if(!h)return;
+  const h=curProj.houses.find(x=>String(x.id)===String(houseId)); if(!h)return;
   const log=h.log||[];
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">Bitácora — ${esc(h.num)}<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
@@ -10923,7 +10924,7 @@ function applyApprovedTypeUnlock(req){
 }
 async function houseUnlockReq(e,id){
   if(e)e.stopPropagation();
-  const h=curProj.houses.find(x=>x.id===id); if(!h)return;
+  const h=curProj.houses.find(x=>String(x.id)===String(id)); if(!h)return;
   if(currentUser&&(currentUser.role==='Administrador'||currentUser.role==='Supervisor')){
     // Admin se auto-aprueba directamente (flujo antiguo)
     requestAuth({
@@ -10952,7 +10953,7 @@ async function houseUnlockReq(e,id){
 // ---- nota de material adicional ----
 function showMatNote(e,houseId,lineId){
   e.stopPropagation();
-  const h=curProj.houses.find(x=>x.id===houseId); const pu=h&&h.purchases.find(p=>p.lineId===lineId);
+  const h=curProj.houses.find(x=>String(x.id)===String(houseId)); const pu=h&&h.purchases.find(p=>p.lineId===lineId);
   document.querySelectorAll('.note-pop').forEach(n=>n.remove());
   const pop=document.createElement('div'); pop.className='note-pop';
   pop.style.left=Math.min(window.innerWidth-260,e.clientX+8)+'px'; pop.style.top=(e.clientY+8)+'px';
@@ -10962,8 +10963,8 @@ function showMatNote(e,houseId,lineId){
 }
 
 // ---- subcontratista / cuadrilla en la casa ----
-function hpSetSub(houseId,subId){ const h=curProj.houses.find(x=>x.id===houseId); if(!h)return; h.subcontractorId=subId||null; h.crewMemberIds=[]; renderHPBody(); }
-function hpToggleCrew(houseId,memberId,checked){ const h=curProj.houses.find(x=>x.id===houseId); if(!h)return; if(!h.crewMemberIds)h.crewMemberIds=[]; if(checked){if(!h.crewMemberIds.includes(memberId))h.crewMemberIds.push(memberId);} else {h.crewMemberIds=h.crewMemberIds.filter(x=>x!==memberId);} }
+function hpSetSub(houseId,subId){ const h=curProj.houses.find(x=>String(x.id)===String(houseId)); if(!h)return; h.subcontractorId=subId||null; h.crewMemberIds=[]; renderHPBody(); }
+function hpToggleCrew(houseId,memberId,checked){ const h=curProj.houses.find(x=>String(x.id)===String(houseId)); if(!h)return; if(!h.crewMemberIds)h.crewMemberIds=[]; if(checked){if(!h.crewMemberIds.includes(memberId))h.crewMemberIds.push(memberId);} else {h.crewMemberIds=h.crewMemberIds.filter(x=>x!==memberId);} }
 
 // ---- helpers de subcontrato / instalación ----
 function installLine(t){ if(!t||!t.categories)return null; for(const c of t.categories){ for(const l of c.lines){ const nm=(l.manualName||lineName(l)||'').toLowerCase(); if(nm.includes('instalaci')) return l; } } return null; }
@@ -10985,7 +10986,7 @@ function houseSubPaidBilled(p,houseId){
       const proj=projects.find(x=>x.id===sec.projId); if(!proj||proj.id!==p.id)return;
       sec.lines.forEach(l=>{
         if(l.houseId===houseId){
-          const h=p.houses.find(x=>x.id===houseId);
+          const h=p.houses.find(x=>String(x.id)===String(houseId));
           const t=h&&p.types.find(x=>x.id===h.typeId);
           const price=t?installPricePerM2(p,t):0;
           total+=(l.area||0)*price;
@@ -11015,10 +11016,10 @@ function houseSubAdvancedPct(p,houseId){
   });
   return Math.min(total,100);
 }
-function hpIsDirty(){ if(!hpSnapshot||!curHouseId)return false; const h=curProj.houses.find(x=>x.id===curHouseId); return JSON.stringify(h)!==JSON.stringify(hpSnapshot); }
+function hpIsDirty(){ if(!hpSnapshot||!curHouseId)return false; const h=curProj.houses.find(x=>String(x.id)===String(curHouseId)); return JSON.stringify(h)!==JSON.stringify(hpSnapshot); }
 function adminEditArea(e,houseId){
   if(e)e.stopPropagation();
-  const h=curProj.houses.find(x=>x.id===houseId); if(!h)return;
+  const h=curProj.houses.find(x=>String(x.id)===String(houseId)); if(!h)return;
   const t=h.typeId&&curProj.types.find(x=>x.id===h.typeId);
   const pwd=prompt('El área de avance solo se actualiza desde la Calculadora de Subcontratos. Para corregir manualmente, ingrese contraseña de administrador:');
   if(pwd===null)return;
@@ -11205,7 +11206,7 @@ function renderCalcEditor(){
   if(wrap){ wrap.innerHTML='<div id="calc-body"></div>'; }
   renderCalcBody();
 }
-function calcLineTotal(p,l){ if(!l.houseId)return 0; const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId); if(!t)return 0; return (l.area||0)*installPricePerM2(p,t); }
+function calcLineTotal(p,l){ if(!l.houseId)return 0; const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); if(!t)return 0; return (l.area||0)*installPricePerM2(p,t); }
 function calcSectionSubtotal(sec){ const p=projects.find(x=>x.id===sec.projId); if(!p)return 0; return sec.lines.reduce((s,l)=>s+calcLineTotal(p,l),0); }
 function calcGrandTotal(){ return calcState.sections.reduce((s,sec)=>s+calcSectionSubtotal(sec),0); }
 function calcCols(){ return calcState.ivaShow
@@ -11220,7 +11221,7 @@ function calcLineHtml(p,si,l,li){
     const dis=(statusBlocked||advPct>=100)&&l.houseId!==h.id;
     return `<option value="${h.id}"${l.houseId===h.id?' selected':''}${dis?' disabled':''}>${esc(h.num)}${dis?' (no disponible)':''}</option>`;
   }).join('');
-  const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId);
+  const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId);
   const price=t?installPricePerM2(p,t):0; const total=calcLineTotal(p,l); const iva=total*0.13;
   return `<div class="calc-line" style="${calcCols()}">
     <select data-no-search style="font-size:11px" onchange="calcSetSub(${si},${li},this.value)"><option value="">— Instalador —</option>${subs.map(s=>`<option value="${s.id}"${l.subId===s.id?' selected':''}>${s.name}</option>`).join('')}</select>
@@ -11306,14 +11307,14 @@ function calcSetHouse(si,li,v){
     l.houseId=null; l.pct=null; l.area=null; renderCalcBody(); return;
   }
   l.houseId=newId;
-  const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId);
+  const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId);
   if(t){ const prev=houseSubAdvancedPct(p,l.houseId); l.pct=Math.max(0,100-prev); l.area=Math.round(t.area*l.pct/100*100)/100; }
   else { l.pct=null; l.area=null; }
   renderCalcBody();
 }
 function calcSetPct(si,li,val){
   const sec=calcState.sections[si]; const p=projects.find(x=>x.id===sec.projId); const l=sec.lines[li];
-  sec.err=''; const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId);
+  sec.err=''; const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId);
   if(!t){renderCalcBody();return;}
   const prev=houseSubAdvancedPct(p,l.houseId); const maxPct=100-prev;
   let pct=parseFloat(val)||0;
@@ -11324,7 +11325,7 @@ function calcSetPct(si,li,val){
 }
 function calcSetArea(si,li,val){
   const sec=calcState.sections[si]; const p=projects.find(x=>x.id===sec.projId); const l=sec.lines[li];
-  sec.err=''; const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId);
+  sec.err=''; const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId);
   if(!t){renderCalcBody();return;}
   const prev=houseSubAdvancedPct(p,l.houseId); const maxArea=t.area*(100-prev)/100;
   let a=parseFloat(val)||0;
@@ -11383,7 +11384,7 @@ function calcConvertToBill(){
     const valid=sec.lines.filter(l=>l.houseId&&l.area);
     if(!valid.length)return;
     if(!p.billVendor)p.billVendor=[];
-    const lines=valid.map(l=>{ const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId); const price=t?installPricePerM2(p,t):0;
+    const lines=valid.map(l=>{ const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); const price=t?installPricePerM2(p,t):0;
       // Encuentra el lineId de "Sub-Contrato" en el tipo para asociar el gasto correctamente
       let subLineId='';
       if(t&&t.categories){
@@ -11402,7 +11403,7 @@ function calcConvertToBill(){
     p.billVendor.push(bill);
     // aplica gasto a casas de ESTE proyecto (solo sus líneas) + descuenta avance a casas
     const savedCur=curProj; curProj=p; vbApplyToHouses(bill); curProj=savedCur;
-    valid.forEach(l=>{ const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId); if(h){ h.areaInstalled=Math.min(t?t.area:Infinity,(h.areaInstalled||0)+(l.area||0)); if(l.subId)h.subcontractorId=l.subId; } });
+    valid.forEach(l=>{ const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); if(h){ h.areaInstalled=Math.min(t?t.area:Infinity,(h.areaInstalled||0)+(l.area||0)); if(l.subId)h.subcontractorId=l.subId; } });
     p.areaInstalled=p.houses.reduce((s,x)=>s+(x.areaInstalled||0),0); p.lastActivity=Date.now();
     made++;
   });
@@ -11419,7 +11420,7 @@ function calcReport(format){
   const d=document.getElementById('calc-rep-drop'); if(d)d.classList.remove('open');
   const rows=[];
   calcState.sections.forEach(sec=>{ const p=projects.find(x=>x.id===sec.projId); if(!p)return;
-    sec.lines.forEach(l=>{ if(!l.houseId)return; const h=p.houses.find(x=>x.id===l.houseId); const t=h&&p.types.find(x=>x.id===h.typeId); const price=t?installPricePerM2(p,t):0; const sub=SYS.subcontractors.find(s=>s.id===l.subId);
+    sec.lines.forEach(l=>{ if(!l.houseId)return; const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); const price=t?installPricePerM2(p,t):0; const sub=SYS.subcontractors.find(s=>s.id===l.subId);
       rows.push({proj:p.name,sub:sub?sub.name:'—',casa:h?esc(h.num):'',pct:l.pct||0,area:l.area||0,price,total:(l.area||0)*price}); }); });
   if(!rows.length){ alert('No hay datos para el informe.'); return; }
   const grand=rows.reduce((s,r)=>s+r.total,0); const grandShown=calcState.ivaShow?grand*1.13:grand;
@@ -11969,7 +11970,7 @@ function reqPickHouse(houseId){
   if(reqState.houseIds.includes(houseId))return;
   reqState.houseIds.push(houseId);
   // Auto-populate with bodega items that are in this house's type budget
-  const h=curProj.houses.find(x=>x.id===houseId);
+  const h=curProj.houses.find(x=>String(x.id)===String(houseId));
   const t=h&&h.typeId?curProj.types.find(x=>x.id===h.typeId):null;
   const bodegaMap={}; // name → {qty, price, unit}
   allBodega().forEach(b=>{ if(!bodegaMap[b.name])bodegaMap[b.name]={qty:0,price:b.price||0,unit:b.unit||'unid'}; bodegaMap[b.name].qty+=(b.qty||0); });
@@ -12044,7 +12045,7 @@ function renderRequisForm(){
   // tabs
   const tabsHtml=`<div class="oc-mat-tabbar">
     <button class="oc-mat-tab resumen${reqActiveTab==='resumen'?' active':''}" onclick="reqActiveTab='resumen';renderRequisForm()">Resumen</button>
-    ${st.houseIds.map(hid=>{const h=p.houses.find(x=>x.id===hid);return`<button class="oc-mat-tab${reqActiveTab===hid?' active':''}" onclick="reqActiveTab=${hid};renderRequisForm()">${h?esc(h.num):'Casa'}</button>`;}).join('')}
+    ${st.houseIds.map(hid=>{const h=p.houses.find(x=>String(x.id)===String(hid));return`<button class="oc-mat-tab${reqActiveTab===hid?' active':''}" onclick="reqActiveTab=${hid};renderRequisForm()">${h?esc(h.num):'Casa'}</button>`;}).join('')}
   </div>`;
   // house body
   let bodyHtml='';
@@ -12129,7 +12130,7 @@ function renderRequisForm(){
           <div class="oc-fld" style="flex:1">
             <div class="oc-fld-label">Casas incluidas</div>
             <div style="display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap">
-              ${st.houseIds.map(hid=>{const h=p.houses.find(x=>x.id===hid);const ht=h&&h.typeId?p.types.find(x=>x.id===h.typeId):null;return`<div class="oc-house-chip" style="flex-direction:column;gap:1px;padding:5px 10px 5px 12px"><div style="display:flex;align-items:center;gap:4px"><span style="font-size:12px;font-weight:500">${h?esc(h.num):'?'}</span><button class="oc-chip-x" onclick="reqRemoveHouse(${hid})">✕</button></div>${ht?`<span style="font-size:9px;color:var(--t3)">${ht.name}</span>`:''}</div>`;}).join('')}
+              ${st.houseIds.map(hid=>{const h=p.houses.find(x=>String(x.id)===String(hid));const ht=h&&h.typeId?p.types.find(x=>x.id===h.typeId):null;return`<div class="oc-house-chip" style="flex-direction:column;gap:1px;padding:5px 10px 5px 12px"><div style="display:flex;align-items:center;gap:4px"><span style="font-size:12px;font-weight:500">${h?esc(h.num):'?'}</span><button class="oc-chip-x" onclick="reqRemoveHouse(${hid})">✕</button></div>${ht?`<span style="font-size:9px;color:var(--t3)">${ht.name}</span>`:''}</div>`;}).join('')}
               <div style="position:relative">
                 <button class="btn-add-house-oc" onclick="reqShowHousePicker(event)">+ Agregar Casa</button>
                 <div id="req-house-picker" style="display:none;position:absolute;top:100%;left:0;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);min-width:180px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.4);max-height:220px;overflow-y:auto">
@@ -12306,7 +12307,7 @@ function vbMoneyInput(val){ return (val||0).toLocaleString('en-US',{minimumFract
 function vbSetTab(tab){ vbActiveTab=tab; renderVendorBill(); }
 function vbHouseTabBody(houseId){
   const p=curProj;
-  const h=p.houses.find(x=>x.id===houseId);
+  const h=p.houses.find(x=>String(x.id)===String(houseId));
   const t=h&&h.typeId?p.types.find(x=>x.id===h.typeId):null;
   const lines=(vbState.ocHouseData&&vbState.ocHouseData[houseId])||[];
   if(!lines.length) return `<div class="oc-empty-tbl">Sin materiales para esta casa en la OC.</div>`;
@@ -12333,7 +12334,7 @@ function renderVendorBill(){
   const hasHouseTabs=!!(st.houseMode&&st.ocHouseIds&&st.ocHouseIds.length);
   const tabsHtml=hasHouseTabs?`<div class="oc-mat-tabbar" style="margin-bottom:0">
     <button class="oc-mat-tab resumen${vbActiveTab==='resumen'?' active':''}" onclick="vbSetTab('resumen')">Resumen (Factura)</button>
-    ${(st.ocHouseIds||[]).map(hid=>{const h=p.houses.find(x=>x.id===hid);return`<button class="oc-mat-tab${vbActiveTab===hid?' active':''}" onclick="vbSetTab(${hid})">${h?esc(h.num):'Casa'}</button>`;}).join('')}
+    ${(st.ocHouseIds||[]).map(hid=>{const h=p.houses.find(x=>String(x.id)===String(hid));return`<button class="oc-mat-tab${vbActiveTab===hid?' active':''}" onclick="vbSetTab(${hid})">${h?esc(h.num):'Casa'}</button>`;}).join('')}
   </div>`:'';
   const showResumen=!hasHouseTabs||vbActiveTab==='resumen';
   const houseBodyHtml=hasHouseTabs&&vbActiveTab!=='resumen'?`<div class="oc-tbl-body" style="min-height:60px">${vbHouseTabBody(vbActiveTab)}</div>`:'';
@@ -12559,18 +12560,18 @@ function vbAssignLabel(dest, projId){
   if(dest==='__bodega__')return 'Bodega';
   // Busca en el proyecto indicado, o en todos los proyectos como fallback
   const searchProjs=projId?[projects.find(p=>p.id===projId)||curProj]:[curProj,...projects.filter(p=>p.id!==curProj.id)];
-  for(const p of searchProjs){ if(!p)continue; const h=p.houses.find(x=>x.id===dest); if(h)return (projId&&projId!==curProj.id?p.name+' · ':'')+h.num; }
+  for(const p of searchProjs){ if(!p)continue; const h=p.houses.find(x=>String(x.id)===String(dest)); if(h)return (projId&&projId!==curProj.id?p.name+' · ':'')+h.num; }
   return '?';
 }
 function vbAssignProjForHouse(houseId){
   // Devuelve el proyecto que contiene esa casa
   if(houseId==='__bodega__') return curProj;
-  for(const p of projects){ if(p.houses&&p.houses.find(h=>h.id===houseId))return p; }
+  for(const p of projects){ if(p.houses&&p.houses.find(h=>String(h.id)===String(houseId)))return p; }
   return curProj;
 }
 // verifica si el producto existe en la lista de materiales de la casa
 function isProductInHouseBudget(p,houseId,productId,desc){
-  const h=p.houses.find(x=>x.id===houseId); const t=h&&p.types.find(x=>x.id===h.typeId); if(!t||!t.categories)return false;
+  const h=p.houses.find(x=>String(x.id)===String(houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); if(!t||!t.categories)return false;
   for(const c of t.categories) for(const l of c.lines){
     const match=(productId&&String(l.matId)===String(productId))||(desc&&(l.manualName||lineName(l))===desc);
     if(match) return true;
@@ -12579,12 +12580,12 @@ function isProductInHouseBudget(p,houseId,productId,desc){
 }
 // Material ya autorizado fuera de lista para la casa (aprobado por el admin → h.purchases)
 function isProductAuthorizedForHouse(p,houseId,productId,desc){
-  const h=p.houses.find(x=>x.id===houseId); if(!h||!h.purchases)return false;
+  const h=p.houses.find(x=>String(x.id)===String(houseId)); if(!h||!h.purchases)return false;
   return h.purchases.some(pu=>pu.nonBudgeted && ((productId&&String(pu.matId)===String(productId))||(desc&&pu.manualName===desc)));
 }
 // presupuesto disponible del producto para una casa (cantidad)
 function houseBudgetQtyForProduct(p,houseId,productId,desc){
-  const h=p.houses.find(x=>x.id===houseId); const t=h&&p.types.find(x=>x.id===h.typeId); if(!t||!t.categories)return Infinity;
+  const h=p.houses.find(x=>String(x.id)===String(houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); if(!t||!t.categories)return Infinity;
   let bud=0;
   t.categories.forEach(c=>c.lines.forEach(l=>{ const match=(productId&&String(l.matId)===String(productId))||(desc&&(l.manualName||lineName(l))===desc); if(match)bud+=(l.qty||0); }));
   return bud||Infinity;
@@ -12819,7 +12820,7 @@ function vbApplyToHouses(data){
   data.lines.filter(l=>!data.qboMultiProject||l.qboProjectActive!==false).forEach(l=>{ const unitNet=(l.qty?vbLineNet(l)/l.qty:(l.price||0));
     (l.assign||[]).forEach(a=>{
       if(a.houseId==='__bodega__'){ curProj.bodega.push({id:'bod-'+Date.now()+Math.random().toString(36).slice(2,5),billId:data.id,productId:l.productId,name:l.desc,qty:a.qty,price:unitNet,date:data.date,project:curProj.name,vendor:data.party||''}); return; }
-      const h=curProj.houses.find(x=>x.id===a.houseId); if(!h)return;
+      const h=curProj.houses.find(x=>String(x.id)===String(a.houseId)); if(!h)return;
       if(!h.purchases)h.purchases=[];
       // Usar el lineId original del presupuesto (viene del OC assign) para que aparezca como material presupuestado en HP
       const budgetLineId = a.lineId || l.lineId || ('bill-'+data.id+'-'+Math.random().toString(36).slice(2,5));
