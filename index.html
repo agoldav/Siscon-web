@@ -9380,20 +9380,40 @@ function chartGrid(W,H,pad,padTop){
   }
   return out.join('');
 }
-function svgBars(items){
+function chartYAxis(vals, padLeft, W, zoom){
+  zoom=+zoom||1;
+  let out='';
+  vals.forEach(v=>{
+    out+=`<line x1="${padLeft.toFixed(1)}" y1="${v.y.toFixed(1)}" x2="${W}" y2="${v.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`;
+    out+=`<text x="${(padLeft-6*zoom).toFixed(1)}" y="${(v.y+3*zoom).toFixed(1)}" text-anchor="end" font-size="${(8*zoom).toFixed(1)}" fill="var(--t3)">${fmtShort(v.val)}</text>`;
+  });
+  return out;
+}
+function svgBars(items, zoom, showAxis){
   if(!items.length) return '<div style="color:var(--t3);font-size:11px;padding:20px;text-align:center">Sin datos</div>';
-  const H=190, pad=34, gap=90, max=Math.max(1,...items.map(i=>Math.abs(i.value)));
-  const W=items.length*gap+20, bw=42;
+  zoom=+zoom||1;
+  const H=190*zoom, pad=34*zoom, gap=90*zoom, max=Math.max(1,...items.map(i=>Math.abs(i.value)));
+  const barTop=22*zoom, bw=42*zoom;
+  const padLeft=showAxis?34*zoom:0;
+  const leftOffset=showAxis?padLeft+10*zoom:30*zoom;
+  const W=items.length*gap+20*zoom+padLeft;
   let bars='';
   items.forEach((it,idx)=>{
-    const x=30+idx*gap;
-    const h=(Math.abs(it.value)/max)*(H-pad-22);
+    const x=leftOffset+idx*gap;
+    const h=(Math.abs(it.value)/max)*(H-pad-barTop);
     const y=H-pad-h;
-    bars+=`<rect x="${x}" y="${y}" width="${bw}" height="${Math.max(1,h)}" rx="7" fill="${it.color}"${chartMarkAttrs(it)}/>`;
-    bars+=`<text x="${x+bw/2}" y="${y-7}" text-anchor="middle" font-size="10" font-weight="600" fill="var(--t1)">${it.disp||fmtShort(it.value)}</text>`;
-    bars+=`<text x="${x+bw/2}" y="${H-12}" text-anchor="middle" font-size="9" fill="var(--t2)">${it.label}</text>`;
+    bars+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1,h).toFixed(1)}" rx="7" fill="${it.color}"${chartMarkAttrs(it)}/>`;
+    bars+=`<text x="${(x+bw/2).toFixed(1)}" y="${(y-7*zoom).toFixed(1)}" text-anchor="middle" font-size="${(10*zoom).toFixed(1)}" font-weight="600" fill="var(--t1)">${it.disp||fmtShort(it.value)}</text>`;
+    bars+=`<text x="${(x+bw/2).toFixed(1)}" y="${(H-12*zoom).toFixed(1)}" text-anchor="middle" font-size="${(9*zoom).toFixed(1)}" fill="var(--t2)">${it.label}</text>`;
   });
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto">${chartGrid(W,H,pad)}<line x1="0" y1="${H-pad}" x2="${W}" y2="${H-pad}" stroke="var(--border2)"/>${bars}</svg>`;
+  const axis = showAxis
+    ? chartYAxis([0,max/3,max*2/3,max].map(v=>({val:v,y:H-pad-(v/max)*(H-pad-barTop)})), padLeft, W, zoom)
+    : chartGrid(W,H,pad);
+  const inner = axis+`<line x1="${padLeft}" y1="${H-pad}" x2="${W}" y2="${H-pad}" stroke="var(--border2)"/>${bars}`;
+  const svgTag = zoom>1
+    ? `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${inner}</svg>`
+    : `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto">${inner}</svg>`;
+  return zoom>1 ? `<div style="overflow-x:auto">${svgTag}</div>` : svgTag;
 }
 function svgDonut(segs, centerLabel){
   const total=segs.reduce((s,x)=>s+Math.max(0,x.value),0)||1;
