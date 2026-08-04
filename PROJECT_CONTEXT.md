@@ -1980,8 +1980,8 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   en las llamadas de Outlook/QuickBooks, que es el mecanismo correcto para ese caso.
 - [x] **Sin cambios en Completado:** no se tocó ninguna función de negocio, solo el header de
   autenticación legado en las llamadas HTTP del frontend.
-- [ ] **Pendiente de este hallazgo:** commit + push a `agoldav/Siscon-web` y deploy a producción vía
-  Vercel — esperando confirmación del usuario antes de subir cambios a producción.
+- [x] **Commit + deploy:** commit `0a34ccb` pusheado a `agoldav/Siscon-web` (2026-08-03), desplegado
+  a producción vía Vercel.
 
 ## 10. ⏳ Pendiente
 
