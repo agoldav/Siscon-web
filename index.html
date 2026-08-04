@@ -11829,7 +11829,7 @@ function globalRecoveryCardHtml(list){
     ${s.recOpen?`<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);overflow-x:auto">
       <table class="rec-table" style="width:100%">
         <thead><tr><th>Proyecto</th><th class="r">Gastado</th><th class="r">Facturado</th><th class="r">Pendiente</th><th style="width:120px">Recuperado</th></tr></thead>
-        <tbody>${det.length?det.map(({p,r})=>`<tr>
+        <tbody>${det.length?det.map(({p,r})=>`<tr style="cursor:pointer" onclick="openProj(${p.id})" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''" title="Ir a ${esc(p.name)}">
           <td style="color:var(--t1)">${esc(p.name)}</td>
           <td class="r">${fmt(r.spent)}</td>
           <td class="r" style="color:var(--grn)">${fmt(r.billed)}</td>
