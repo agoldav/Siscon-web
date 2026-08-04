@@ -1421,7 +1421,7 @@ function _clearNormalizedState(){
   _projectItemVersions.clear();_projectItemSnapshots.clear();_projectItemProjectIds.clear();
 }
 async function _dbRowRequest(method,path,body){
-  const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
+  const headers={'Authorization':`Bearer ${_sbToken}`};
   if(body!==undefined)headers['Content-Type']='application/json';
   const resp=await fetch(`${BACKEND_URL}${path}`,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
   const data=await resp.json().catch(()=>({}));
@@ -2111,7 +2111,6 @@ async function _saveDataToAPICore(forzar){
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${_sbToken}`,
-        'x-siscon-token': 'siscon-2026-pmapp',
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(body)
@@ -2149,7 +2148,7 @@ function saveData(){
 async function loadDataFromAPI(){
   if(!_sbToken || !currentUser) return false;
   try{
-    const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
+    const headers={'Authorization':`Bearer ${_sbToken}`};
     const [
       resp,projectsResp,housesResp,transactionsResp,houseTypesResp,documentsResp,
       garantiasResp,bitacoraResp,tasksResp,subAdvancesResp,bodegaResp,activityResp,
@@ -2560,7 +2559,7 @@ async function resetData(){
   try{
     const resp=await fetch(`${BACKEND_URL}/api/admin/reset-app`,{
       method:'POST',
-      headers:{'Authorization':`Bearer ${_sbToken||''}`,'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},
+      headers:{'Authorization':`Bearer ${_sbToken||''}`,'Content-Type':'application/json'},
       body:JSON.stringify({confirmation:'BORRAR TODO'})
     });
     const result=await resp.json().catch(()=>({}));
@@ -2596,7 +2595,6 @@ async function migrateLocalStorageToSupabase(){
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${_sbToken}`,
-        'x-siscon-token': 'siscon-2026-pmapp',
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
@@ -2886,7 +2884,7 @@ async function sbRefreshToken(){
   const rt=localStorage.getItem('sb_refresh_token');
   if(!rt||!currentUser) return false;
   try{
-    const resp=await fetch(BACKEND_URL+'/api/auth/refresh-token',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({refresh_token:rt})});
+    const resp=await fetch(BACKEND_URL+'/api/auth/refresh-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refresh_token:rt})});
     if(!resp.ok) return false;
     const d=await resp.json();
     if(d.access_token){ _sbToken=d.access_token; localStorage.setItem('sb_token',d.access_token); }
@@ -2918,7 +2916,7 @@ async function login(){
   if(!password){showError('lerr','Contraseña requerida');return;}
   authLoading(true,'login-btn','Ingresando…');
   try{
-    const resp=await fetch(BACKEND_URL+'/api/auth/signin',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const resp=await fetch(BACKEND_URL+'/api/auth/signin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     if(!resp.ok){authLoading(false,'login-btn');showError('lerr',await authErrMsg(resp));return;}
     const data=await resp.json();
     currentUser=data.user;
@@ -2952,7 +2950,7 @@ async function login(){
   }catch(e){authLoading(false,'login-btn');showError('lerr','Error: '+e.message);}
 }
 async function logout(){
-  try{const token=localStorage.getItem('sb_token');await fetch(BACKEND_URL+'/api/auth/logout',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Authorization':'Bearer '+token,'Content-Type':'application/json'},body:'{}'});}catch(e){console.error('Error logout:',e);}
+  try{const token=localStorage.getItem('sb_token');await fetch(BACKEND_URL+'/api/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:'{}'});}catch(e){console.error('Error logout:',e);}
   stopAuthPolling();
   stopTokenRefresh();
   msgStopPolling();
@@ -14023,7 +14021,7 @@ let msgPollIv=null;
 const MSG_MAX_ATTACH=3*1024*1024;        // 3 MB por adjunto
 
 async function apiFetch(method,path,body){
-  const headers={'Authorization':`Bearer ${_sbToken}`,'x-siscon-token':'siscon-2026-pmapp'};
+  const headers={'Authorization':`Bearer ${_sbToken}`};
   if(body!==undefined) headers['Content-Type']='application/json';
   const resp=await fetch(`${BACKEND_URL}${path}`,{method,headers,body:body!==undefined?JSON.stringify(body):undefined});
   if(!resp.ok){ const err=await resp.json().catch(()=>({})); throw new Error(err.error||('Error '+resp.status)); }
@@ -15260,8 +15258,8 @@ function showError(elemId,msg){document.getElementById(elemId).textContent=msg;d
 function clearErrors(){['lerr','serr','ferr','ierr'].forEach(id=>{document.getElementById(id).classList.add('hidden');});}
 function validateEmail(email){return/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);}
 function validatePassword(password){return password.length>=8&&/[A-Z]/.test(password)&&/\d/.test(password);}
-async function forgotPassword(){const email=document.getElementById('fe').value.trim();if(!validateEmail(email)){showError('ferr','Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/forgot-password',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){showError('ferr',await authErrMsg(resp));return;}showToast('✓ Instrucciones enviadas al email');showLogin();}catch(e){showError('ferr','Error: '+e.message);}}
-async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}authLoading(true,'accept-btn','Creando cuenta…');try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){authLoading(false,'accept-btn');showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();if(data.needsManualLogin||!data.access_token){authLoading(false,'accept-btn');try{showLogin();}catch(e){}const lu=document.getElementById('lu');if(lu)lu.value=email;alert(data.message||'Tu cuenta fue creada. Inicia sesión con tu email y contraseña.');return;}currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);startTokenRefresh();authLoading(false,'accept-btn');document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';document.getElementById('sb-btn-settings').style.display=data.user.role==='Administrador'?'':'none';const _apiOk2=await loadDataFromAPI();logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});if(!_apiOk2)loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){authLoading(false,'accept-btn');showError('ierr','Error: '+e.message);}}
+async function forgotPassword(){const email=document.getElementById('fe').value.trim();if(!validateEmail(email)){showError('ferr','Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){showError('ferr',await authErrMsg(resp));return;}showToast('✓ Instrucciones enviadas al email');showLogin();}catch(e){showError('ferr','Error: '+e.message);}}
+async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}authLoading(true,'accept-btn','Creando cuenta…');try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){authLoading(false,'accept-btn');showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();if(data.needsManualLogin||!data.access_token){authLoading(false,'accept-btn');try{showLogin();}catch(e){}const lu=document.getElementById('lu');if(lu)lu.value=email;alert(data.message||'Tu cuenta fue creada. Inicia sesión con tu email y contraseña.');return;}currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);startTokenRefresh();authLoading(false,'accept-btn');document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';document.getElementById('sb-btn-settings').style.display=data.user.role==='Administrador'?'':'none';const _apiOk2=await loadDataFromAPI();logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});if(!_apiOk2)loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){authLoading(false,'accept-btn');showError('ierr','Error: '+e.message);}}
 function checkInvitationCode(){const params=new URLSearchParams(window.location.search);const code=params.get('invite');const email=params.get('email');if(code&&email){document.getElementById('login-form').classList.add('hidden');document.getElementById('invite-form').classList.remove('hidden');document.getElementById('invite-email-display').textContent='Email: '+email;window._inviteCode=code;window._inviteEmail=email;}}
 // FASE 2: Bootstrap desde Cloudflare Access al cargar
 if(document.readyState==='loading'){
@@ -15276,9 +15274,9 @@ if(document.readyState==='loading'){
 
 // Fase 4: Gestión de Usuarios Supabase
 let _sbUsersCache=[];
-async function loadSupabaseUsers(){try{const resp=await fetch(BACKEND_URL+'/api/auth/users',{headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp'}});if(!resp.ok)return{users:[],invitations:[]};const data=await resp.json();return{users:data.users||[],invitations:data.invitations||[]};}catch(e){console.error('Error cargando usuarios:',e);return{users:[],invitations:[]};}}
-async function changeUserRole(id,role){try{const resp=await fetch(BACKEND_URL+'/api/auth/users/'+id+'/role',{method:'PUT',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({role})});const data=await resp.json().catch(()=>({}));if(!resp.ok){alert('Error: '+(data.error||'No se pudo cambiar el rol'));return;}showToast('✓ Rol actualizado');await openUsersModal();}catch(e){alert('Error: '+e.message);}}
-async function deleteSupabaseUser(id){const u=(_sbUsersCache||[]).find(x=>String(x.id)===String(id));const name=(u&&(u.name||u.email||u.username))||'este usuario';if(!confirm('¿Eliminar la cuenta de "'+name+'"? Perderá el acceso al sistema. Esta acción no se puede deshacer.'))return;try{const resp=await fetch(BACKEND_URL+'/api/auth/users/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp'}});const data=await resp.json().catch(()=>({}));if(!resp.ok){alert('Error: '+(data.error||'No se pudo eliminar'));return;}showToast('✓ Cuenta eliminada');await openUsersModal();}catch(e){alert('Error: '+e.message);}}
+async function loadSupabaseUsers(){try{const resp=await fetch(BACKEND_URL+'/api/auth/users',{headers:{'Authorization':'Bearer '+_sbToken}});if(!resp.ok)return{users:[],invitations:[]};const data=await resp.json();return{users:data.users||[],invitations:data.invitations||[]};}catch(e){console.error('Error cargando usuarios:',e);return{users:[],invitations:[]};}}
+async function changeUserRole(id,role){try{const resp=await fetch(BACKEND_URL+'/api/auth/users/'+id+'/role',{method:'PUT',headers:{'Authorization':'Bearer '+_sbToken,'Content-Type':'application/json'},body:JSON.stringify({role})});const data=await resp.json().catch(()=>({}));if(!resp.ok){alert('Error: '+(data.error||'No se pudo cambiar el rol'));return;}showToast('✓ Rol actualizado');await openUsersModal();}catch(e){alert('Error: '+e.message);}}
+async function deleteSupabaseUser(id){const u=(_sbUsersCache||[]).find(x=>String(x.id)===String(id));const name=(u&&(u.name||u.email||u.username))||'este usuario';if(!confirm('¿Eliminar la cuenta de "'+name+'"? Perderá el acceso al sistema. Esta acción no se puede deshacer.'))return;try{const resp=await fetch(BACKEND_URL+'/api/auth/users/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+_sbToken}});const data=await resp.json().catch(()=>({}));if(!resp.ok){alert('Error: '+(data.error||'No se pudo eliminar'));return;}showToast('✓ Cuenta eliminada');await openUsersModal();}catch(e){alert('Error: '+e.message);}}
 function ucopyInvite(code,email){const link='https://app.sisconcr.com?invite='+encodeURIComponent(code)+'&email='+encodeURIComponent(email);try{navigator.clipboard.writeText(link);showToast('Link copiado');}catch(e){prompt('Copia el link:',link);}}
 // VUL-045: alta directa, sin link ni código. Antes esto llamaba a /api/auth/invite-user y el
 // invitado tenía que aceptar un link con una contraseña que nunca usaba para entrar (el acceso
@@ -15290,7 +15288,7 @@ async function createSupabaseUser(){
   if(!validateEmail(email)){alert('Email inválido');return;}
   if(!name){alert('Nombre requerido');return;}
   try{
-    const resp=await fetch(BACKEND_URL+'/api/auth/create-user',{method:'POST',headers:{'Authorization':'Bearer '+_sbToken,'x-siscon-token':'siscon-2026-pmapp','Content-Type':'application/json'},body:JSON.stringify({email,name,role})});
+    const resp=await fetch(BACKEND_URL+'/api/auth/create-user',{method:'POST',headers:{'Authorization':'Bearer '+_sbToken,'Content-Type':'application/json'},body:JSON.stringify({email,name,role})});
     const data=await resp.json().catch(()=>({}));
     if(!resp.ok){alert('Error: '+(data.message||data.error||'No se pudo crear el usuario'));return;}
     alert('✓ '+(data.message||'Usuario creado.'));

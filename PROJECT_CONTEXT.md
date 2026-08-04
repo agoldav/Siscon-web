@@ -1961,6 +1961,28 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   `314219f`, `67f6bbd`, `fe77a81`, `b79983e`, `cce8d5d`, `eee4da1`), todos desplegados a producción
   vía Vercel (2026-08-03).
 
+### Sesión 2026-08-03 (revisión: API keys nunca expuestas en el navegador)
+> Cubre el ítem de Pendiente "Seguridad: API keys siempre vía backend, nunca expuestas en el navegador".
+- [x] **Auditoría del frontend (`siscon-web/index.html`):** confirmado que ninguna API key real
+  (Anthropic, QuickBooks, Microsoft, Supabase `service_role`) está expuesta en el navegador.
+  `claudeCall()` siempre pasa por `/api/claude` en el backend sin credencial en el cliente. La
+  mención en la Sección 7 de una "Claude API key directa (fallback)" en Ajustes está obsoleta —
+  ese campo ya no existe en el frontend.
+- [x] **Hallazgo y fix — `SISCON_TOKEN` hardcodeado en el cliente:** el valor literal
+  `'siscon-2026-pmapp'` estaba escrito directamente en ~15 llamadas `fetch` del frontend (login,
+  refresh de sesión, logout, guardado/carga de `settings`, reset de app, gestión de usuarios,
+  mensajería). Revisando `siscon-backend/server.js` (`checkToken()`, líneas 111-124) se confirmó
+  que en producción (`CLOUDFLARE_ENABLED=true`) ese header se ignora por completo — el gate real
+  es el JWT de Cloudflare Access — por lo que el valor no protegía nada en vivo, solo quedaba
+  publicado en el código fuente sin necesidad. Se eliminó el header `x-siscon-token` de esas ~15
+  llamadas (verificado con `node --check` sobre el JS extraído del archivo). Se dejó intacto el uso
+  legítimo y ya existente de `SYS.backendToken` (token opcional configurable en Ajustes → Backend)
+  en las llamadas de Outlook/QuickBooks, que es el mecanismo correcto para ese caso.
+- [x] **Sin cambios en Completado:** no se tocó ninguna función de negocio, solo el header de
+  autenticación legado en las llamadas HTTP del frontend.
+- [ ] **Pendiente de este hallazgo:** commit + push a `agoldav/Siscon-web` y deploy a producción vía
+  Vercel — esperando confirmación del usuario antes de subir cambios a producción.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1985,7 +2007,7 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Infraestructura / Producción
 - [x] Persistencia cifrada de tokens QBO en Supabase (no en `/tmp`) — implementada y desplegada el 2026-08-01; el vault nunca se expone al frontend y el reinicio total lo elimina.
-- [ ] Seguridad: API keys siempre vía backend, nunca expuestas en el navegador
+- [x] Seguridad: API keys siempre vía backend, nunca expuestas en el navegador — verificado 2026-08-03: ninguna API key real expuesta; se eliminó además un `SISCON_TOKEN` legado hardcodeado en el frontend que ya no protegía nada en producción (ver Sección 9).
 - [x] Habilitar RLS correctamente en Supabase — deny-by-default verificado + `FORCE` en las 21 tablas (VUL-016, 2026-07-24). Las políticas por-rol/usuario (VUL-014/015) se reclasificaron como *no aplican por arquitectura* (service_role ignora RLS + el frontend no accede directo); ver Sección 11.
 
 ### Informes adicionales (pendiente de implementar)
