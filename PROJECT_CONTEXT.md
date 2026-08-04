@@ -1983,6 +1983,38 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] **Commit + deploy:** commit `0a34ccb` pusheado a `agoldav/Siscon-web` (2026-08-03), desplegado
   a producción vía Vercel.
 
+### Sesión 2026-08-03 (tooltip interactivo, click-a-proyecto y zoom en gráficas del Dashboard)
+> Mejoras pedidas por el usuario en conversación, no listadas en Pendiente. Brainstorm → spec →
+> plan en `docs/superpowers/specs/2026-08-03-charts-tooltip-click-zoom-design.md` y
+> `docs/superpowers/plans/2026-08-03-charts-tooltip-click-zoom.md`.
+- [x] **Tooltip flotante en todas las gráficas SVG de la app:** componente compartido
+  (`chartTipShow`/`chartTipMove`/`chartTipHide` + helper `chartMarkAttrs`) que agrega
+  `data-label`/`data-value` y handlers de hover a cada barra/segmento/punto de `svgBars`,
+  `svgDonut`, `svgLine`, `svgChart1` y `svgNetBars`. Al hacer hover aparece una ventana junto al
+  cursor (la sigue mientras se mueve) con el número exacto (`fmt()`, no abreviado). Aplica tanto
+  a las gráficas del Dashboard como a las internas de cada proyecto (presupuesto por categoría,
+  estado de casas, flujo de caja de un proyecto, etc.).
+- [x] **Click a proyecto en las 4 gráficas del Dashboard:** "Valor de Venta por Proyecto",
+  "Proyección de Flujo de Efectivo", "Gastos No Facturados" y "Facturas Pendientes de Pago" —
+  cada barra ya representa un proyecto (`id:p.id` agregado a los items en `renderDashStats`), así
+  que además del tooltip, el click navega al proyecto (`openProj(id)`), igual que las tarjetas
+  Kanban/lista. Las gráficas internas de un proyecto no ganan click (sus items no llevan `id`).
+- [x] **Recuperación de Dinero — filas de detalle clickeables:** cada fila de la tabla de detalle
+  por proyecto en `globalRecoveryCardHtml` navega al proyecto al hacer click (cursor + hover,
+  mismo patrón que la vista Lista del Dashboard).
+- [x] **Slider de zoom en "Valor de Venta por Proyecto":** control de rango 1x-2.5x
+  (`SYS.stats.zoomVenta`, con migración para instalaciones existentes). En 1x se ve igual que
+  antes; al subir el zoom, `svgChart1` escala altura/ancho de barra/tamaño de letra
+  proporcionalmente y el contenedor pasa a scroll horizontal si los proyectos no caben — sin
+  afectar las demás tarjetas de la sección.
+- [x] **Verificado:** `node --check` sobre el JS extraído tras cada tarea; comportamiento probado
+  interactivamente en el Browser pane (hover/click/zoom simulados con eventos reales de mouse
+  sobre `renderDashStats()`/`globalRecoveryCardHtml()` real, datos de prueba) — sin necesidad de
+  login porque el bloque `<script>` completo se ejecuta y expone todas las funciones aunque el
+  usuario no haya iniciado sesión.
+- [x] **Commits:** `dc0ac38` (tooltip), `2caf816` (click Dashboard), `792edd0` (filas
+  Recuperación), `390fc7b` (zoom) en `agoldav/Siscon-web`.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
