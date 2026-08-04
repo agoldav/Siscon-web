@@ -11941,17 +11941,17 @@ function renderDashStats(){
   const s=dstats();
   if(!s.open) return `<div class="stats-head"><div class="stats-title">Información General y Estadísticas</div><button class="stats-toggle" onclick="statsToggle('open')" title="Mostrar">▾</button></div>`;
   const list=statsProjects(s);
-  const items=list.map(p=>({label:p.name,venta:p.salePrice||0,gastado:projGastado(p),pendiente:projPendienteGasto(p)}));
+  const items=list.map(p=>({label:p.name,venta:p.salePrice||0,gastado:projGastado(p),pendiente:projPendienteGasto(p),id:p.id}));
   const totVenta=items.reduce((a,b)=>a+b.venta,0), totGast=items.reduce((a,b)=>a+b.gastado,0), totPend=items.reduce((a,b)=>a+b.pendiente,0);
   const cashSel=statsCashSel(), cw=CASH_WINDOWS[s.cashWindow]||CASH_WINDOWS['1m'];
-  const cashRaw=projects.filter(p=>projActive(p)&&cashSel.includes(p.id)).map(p=>{const c=projCashflowNet(p,cw[0]);return {label:p.name,value:c.net,eg:c.egreso,ing:c.ingreso};});
+  const cashRaw=projects.filter(p=>projActive(p)&&cashSel.includes(p.id)).map(p=>{const c=projCashflowNet(p,cw[0]);return {label:p.name,value:c.net,eg:c.egreso,ing:c.ingreso,id:p.id};});
   const totCash=cashRaw.reduce((a,b)=>a+b.value,0), totEg=cashRaw.reduce((a,b)=>a+b.eg,0), totIng=cashRaw.reduce((a,b)=>a+b.ing,0);
   const unbSel=statsUnbSel();
-  const unbItems=projects.filter(p=>unbSel.includes(p.id)).map(p=>({label:p.name,value:projUnbilled(p),color:'#e24b4a'}));
+  const unbItems=projects.filter(p=>unbSel.includes(p.id)).map(p=>({label:p.name,value:projUnbilled(p),color:'#e24b4a',id:p.id}));
   const totUnb=unbItems.reduce((a,b)=>a+b.value,0);
   // #13: facturas pendientes de pago por proyecto (todos)
   const pendPay=p=>{ return (p.invClient||[]).filter(inv=>inv.status!=='Anulada'&&inv.status!=='Pagada').reduce((s,inv)=>{ const paid=(p.payments||[]).filter(pg=>pg.refInvoiceId===inv.id&&pg.status!=='Anulada').reduce((a,pg)=>a+(pg.totalUSD||0),0); return s+Math.max(0,(inv.totalUSD||0)-paid); },0); };
-  const pendPayItems=projects.map(p=>({label:p.name,value:pendPay(p),color:'#d4941a'})).filter(x=>x.value>0.01);
+  const pendPayItems=projects.map(p=>({label:p.name,value:pendPay(p),color:'#d4941a',id:p.id})).filter(x=>x.value>0.01);
   const pendPayTot=pendPayItems.reduce((a,b)=>a+b.value,0);
   return `
     <div class="stats-head"><div class="stats-title">Información General y Estadísticas</div><button class="stats-toggle" onclick="statsToggle('open')" title="Ocultar">▴</button></div>
