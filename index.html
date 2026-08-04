@@ -11962,7 +11962,16 @@ function svgChart1(items,showG,showP,zoom){
     : `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto">${svg}</svg>`;
   return zoom>1 ? `<div style="overflow-x:auto">${svgTag}</div>` : svgTag;
 }
-function dstats(){ if(!SYS.stats)SYS.stats={open:true,scope:'todos',time:'todo',from:'',to:'',showGastado:false,showPendiente:false,cashWindow:'1m',cashProjects:null,unbilledProjects:null,zoomVenta:1}; const s=SYS.stats; if(s.zoomVenta===undefined)s.zoomVenta=1; return s; }
+function dstats(){ if(!SYS.stats)SYS.stats={open:true,scope:'todos',time:'todo',from:'',to:'',showGastado:false,showPendiente:false,cashWindow:'1m',cashProjects:null,unbilledProjects:null,zoomVenta:1,zoomCash:1,zoomUnb:1,zoomPend:1}; const s=SYS.stats; if(s.zoomVenta===undefined)s.zoomVenta=1; if(s.zoomCash===undefined)s.zoomCash=1; if(s.zoomUnb===undefined)s.zoomUnb=1; if(s.zoomPend===undefined)s.zoomPend=1; return s; }
+let _statsChartData=null;
+function chartZoomLive(which, val){
+  const d=_statsChartData; if(!d) return;
+  const el=document.getElementById('chart-body-'+which); if(!el) return;
+  if(which==='venta'){ dstats().zoomVenta=val; el.innerHTML=svgChart1(d.items,d.showG,d.showP,val); }
+  else if(which==='cash'){ dstats().zoomCash=val; el.innerHTML=svgNetBars(d.cashRaw,val); }
+  else if(which==='unb'){ dstats().zoomUnb=val; el.innerHTML=svgBars(d.unbItems,val,true); }
+  else if(which==='pend'){ dstats().zoomPend=val; el.innerHTML=svgBars(d.pendPayItems,val,true); }
+}
 function updateStats(){ const el=document.getElementById('dash-stats'); if(el)el.innerHTML=renderDashStats(); }
 function statsSet(k,v){ dstats()[k]=v; saveData(); updateStats(); }
 function statsToggle(k){ const s=dstats(); s[k]=!s[k]; saveData(); updateStats(); }
@@ -11987,6 +11996,7 @@ function renderDashStats(){
   const pendPay=p=>{ return (p.invClient||[]).filter(inv=>inv.status!=='Anulada'&&inv.status!=='Pagada').reduce((s,inv)=>{ const paid=(p.payments||[]).filter(pg=>pg.refInvoiceId===inv.id&&pg.status!=='Anulada').reduce((a,pg)=>a+(pg.totalUSD||0),0); return s+Math.max(0,(inv.totalUSD||0)-paid); },0); };
   const pendPayItems=projects.map(p=>({label:p.name,value:pendPay(p),color:'#d4941a',id:p.id})).filter(x=>x.value>0.01);
   const pendPayTot=pendPayItems.reduce((a,b)=>a+b.value,0);
+  _statsChartData={items,showG:s.showGastado,showP:s.showPendiente,cashRaw,unbItems,pendPayItems};
   return `
     <div class="stats-head"><div class="stats-title">Información General y Estadísticas</div><button class="stats-toggle" onclick="statsToggle('open')" title="Ocultar">▴</button></div>
     <div class="stats-body">
@@ -12003,11 +12013,11 @@ function renderDashStats(){
             </div>
             <div style="display:flex;align-items:center;gap:6px" title="Zoom de la gráfica">
               <span style="font-size:11px;color:var(--t3)">🔍</span>
-              <input type="range" min="1" max="2.5" step="0.25" value="${s.zoomVenta}" onchange="statsSet('zoomVenta',this.value)" style="width:90px"/>
+              <input type="range" min="1" max="2.5" step="0.25" value="${s.zoomVenta}" oninput="chartZoomLive('venta',this.value)" onchange="statsSet('zoomVenta',this.value)" style="width:90px"/>
             </div>
           </div>
         </div>
-        ${svgChart1(items,s.showGastado,s.showPendiente,s.zoomVenta)}
+        <div id="chart-body-venta">${svgChart1(items,s.showGastado,s.showPendiente,s.zoomVenta)}</div>
         ${legend([{label:'Valor de venta',color:'#0d99ff'}].concat(s.showGastado?[{label:'Gastado',color:'#e8783a'}]:[]).concat(s.showPendiente?[{label:'Pendiente por gastar',color:'#d4941a'}]:[]))}
       </div>
       ${globalRecoveryCardHtml(list)}
@@ -12020,22 +12030,38 @@ function renderDashStats(){
               <div style="position:relative"><button class="btn-sm" onclick="statsToggle('_menuCash')">Proyectos</button>
                 ${s._menuCash?`<div class="stats-menu">${projects.filter(projActive).map(p=>`<label><input type="checkbox" ${cashSel.includes(p.id)?'checked':''} onchange="statsToggleCash(${p.id})"/> ${esc(p.name)}</label>`).join('')||'<div style="font-size:11px;color:var(--t3)">Sin proyectos activos</div>'}</div>`:''}
               </div>
+              <div style="display:flex;align-items:center;gap:6px" title="Zoom de la gráfica">
+                <span style="font-size:11px;color:var(--t3)">🔍</span>
+                <input type="range" min="1" max="2.5" step="0.25" value="${s.zoomCash}" oninput="chartZoomLive('cash',this.value)" onchange="statsSet('zoomCash',this.value)" style="width:90px"/>
+              </div>
             </div>
           </div>
-          ${svgNetBars(cashRaw)}
+          <div id="chart-body-cash">${svgNetBars(cashRaw,s.zoomCash)}</div>
         </div>
         <div class="chart-card">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:6px">
             <div><h4>Gastos No Facturados · <span style="color:var(--red)">${fmt(totUnb)}</span></h4><div class="csub">Gastado sin facturar (por recuperar)</div></div>
-            <div style="position:relative"><button class="btn-sm" onclick="statsToggle('_menuUnbilled')">Proyectos</button>
-              ${s._menuUnbilled?`<div class="stats-menu">${projects.map(p=>`<label><input type="checkbox" ${unbSel.includes(p.id)?'checked':''} onchange="statsToggleUnb(${p.id})"/> ${esc(p.name)}</label>`).join('')}</div>`:''}
+            <div style="display:flex;gap:6px;align-items:center">
+              <div style="position:relative"><button class="btn-sm" onclick="statsToggle('_menuUnbilled')">Proyectos</button>
+                ${s._menuUnbilled?`<div class="stats-menu">${projects.map(p=>`<label><input type="checkbox" ${unbSel.includes(p.id)?'checked':''} onchange="statsToggleUnb(${p.id})"/> ${esc(p.name)}</label>`).join('')}</div>`:''}
+              </div>
+              <div style="display:flex;align-items:center;gap:6px" title="Zoom de la gráfica">
+                <span style="font-size:11px;color:var(--t3)">🔍</span>
+                <input type="range" min="1" max="2.5" step="0.25" value="${s.zoomUnb}" oninput="chartZoomLive('unb',this.value)" onchange="statsSet('zoomUnb',this.value)" style="width:90px"/>
+              </div>
             </div>
           </div>
-          ${svgBars(unbItems)}
+          <div id="chart-body-unb">${svgBars(unbItems,s.zoomUnb,true)}</div>
         </div>
         <div class="chart-card">
-          <div style="margin-bottom:6px"><h4>Facturas Pendientes de Pago · <span style="color:var(--amb)">${fmt(pendPayTot)}</span></h4><div class="csub">Saldo por cobrar a clientes, por proyecto</div></div>
-          ${svgBars(pendPayItems)}
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+            <div><h4>Facturas Pendientes de Pago · <span style="color:var(--amb)">${fmt(pendPayTot)}</span></h4><div class="csub">Saldo por cobrar a clientes, por proyecto</div></div>
+            <div style="display:flex;align-items:center;gap:6px" title="Zoom de la gráfica">
+              <span style="font-size:11px;color:var(--t3)">🔍</span>
+              <input type="range" min="1" max="2.5" step="0.25" value="${s.zoomPend}" oninput="chartZoomLive('pend',this.value)" onchange="statsSet('zoomPend',this.value)" style="width:90px"/>
+            </div>
+          </div>
+          <div id="chart-body-pend">${svgBars(pendPayItems,s.zoomPend,true)}</div>
         </div>
       </div>
     </div>`;
