@@ -2948,6 +2948,7 @@ async function login(){
     setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);
     setTimeout(()=>checkPendingAuthOnLogin(), 1200);
     if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);
+    startVersionSync();
   }catch(e){authLoading(false,'login-btn');showError('lerr','Error: '+e.message);}
 }
 async function logout(){
@@ -2955,6 +2956,7 @@ async function logout(){
   stopAuthPolling();
   stopTokenRefresh();
   msgStopPolling();
+  stopVersionSync();
   currentUser=null;
   _sbToken=null;
   localStorage.removeItem('sb_token');
@@ -13975,6 +13977,28 @@ function msgStartPolling(){
   msgPollIv=setInterval(async ()=>{ await msgLoadConvs(); msgRenderList(); }, 12000);
 }
 function msgStopPolling(){ if(msgPollIv){ clearInterval(msgPollIv); msgPollIv=null; } }
+
+// ========== VERSIONING SYNC (detecta cambios de otros usuarios) ==========
+let _versionSyncIv=null;
+let _lastSettingsVersion=null;
+function startVersionSync(){
+  if(_versionSyncIv) return;
+  _lastSettingsVersion=_settingsVersion;
+  _versionSyncIv=setInterval(async ()=>{
+    try{
+      const resp=await fetch(BACKEND_URL+'/api/db/settings/1',{method:'GET',credentials:'include',headers:{'Authorization':'Bearer '+_sbToken}});
+      if(!resp.ok) return;
+      const remote=await resp.json();
+      const remoteVer=remote.data?._settingsVersion;
+      if(remoteVer&&remoteVer!==_lastSettingsVersion){
+        _lastSettingsVersion=remoteVer;
+        showToast('⚠ Otro usuario hizo cambios. Recargando…',4000);
+        setTimeout(()=>loadDataFromAPI(),500);
+      }
+    }catch(e){ console.warn('versionSync error:',e); }
+  },10000);
+}
+function stopVersionSync(){ if(_versionSyncIv){ clearInterval(_versionSyncIv); _versionSyncIv=null; } }
 
 async function msgLoadDirectory(){
   try{
