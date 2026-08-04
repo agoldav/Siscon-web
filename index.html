@@ -9716,13 +9716,74 @@ function setTxnTab(k){
 }
 function renderTxnSub(){ if(curTxnTab==='oc') renderOCList(); else renderGenericList(curTxnTab); updateBadges(); }
 
+// ---- Fila genérica de transacción (reutilizada por listas + secciones inyectadas) ----
+function txnRowHtml(type,tx,def,vendorLike,openCall,dupCall,delCall){
+  const isCRCTx = tx.currencyBill==='CRC';
+  const xrTx = qboAppExchangeRate(tx.currencyBill,tx.exchangeRate||SYS.exchangeRate||1);
+  const totalCRCdisp = tx.totalCRC || (tx.totalUSD * xrTx);
+  const totalUSDdisp = tx.totalUSD || (tx.totalCRC ? tx.totalCRC/xrTx : 0);
+  const qboProjectCost=Number(tx.qboProjectSubtotalUSD??tx.subtotalUSD??0);
+  const qboDocumentCost=Number(tx.qboDocumentSubtotalUSD??qboProjectCost);
+  const amountDisplay = vendorLike&&tx.qboId
+    ?`<span style="font-size:12px;font-weight:600;color:var(--grn)">Total ${fmt(qboProjectCost)} de ${fmt(qboDocumentCost)}</span>
+      <span style="font-size:10px;color:${tx.qboCostPending?'var(--amb)':'var(--t3)'}">${tx.qboEntity==='SalesReceipt'?(tx.qboCostPending?'⚠ COGS pendiente de lectura QBO':'COGS FIFO de inventario'):`sin IVA${Number(tx.qboProjectTaxUSD)>0?' · IVA informativo '+fmt(Number(tx.qboProjectTaxUSD)):''}`}</span>`
+    :isCRCTx
+    ? `<span style="font-size:12px;font-weight:600;color:var(--org)">₡${totalCRCdisp.toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+       <span style="font-size:10px;color:var(--t3)">${fmt(totalUSDdisp)} USD</span>`
+    : `<span style="font-size:12px;font-weight:600;color:var(--grn)">${fmt(tx.totalUSD||0)}</span>`;
+  return `<div class="oc-list-item" onclick="${openCall}" style="${tx._pending?'border-left:3px solid var(--red)':''}">
+    <span class="oc-num-badge" style="color:${def.color}${vendorLike?';min-width:190px;text-align:right;flex-shrink:0':''}">${esc(vendorLike&&tx.invoiceNumber?tx.invoiceNumber:tx.num)}</span>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}${type==='pagos'&&tx.paymentDirection?`<span style="font-size:9px;font-weight:700;color:${tx.paymentDirection==='received'?'var(--grn)':'var(--org)'}">${tx.paymentDirection==='received'?'RECIBIDO QB':'PAGADO QB'}</span>`:''}</div>
+      <div style="font-size:10px;color:${vendorLike&&tx.qboProjectPresence==='missing'?'var(--red)':'var(--t2)'};margin-top:2px">${vendorLike&&tx.qboProjectPresence==='missing'?`⚠ ${esc(tx.qboPresenceMessage||'No se encuentra en este proyecto de QuickBooks')}`:`${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.qboEntity==='SalesReceipt'?' · Recibo de venta QBO':''}${tx.qboMultiProject?' · Parte de factura multiproyecto':''}${tx.consecutivo?' · Consec: '+esc(tx.consecutivo):''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}`}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+      ${txnBadge(tx.status)}
+      ${amountDisplay}
+    </div>
+    <span class="qbo-badge${tx.qboId&&!tx.qboCostPending?'':' pending'}">${def.qbo?(tx.qboId?(tx.qboEntity==='SalesReceipt'?(tx.qboCostPending?'⚠ RECIBO QBO':'✓ RECIBO QBO'):'✓ QBO'):'⏳ QBO'):'Interno'}</span>
+    <div style="position:relative">
+      <button onclick="event.stopPropagation();txnListMenuToggle('${tx.id}',event)" style="background:transparent;border:none;color:var(--t3);font-size:16px;cursor:pointer;padding:2px 6px" title="Opciones">⋮</button>
+      <div id="txn-dd-${tx.id}" style="display:none;position:absolute;right:0;top:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);z-index:200;min-width:130px;box-shadow:0 4px 16px rgba(0,0,0,.4)">
+        <button onclick="event.stopPropagation();txnListMenuClose();${openCall}" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:9px 14px;font-size:12px;color:var(--t1);cursor:pointer" onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='transparent'">Editar</button>
+        <button onclick="event.stopPropagation();txnListMenuClose();${dupCall}" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:9px 14px;font-size:12px;color:var(--t1);cursor:pointer" onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='transparent'">Duplicar</button>
+        <button onclick="event.stopPropagation();txnListMenuClose();${delCall}" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:9px 14px;font-size:12px;color:var(--red);cursor:pointer" onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='transparent'">Eliminar</button>
+      </div>
+    </div>
+  </div>`;
+}
+function txnDeleteCall(type,id){
+  return type==='proveedor'?`deleteVendorBill('${id}')`
+    :type==='cliente'?`deleteClientInv('${id}')`
+    :type==='notas'?`deleteGenericTxn('notas','${id}')`
+    :type==='requis'?`deleteGenericTxn('requis','${id}')`
+    :type==='pagos'?`deleteGenericTxn('pagos','${id}')`
+    :``;
+}
+// ---- Recibos de venta QBO (inventario): viven en billVendor pero se muestran aparte, dentro de Requisición de Materiales ----
+function renderInventoryReceiptsSection(){
+  const receipts=txnSortArr(txnArr('proveedor').filter(tx=>tx.qboEntity==='SalesReceipt'),t=>t.party,t=>t.date,t=>t.status,t=>t.num,()=>'');
+  const inventoryCogs=receipts.reduce((sum,tx)=>sum+(Number(tx.qboProjectSubtotalUSD)||0),0);
+  const pendingInventoryCogs=receipts.filter(tx=>tx.qboCostPending).length;
+  return `
+    <div class="th-row" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border)">
+      <div class="th-title">Recibos de venta QBO (${receipts.length})</div>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px;padding:9px 12px;border:1px solid ${pendingInventoryCogs?'rgba(212,148,26,.35)':'rgba(29,184,122,.28)'};border-radius:8px;background:${pendingInventoryCogs?'rgba(212,148,26,.08)':'rgba(29,184,122,.06)'};font-size:11px;color:var(--t2)">
+      <strong style="color:var(--t1)">Recibos de venta QBO: ${receipts.length}</strong>
+      <span>COGS FIFO aplicado al proyecto: <strong style="color:var(--grn)">${fmt(inventoryCogs)}</strong></span>
+      ${pendingInventoryCogs?`<span style="color:var(--amb)">⚠ ${pendingInventoryCogs} recibo(s) visible(s) todavía sin costo contable disponible</span>`:''}
+    </div>
+    ${receipts.length===0?`<div style="color:var(--t3);font-size:13px;padding:20px;text-align:center">No hay recibos de inventario QBO todavía.</div>`
+      :receipts.map(tx=>txnRowHtml('proveedor',tx,TXN_DEFS.proveedor,true,`openGenericTxn('proveedor','${tx.id}')`,`duplicateGenericTxn('proveedor','${tx.id}')`,txnDeleteCall('proveedor',tx.id))).join('')}
+  `;
+}
 // ---- Lista genérica de transacciones ----
 function renderGenericList(type){
   const def=TXN_DEFS[type];
-  const arr=txnSortArr(txnArr(type),t=>t.party||t.client,t=>t.date||t.createdAt,t=>t.status,t=>t.num,t=>(t.lines&&t.lines[0]&&t.lines[0].desc)||'');
-  const inventoryReceipts=type==='proveedor'?arr.filter(tx=>tx.qboEntity==='SalesReceipt'):[];
-  const inventoryCogs=inventoryReceipts.reduce((sum,tx)=>sum+(Number(tx.qboProjectSubtotalUSD)||0),0);
-  const pendingInventoryCogs=inventoryReceipts.filter(tx=>tx.qboCostPending).length;
+  const vendorLike=type==='proveedor';
+  let arr=txnSortArr(txnArr(type),t=>t.party||t.client,t=>t.date||t.createdAt,t=>t.status,t=>t.num,t=>(t.lines&&t.lines[0]&&t.lines[0].desc)||'');
+  if(type==='proveedor') arr=arr.filter(tx=>tx.qboEntity!=='SalesReceipt');
   txnBodyEl().innerHTML=`
     <div class="th-row">
       <div class="th-title">${TXN_TABS.find(t=>t[0]===type)[1]} (${arr.length})</div>
@@ -9733,47 +9794,9 @@ function renderGenericList(type){
         ${txnSortSelect(`renderGenericList('${type}')`)}
       </div>
     </div>
-    ${type==='proveedor'?`<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px;padding:9px 12px;border:1px solid ${pendingInventoryCogs?'rgba(212,148,26,.35)':'rgba(29,184,122,.28)'};border-radius:8px;background:${pendingInventoryCogs?'rgba(212,148,26,.08)':'rgba(29,184,122,.06)'};font-size:11px;color:var(--t2)">
-      <strong style="color:var(--t1)">Recibos de venta QBO: ${inventoryReceipts.length}</strong>
-      <span>COGS FIFO aplicado al proyecto: <strong style="color:var(--grn)">${fmt(inventoryCogs)}</strong></span>
-      ${pendingInventoryCogs?`<span style="color:var(--amb)">⚠ ${pendingInventoryCogs} recibo(s) visible(s) todavía sin costo contable disponible</span>`:''}
-    </div>`:''}
     ${arr.length===0?`<div style="color:var(--t3);font-size:13px;padding:30px;text-align:center">No hay registros. Crea uno con "+ Nuevo".</div>`:''}
-    ${arr.map(tx=>{
-      const isCRCTx = tx.currencyBill==='CRC';
-      const xrTx = qboAppExchangeRate(tx.currencyBill,tx.exchangeRate||SYS.exchangeRate||1);
-      const totalCRCdisp = tx.totalCRC || (tx.totalUSD * xrTx);
-      const totalUSDdisp = tx.totalUSD || (tx.totalCRC ? tx.totalCRC/xrTx : 0);
-      const qboProjectCost=Number(tx.qboProjectSubtotalUSD??tx.subtotalUSD??0);
-      const qboDocumentCost=Number(tx.qboDocumentSubtotalUSD??qboProjectCost);
-      const amountDisplay = type==='proveedor'&&tx.qboId
-        ?`<span style="font-size:12px;font-weight:600;color:var(--grn)">Total ${fmt(qboProjectCost)} de ${fmt(qboDocumentCost)}</span>
-          <span style="font-size:10px;color:${tx.qboCostPending?'var(--amb)':'var(--t3)'}">${tx.qboEntity==='SalesReceipt'?(tx.qboCostPending?'⚠ COGS pendiente de lectura QBO':'COGS FIFO de inventario'):`sin IVA${Number(tx.qboProjectTaxUSD)>0?' · IVA informativo '+fmt(Number(tx.qboProjectTaxUSD)):''}`}</span>`
-        :isCRCTx
-        ? `<span style="font-size:12px;font-weight:600;color:var(--org)">₡${totalCRCdisp.toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-           <span style="font-size:10px;color:var(--t3)">${fmt(totalUSDdisp)} USD</span>`
-        : `<span style="font-size:12px;font-weight:600;color:var(--grn)">${fmt(tx.totalUSD||0)}</span>`;
-      return `<div class="oc-list-item" onclick="openGenericTxn('${type}','${tx.id}')" style="${tx._pending?'border-left:3px solid var(--red)':''}">
-        <span class="oc-num-badge" style="color:${def.color}">${esc(type==='proveedor'&&tx.invoiceNumber?tx.invoiceNumber:tx.num)}</span>
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}${type==='pagos'&&tx.paymentDirection?`<span style="font-size:9px;font-weight:700;color:${tx.paymentDirection==='received'?'var(--grn)':'var(--org)'}">${tx.paymentDirection==='received'?'RECIBIDO QB':'PAGADO QB'}</span>`:''}</div>
-          <div style="font-size:10px;color:${type==='proveedor'&&tx.qboProjectPresence==='missing'?'var(--red)':'var(--t2)'};margin-top:2px">${type==='proveedor'&&tx.qboProjectPresence==='missing'?`⚠ ${esc(tx.qboPresenceMessage||'No se encuentra en este proyecto de QuickBooks')}`:`${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.qboEntity==='SalesReceipt'?' · Recibo de venta QBO':''}${tx.qboMultiProject?' · Parte de factura multiproyecto':''}${tx.consecutivo?' · Consec: '+esc(tx.consecutivo):''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}`}</div>
-        </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-          ${txnBadge(tx.status)}
-          ${amountDisplay}
-        </div>
-        <span class="qbo-badge${tx.qboId&&!tx.qboCostPending?'':' pending'}">${def.qbo?(tx.qboId?(tx.qboEntity==='SalesReceipt'?(tx.qboCostPending?'⚠ RECIBO QBO':'✓ RECIBO QBO'):'✓ QBO'):'⏳ QBO'):'Interno'}</span>
-        <div style="position:relative">
-          <button onclick="event.stopPropagation();txnListMenuToggle('${tx.id}',event)" style="background:transparent;border:none;color:var(--t3);font-size:16px;cursor:pointer;padding:2px 6px" title="Opciones">⋮</button>
-          <div id="txn-dd-${tx.id}" style="display:none;position:absolute;right:0;top:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);z-index:200;min-width:130px;box-shadow:0 4px 16px rgba(0,0,0,.4)">
-            <button onclick="event.stopPropagation();txnListMenuClose();openGenericTxn('${type}','${tx.id}')" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:9px 14px;font-size:12px;color:var(--t1);cursor:pointer" onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='transparent'">Editar</button>
-            <button onclick="event.stopPropagation();txnListMenuClose();duplicateGenericTxn('${type}','${tx.id}')" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:9px 14px;font-size:12px;color:var(--t1);cursor:pointer" onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='transparent'">Duplicar</button>
-            <button onclick="event.stopPropagation();txnListMenuClose();${type==='proveedor'?`deleteVendorBill('${tx.id}')`:type==='cliente'?`deleteClientInv('${tx.id}')`:type==='notas'?`deleteGenericTxn('notas','${tx.id}')`:type==='requis'?`deleteGenericTxn('requis','${tx.id}')`:type==='pagos'?`deleteGenericTxn('pagos','${tx.id}')`:``}" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:9px 14px;font-size:12px;color:var(--red);cursor:pointer" onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background='transparent'">Eliminar</button>
-          </div>
-        </div>
-      </div>`;
-    }).join('')}`;
+    ${arr.map(tx=>txnRowHtml(type,tx,def,vendorLike,`openGenericTxn('${type}','${tx.id}')`,`duplicateGenericTxn('${type}','${tx.id}')`,txnDeleteCall(type,tx.id))).join('')}
+    ${type==='requis'?renderInventoryReceiptsSection():''}`;
 }
 
 // ---- Formulario genérico ----
@@ -11581,7 +11604,10 @@ function calcReport(format){
 function pendingCount(type){
   if(!curProj) return 0;
   const def=TXN_DEFS[type]; if(!def) return 0;
-  return (curProj[def.key]||[]).filter(x=>x._pending).length;
+  const base=(curProj[def.key]||[]).filter(x=>x._pending);
+  if(type==='proveedor') return base.filter(x=>x.qboEntity!=='SalesReceipt').length;
+  if(type==='requis') return base.length+(curProj.billVendor||[]).filter(x=>x.qboEntity==='SalesReceipt'&&x._pending).length;
+  return base.length;
 }
 function pendingTotalProj(){
   if(!curProj) return 0;
