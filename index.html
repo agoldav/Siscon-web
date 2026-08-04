@@ -11230,11 +11230,13 @@ function calcOpen(id){
   calcState._billed=r.billed; calcState._num=r.num;
   renderCalcWin();
 }
+function calcCanEdit(){ return !calcState._billed || (currentUser && currentUser.role==='Administrador'); }
 function renderCalcEditor(){
   const foot=document.getElementById('calc-foot');
+  const canEdit=calcCanEdit();
   if(foot) foot.innerHTML=`<button class="btn-cancel" onclick="calcEditId=null;renderCalcWin()">← Volver a la lista</button>
       ${calcEditId!=='new'&&!calcState._billed?`<button onclick="calcConvertToBill()" style="background:#fff;color:#1db87a;border:1.5px solid #1db87a;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer" onmouseenter="this.style.background='rgba(29,184,122,.08)'" onmouseleave="this.style.background='#fff'">Convertir en Factura</button>`:''}
-      <div class="split-btn-oc">
+      ${canEdit?`<div class="split-btn-oc">
         <button class="split-main-oc" onclick="saveCalc()">Guardar Avance</button>
         <button class="split-arrow-oc" onclick="event.stopPropagation();document.getElementById('calc-save-drop').classList.toggle('open')">▾</button>
         <div class="split-drop-oc" id="calc-save-drop">
@@ -11243,7 +11245,8 @@ function renderCalcEditor(){
           <button class="split-opt-oc" onclick="document.getElementById('calc-save-drop').classList.remove('open');calcReport('pdf')">Generar Informe PDF</button>
           <button class="split-opt-oc" onclick="document.getElementById('calc-save-drop').classList.remove('open');calcReport('excel')">Generar Informe Excel</button>
         </div>
-      </div>`;
+      </div>`:`<span style="font-size:11px;color:var(--t3);align-self:center;display:flex;align-items:center;gap:5px">🔒 Facturado — solo el Administrador puede modificarlo</span>
+      <div class="split-btn-oc"><button class="split-main-oc" onclick="calcReport('pdf')">Informe PDF</button><button class="split-arrow-oc" onclick="event.stopPropagation();document.getElementById('calc-save-drop').classList.toggle('open')">▾</button><div class="split-drop-oc" id="calc-save-drop"><button class="split-opt-oc" onclick="document.getElementById('calc-save-drop').classList.remove('open');calcReport('pdf')">Generar Informe PDF</button><button class="split-opt-oc" onclick="document.getElementById('calc-save-drop').classList.remove('open');calcReport('excel')">Generar Informe Excel</button></div></div>`}`;
   const wrap=document.getElementById('calc-win');
   if(wrap){ wrap.innerHTML='<div id="calc-body"></div>'; }
   renderCalcBody();
@@ -11255,6 +11258,7 @@ function calcCols(){ return calcState.ivaShow
   ? 'grid-template-columns:minmax(140px,1.5fr) minmax(120px,1.2fr) minmax(120px,1.3fr) minmax(52px,56px) minmax(72px,80px) minmax(72px,80px) minmax(84px,95px) minmax(72px,80px) 24px'
   : 'grid-template-columns:minmax(140px,1.5fr) minmax(120px,1.2fr) minmax(120px,1.3fr) minmax(52px,56px) minmax(72px,80px) minmax(72px,80px) minmax(84px,95px) 24px'; }
 function calcLineHtml(p,si,l,li){
+  const canEdit=calcCanEdit();
   const subs=SYS.subcontractors;
   const sub=subs.find(s=>s.id===l.subId);
   const houseOpts=p.houses.map(h=>{
@@ -11265,26 +11269,28 @@ function calcLineHtml(p,si,l,li){
   }).join('');
   const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId);
   const price=t?installPricePerM2(p,t):0; const total=calcLineTotal(p,l); const iva=total*0.13;
+  const dsb=canEdit?'':'disabled';
   return `<div class="calc-line" style="${calcCols()}">
-    <select data-no-search style="font-size:11px" onchange="calcSetSub(${si},${li},this.value)"><option value="">— Instalador —</option>${subs.map(s=>`<option value="${s.id}"${l.subId===s.id?' selected':''}>${s.name}</option>`).join('')}</select>
-    ${crewDropHtml(sub,l.crewIds,(id)=>`calcToggleCrew(${si},${li},'${id}',this.checked)`)}
-    <select data-no-search style="font-size:11px" onchange="calcSetHouse(${si},${li},this.value)"><option value="">— Casa —</option>${houseOpts}</select>
-    <input type="number" style="font-size:11px;text-align:right" value="${l.pct!=null&&l.houseId?l.pct:''}" min="0" max="100" onchange="calcSetPct(${si},${li},this.value)"/>
-    <input type="number" style="font-size:11px;text-align:right" value="${l.area!=null&&l.houseId?l.area:''}" min="0" step="0.01" onchange="calcSetArea(${si},${li},this.value)"/>
+    <select data-no-search ${dsb} style="font-size:11px" onchange="calcSetSub(${si},${li},this.value)"><option value="">— Instalador —</option>${subs.map(s=>`<option value="${s.id}"${l.subId===s.id?' selected':''}>${s.name}</option>`).join('')}</select>
+    ${crewDropHtml(sub,l.crewIds,(id)=>`calcToggleCrew(${si},${li},'${id}',this.checked)`,!canEdit)}
+    <select data-no-search ${dsb} style="font-size:11px" onchange="calcSetHouse(${si},${li},this.value)"><option value="">— Casa —</option>${houseOpts}</select>
+    <input type="number" ${dsb} style="font-size:11px;text-align:right" value="${l.pct!=null&&l.houseId?l.pct:''}" min="0" max="100" onchange="calcSetPct(${si},${li},this.value)"/>
+    <input type="number" ${dsb} style="font-size:11px;text-align:right" value="${l.area!=null&&l.houseId?l.area:''}" min="0" step="0.01" onchange="calcSetArea(${si},${li},this.value)"/>
     <div style="text-align:center;font-size:12px">${fmt(price)}</div>
     <div class="oc-subtotal" style="text-align:center">${fmt(total)}</div>
     ${calcState.ivaShow?`<div style="text-align:center;font-size:12px;color:var(--amb)">${fmt(iva)}</div>`:''}
-    <button class="oc-btn-del" onclick="calcDelLine(${si},${li})">✕</button>
+    ${canEdit?`<button class="oc-btn-del" onclick="calcDelLine(${si},${li})">✕</button>`:'<div></div>'}
   </div>`;
 }
 function calcSectionHtml(sec,si){
   const p=projects.find(x=>x.id===sec.projId); if(!p)return '';
+  const canEdit=calcCanEdit();
   const sub=calcSectionSubtotal(sec); const iva=sub*0.13;
   return `<div class="calc-projbox">
-    <h5>${esc(p.name)}<button class="oc-btn-del" onclick="calcDelProject(${si})">✕</button></h5>
+    <h5>${esc(p.name)}${canEdit?`<button class="oc-btn-del" onclick="calcDelProject(${si})">✕</button>`:''}</h5>
     <div class="calc-line" style="${calcCols()}"><div class="cl-h">Instalador</div><div class="cl-h">Cuadrilla</div><div class="cl-h">Número de Casa</div><div class="cl-h" style="text-align:center">% Avance</div><div class="cl-h" style="text-align:center">Área (m²)</div><div class="cl-h" style="text-align:center">$/m²</div><div class="cl-h" style="text-align:center">Total</div>${calcState.ivaShow?'<div class="cl-h" style="text-align:center">IVA</div>':''}<div></div></div>
     ${sec.lines.map((l,li)=>calcLineHtml(p,si,l,li)).join('')}
-    <button class="btn-oc-extra" style="margin-top:6px" onclick="calcAddLine(${si})">+ Agregar</button>
+    ${canEdit?`<button class="btn-oc-extra" style="margin-top:6px" onclick="calcAddLine(${si})">+ Agregar</button>`:''}
     ${sec.err?`<div class="calc-err">${sec.err}</div>`:''}
     <div style="text-align:right;font-size:12px;margin-top:8px">${calcState.ivaShow?`Subtotal: ${fmt(sub)} · IVA: <span style="color:var(--amb)">${fmt(iva)}</span> · `:''}<strong>Total ${esc(p.name)}: <span style="color:var(--grn)">${fmt(calcState.ivaShow?sub+iva:sub)}</span></strong></div>
   </div>`;
@@ -11310,36 +11316,39 @@ function renderCalcBody(){
         <label style="font-size:11px;color:var(--t2);display:flex;align-items:center;gap:6px"><input type="checkbox" ${calcState.ivaShow?'checked':''} onchange="calcState.ivaShow=this.checked;renderCalcBody()" style="width:auto"/> IVA</label>
         ${!calcState.approvedBy?`<button class="btn-sm" onclick="calcSendApproval()">Enviar a aprobación</button>`:''}
         ${calcCanApprove()&&!calcState.approvedBy?`<button class="btn-sm" style="border-color:var(--grn);color:var(--grn)" onclick="calcApprove()">✓ Aprobar informe</button>`:''}
-        <select id="calc-proj-pick" data-no-search style="font-size:12px"><option value="">— Proyecto —</option>${projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
-        <button class="btn-add" onclick="calcAddProject()">+ Agregar Avance de Proyecto</button>
+        ${calcCanEdit()?`<select id="calc-proj-pick" data-no-search style="font-size:12px"><option value="">— Proyecto —</option>${projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+        <button class="btn-add" onclick="calcAddProject()">+ Agregar Avance de Proyecto</button>`:''}
       </div>
     </div>
     ${calcState.sections.map((sec,si)=>calcSectionHtml(sec,si)).join('')||'<div style="color:var(--t3);font-size:12px;padding:24px;text-align:center">Selecciona un proyecto y presiona "Agregar Avance de Proyecto".</div>'}`;
 }
 function calcAddProject(){
+  if(!calcCanEdit()){alert('Este avance ya fue facturado. Solo el Administrador puede modificarlo.');return;}
   const v=document.getElementById('calc-proj-pick').value;
   if(!v){alert('Selecciona un proyecto');return;}
   calcState.sections.push({projId:parseInt(v),lines:[{subId:'',crewIds:[],houseId:null,pct:null,area:null}],err:''});
   renderCalcBody();
 }
-function calcDelProject(si){ calcState.sections.splice(si,1); renderCalcBody(); }
-function calcAddLine(si){ const ls=calcState.sections[si].lines; const prevSub=ls.length?ls[ls.length-1].subId:''; const prevCrew=ls.length?(ls[ls.length-1].crewIds||[]).slice():[]; ls.push({subId:prevSub||'',crewIds:prevCrew,houseId:null,pct:null,area:null}); renderCalcBody(); }
-function calcDelLine(si,li){ calcState.sections[si].lines.splice(li,1); if(!calcState.sections[si].lines.length)calcState.sections[si].lines.push({subId:'',crewIds:[],houseId:null,pct:null,area:null}); renderCalcBody(); }
-function calcSetSub(si,li,v){ const l=calcState.sections[si].lines[li]; l.subId=v; l.crewIds=[]; renderCalcBody(); }
-function calcToggleCrew(si,li,mid,ck){ const l=calcState.sections[si].lines[li]; if(!l.crewIds)l.crewIds=[]; if(ck){if(!l.crewIds.includes(mid))l.crewIds.push(mid);}else{l.crewIds=l.crewIds.filter(x=>x!==mid);} }
+function calcDelProject(si){ if(!calcCanEdit()){alert('Este avance ya fue facturado. Solo el Administrador puede modificarlo.');return;} calcState.sections.splice(si,1); renderCalcBody(); }
+function calcAddLine(si){ if(!calcCanEdit()){alert('Este avance ya fue facturado. Solo el Administrador puede modificarlo.');return;} const ls=calcState.sections[si].lines; const prevSub=ls.length?ls[ls.length-1].subId:''; const prevCrew=ls.length?(ls[ls.length-1].crewIds||[]).slice():[]; ls.push({subId:prevSub||'',crewIds:prevCrew,houseId:null,pct:null,area:null}); renderCalcBody(); }
+function calcDelLine(si,li){ if(!calcCanEdit()){alert('Este avance ya fue facturado. Solo el Administrador puede modificarlo.');return;} calcState.sections[si].lines.splice(li,1); if(!calcState.sections[si].lines.length)calcState.sections[si].lines.push({subId:'',crewIds:[],houseId:null,pct:null,area:null}); renderCalcBody(); }
+function calcSetSub(si,li,v){ if(!calcCanEdit())return; const l=calcState.sections[si].lines[li]; l.subId=v; l.crewIds=[]; renderCalcBody(); }
+function calcToggleCrew(si,li,mid,ck){ if(!calcCanEdit())return; const l=calcState.sections[si].lines[li]; if(!l.crewIds)l.crewIds=[]; if(ck){if(!l.crewIds.includes(mid))l.crewIds.push(mid);}else{l.crewIds=l.crewIds.filter(x=>x!==mid);} }
 // dropdown de cuadrilla (multi-check) reutilizable. onAttr(id) -> string JS para onchange (usa this.checked)
-function crewDropHtml(sub,selected,onAttr){
+function crewDropHtml(sub,selected,onAttr,disabled){
   const sel=selected||[];
+  const dis=disabled?' disabled':'';
   const names=sub?(sub.crew||[]).filter(m=>sel.includes(m.id)).map(m=>m.name).join(', '):'';
   const label=sel.includes('__unknown__')?'Info. desconocida'+(names?', '+names:''):(names||'— Cuadrilla —');
-  let opts=`<label style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 6px"><input type="checkbox" style="width:auto" ${sel.includes('__unknown__')?'checked':''} onchange="${onAttr('__unknown__')}"/>Información desconocida</label>`;
-  if(sub) opts+=(sub.crew||[]).map(m=>`<label style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 6px"><input type="checkbox" style="width:auto" ${sel.includes(m.id)?'checked':''} onchange="${onAttr(m.id)}"/>${esc(m.name||'(sin nombre)')} <span style="color:var(--t3)">· ${esc(m.role)}</span></label>`).join('');
+  let opts=`<label style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 6px"><input type="checkbox" style="width:auto"${dis} ${sel.includes('__unknown__')?'checked':''} onchange="${onAttr('__unknown__')}"/>Información desconocida</label>`;
+  if(sub) opts+=(sub.crew||[]).map(m=>`<label style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 6px"><input type="checkbox" style="width:auto"${dis} ${sel.includes(m.id)?'checked':''} onchange="${onAttr(m.id)}"/>${esc(m.name||'(sin nombre)')} <span style="color:var(--t3)">· ${esc(m.role)}</span></label>`).join('');
   return `<div style="position:relative">
-    <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='block'?'none':'block'" style="font-size:11px;border:1px solid var(--border2);border-radius:6px;padding:4px 8px;cursor:pointer;background:var(--bg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)} ▾</div>
+    <div onclick="${disabled?'':"this.nextElementSibling.style.display=this.nextElementSibling.style.display==='block'?'none':'block'"}" style="font-size:11px;border:1px solid var(--border2);border-radius:6px;padding:4px 8px;cursor:${disabled?'default':'pointer'};background:var(--bg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:${disabled?'.6':'1'}">${esc(label)}${disabled?'':' ▾'}</div>
     <div style="display:none;position:absolute;top:100%;left:0;min-width:190px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;z-index:50;max-height:170px;overflow:auto;box-shadow:0 6px 18px rgba(0,0,0,.4)">${opts}</div>
   </div>`;
 }
 function calcSetHouse(si,li,v){
+  if(!calcCanEdit())return;
   const sec=calcState.sections[si]; const p=projects.find(x=>x.id===sec.projId); const l=sec.lines[li];
   sec.err='';
   const newId=v?parseInt(v):null;
@@ -11355,6 +11364,7 @@ function calcSetHouse(si,li,v){
   renderCalcBody();
 }
 function calcSetPct(si,li,val){
+  if(!calcCanEdit())return;
   const sec=calcState.sections[si]; const p=projects.find(x=>x.id===sec.projId); const l=sec.lines[li];
   sec.err=''; const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId);
   if(!t){renderCalcBody();return;}
@@ -11366,6 +11376,7 @@ function calcSetPct(si,li,val){
   renderCalcBody();
 }
 function calcSetArea(si,li,val){
+  if(!calcCanEdit())return;
   const sec=calcState.sections[si]; const p=projects.find(x=>x.id===sec.projId); const l=sec.lines[li];
   sec.err=''; const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId);
   if(!t){renderCalcBody();return;}
@@ -11405,6 +11416,7 @@ function calcDeleteAdvance(id){
   saveData(); showToast('Avance eliminado'); renderCalcWin();
 }
 function saveCalc(){
+  if(!calcCanEdit()){alert('Este avance ya fue facturado. Solo el Administrador puede modificarlo.');return;}
   // valida que haya al menos una línea con casa y área
   let count=0, firstSubId='', firstSubName='';
   calcState.sections.forEach(sec=>sec.lines.forEach(l=>{ if(l.houseId&&l.area){count++; if(!firstSubId&&l.subId){firstSubId=l.subId; const s=SYS.subcontractors.find(x=>x.id===l.subId); firstSubName=s?s.name:'';}} }));
