@@ -1906,6 +1906,61 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] **Commits + deploy:** 6 commits pusheados a `agoldav/Siscon-web`, todos desplegados a producción
   vía Vercel (2026-08-03).
 
+### Sesión 2026-08-03 (Importación de Lista de Casas + fix de raíz de IDs number/string + Calculadora de Avance)
+> Cubre el ítem de Pendiente "Carga posterior de casas desde Excel" (solo la parte de número de casa +
+> tipo — la importación de tipos con líneas de materiales ya estaba cubierta por la sesión anterior) y
+> mejoras pedidas por el usuario sobre la Calculadora de Avance de Subcontratos, no listadas en Pendiente.
+- [x] **Importación de Lista de Casas (Excel o PDF):** botón "Importar" en Lista de Casas
+  (`housesImportFilePicker`/`housesImportExcel`/`housesImportPDF`). Acepta columnas Número de Casa +
+  Tipo de Casa; el PDF se procesa vía OCR con Claude. El Tipo debe coincidir **100%** (exacto, solo
+  normalizando mayúsculas/espacios) con un Tipo ya creado en el proyecto — si no matchea, bloquea toda
+  la importación con el mensaje "No se puede hacer la importación" y el detalle de las filas con error.
+  Crea las casas con el número y el `typeId` asignados (`housesApplyImported`).
+  - [x] Fix de bug encontrado en pruebas: la validación guardaba el objeto Tipo completo en vez del
+    nombre (`item.type.toLowerCase is not a function`); corregido a guardar `typeName`.
+- [x] **Causa raíz encontrada y corregida — comparaciones de ID de casa con `===` estricto:**
+  ~70 funciones en todo el archivo comparaban `houses.find(x=>x.id===id)` (u opciones de `<select>`
+  equivalentes) con igualdad estricta. Cuando el tipo no coincide (number vs string, p. ej. tras
+  guardar/recargar desde Supabase), la búsqueda falla en silencio. Esto causaba: panel de casa que
+  abre en blanco y luego deja de abrir del todo tras el segundo clic (`openHP`/`renderHPBody`/
+  `hpIsDirty` con estado inconsistente); dropdown "Número de Casa" en la Calculadora de Avance que no
+  mostraba la casa ya seleccionada aunque el % y el área sí estaban correctos; mismo problema en chips
+  de casa de OC, Factura Cliente y selector de casa de Bitácora. Reemplazadas todas las comparaciones
+  por `String(x.id)===String(id)` (patrón ya usado en el resto de la app).
+- [x] **Fix del generador de ID en la importación de casas:** `Date.now()+Math.random()*1000000|0`
+  generaba IDs **negativos** por precedencia de operadores (el `|0` truncaba a 32 bits toda la suma).
+  Corregido a `Date.now()+(_idOffset++)`, igual patrón que `addHouseBulk()`.
+- [x] **Fix `houseSubAdvancedPct`:** mismo bug de comparación de tipo (`sec.projId!==p.id`,
+  `l.houseId===houseId`) impedía sumar correctamente el % ya avanzado de una casa, por lo que el
+  dropdown de la Calculadora nunca deshabilitaba casas que ya llegaron al 100% de avance. Corregido;
+  ahora esas casas aparecen en gris y no se pueden seleccionar.
+- [x] **Polling de sincronización entre sesiones:** cada 10 segundos (`startVersionSync`/
+  `stopVersionSync`), la app compara `_settingsVersion` contra el servidor; si otro usuario guardó
+  cambios, muestra "⚠ Otro usuario hizo cambios. Recargando…" y recarga automáticamente desde
+  Supabase. Arranca al hacer login, se detiene al hacer logout. Mitiga (no elimina del todo) el
+  problema de estado desfasado entre dos sesiones simultáneas (Admin + Regular).
+- [x] **Calculadora de Avance — permisos sobre avances facturados:**
+  - [x] Solo **Administrador** puede eliminar un avance ya facturado (antes el botón de eliminar se
+    ocultaba para todos una vez facturado, sin manera de borrarlo salvo eliminando la factura
+    vinculada a mano primero). Admin ahora puede eliminar con confirmación explícita, que borra en
+    cascada la factura de proveedor vinculada y revierte el gasto/compras de la casa asociada.
+  - [x] Un avance ya facturado queda de **solo lectura** para usuario regular: todos los campos
+    (instalador, cuadrilla, casa, % avance, área) se deshabilitan, se ocultan los botones de
+    eliminar línea/proyecto y de agregar, con mensaje "🔒 Facturado — solo el Administrador puede
+    modificarlo" (solo queda disponible generar informes PDF/Excel). Además de ocultar los controles,
+    se agregó un guard a nivel de función (`calcCanEdit()`) en cada mutador
+    (`calcSetHouse`/`calcSetPct`/`calcSetArea`/`calcAddLine`/`calcDelLine`/`calcAddProject`/
+    `calcDelProject`/`calcSetSub`/`calcToggleCrew`/`saveCalc`) para que la restricción no dependa
+    solo de la interfaz.
+- [x] **Calculadora de Avance — ordenar y filtrar la lista de avances:**
+  - [x] Ordenar por Fecha, Consecutivo o Monto, ascendente/descendente (clic alterna dirección, mismo
+    patrón que Bitácora).
+  - [x] Filtro por Contratista (multi-selección vía checkboxes, mismo patrón que "Columnas" en Lista
+    de Casas) y filtro por Proyecto (selección única; solo muestra avances que incluyan ese proyecto).
+- [x] **Commits + deploy:** 9 commits pusheados a `agoldav/Siscon-web` (`bf23f67`, `bdf41c1`,
+  `314219f`, `67f6bbd`, `fe77a81`, `b79983e`, `cce8d5d`, `eee4da1`), todos desplegados a producción
+  vía Vercel (2026-08-03).
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -1926,7 +1981,6 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
-- [ ] **Carga posterior de casas desde Excel:** el usuario entregará por proyecto las listas de tipos de casa y sus líneas de materiales, más la lista de números de casa y tipo correspondiente. Importarlas automáticamente solo cuando entregue cada archivo e instrucciones.
 - [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
 ### Infraestructura / Producción
