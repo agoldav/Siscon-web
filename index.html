@@ -5185,7 +5185,7 @@ function housesApplyImported(importData){
 // ========== HOUSE PANEL ==========
 function openHP(houseId){
   curHouseId=houseId;
-  const h=curProj.houses.find(x=>x.id===houseId);
+  const h=curProj.houses.find(x=>String(x.id)===String(houseId));
   hpSnapshot=JSON.parse(JSON.stringify(h));
   fwinOpen('house',{
     title:'Casa: '+h.num,
