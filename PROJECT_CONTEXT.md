@@ -2069,7 +2069,6 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Infraestructura / Producción
 - [x] Persistencia cifrada de tokens QBO en Supabase (no en `/tmp`) — implementada y desplegada el 2026-08-01; el vault nunca se expone al frontend y el reinicio total lo elimina.
-- [x] Seguridad: API keys siempre vía backend, nunca expuestas en el navegador — verificado 2026-08-03: ninguna API key real expuesta; se eliminó además un `SISCON_TOKEN` legado hardcodeado en el frontend que ya no protegía nada en producción (ver Sección 9).
 - [x] Habilitar RLS correctamente en Supabase — deny-by-default verificado + `FORCE` en las 21 tablas (VUL-016, 2026-07-24). Las políticas por-rol/usuario (VUL-014/015) se reclasificaron como *no aplican por arquitectura* (service_role ignora RLS + el frontend no accede directo); ver Sección 11.
 
 ### Informes adicionales (pendiente de implementar)
