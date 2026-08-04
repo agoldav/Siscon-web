@@ -11936,13 +11936,15 @@ function svgNetBars(items, zoom){
 function svgChart1(items,showG,showP,zoom){
   if(!items.length)return '<div style="color:var(--t3);font-size:11px;padding:20px;text-align:center">Sin proyectos para el filtro seleccionado</div>';
   zoom=+zoom||1;
-  const H=220*zoom,pad=42*zoom, dual=(showG||showP), groupW=(dual?130:96)*zoom, W=items.length*groupW+30*zoom;
-  const barW=36*zoom, gap2=42*zoom, fs=9*zoom;
+  const padLeft=34*zoom;
+  const H=220*zoom,pad=42*zoom, dual=(showG||showP), groupW=(dual?130:96)*zoom, W=items.length*groupW+30*zoom+padLeft;
+  const barW=36*zoom, gap2=42*zoom, fs=9*zoom, barTop=26*zoom;
   let max=1; items.forEach(it=>{ max=Math.max(max,it.venta,(showG?it.gastado:0)+(showG&&showP?it.pendiente:0),(showP&&!showG?it.pendiente:0)); });
-  const bh=v=>(v/max)*(H-pad-26*zoom);
-  let svg=chartGrid(W,H,pad,18*zoom)+`<line x1="0" y1="${H-pad}" x2="${W}" y2="${H-pad}" stroke="var(--border2)"/>`;
+  const bh=v=>(v/max)*(H-pad-barTop);
+  const axis=chartYAxis([0,max/3,max*2/3,max].map(v=>({val:v,y:H-pad-(v/max)*(H-pad-barTop)})),padLeft,W,zoom);
+  let svg=axis+`<line x1="${padLeft}" y1="${H-pad}" x2="${W}" y2="${H-pad}" stroke="var(--border2)"/>`;
   items.forEach((it,i)=>{
-    const x=25*zoom+i*groupW;
+    const x=padLeft+10*zoom+i*groupW;
     const vh=bh(it.venta);
     svg+=`<rect x="${x.toFixed(1)}" y="${(H-pad-vh).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1,vh).toFixed(1)}" rx="${(6*zoom).toFixed(1)}" fill="var(--acc)"${chartMarkAttrs({label:'Venta · '+it.label,value:it.venta,id:it.id})}/>`;
     svg+=`<text x="${(x+barW/2).toFixed(1)}" y="${(H-pad-vh-4*zoom).toFixed(1)}" text-anchor="middle" font-size="${fs.toFixed(1)}" fill="var(--t1)">${fmtShort(it.venta)}</text>`;
