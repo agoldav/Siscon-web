@@ -11010,8 +11010,8 @@ function houseSubAdvancedPct(p,houseId){
   (SYS.subAdvanceRecords||[]).forEach(rec=>{
     if(rec.id===calcEditId)return; // excluir el avance que se está editando ahora
     (rec.state&&rec.state.sections||[]).forEach(sec=>{
-      if(sec.projId!==p.id)return;
-      sec.lines.forEach(l=>{ if(l.houseId===houseId) total+=(l.pct||0); });
+      if(String(sec.projId)!==String(p.id))return;
+      sec.lines.forEach(l=>{ if(String(l.houseId)===String(houseId)) total+=(l.pct||0); });
     });
   });
   return Math.min(total,100);
