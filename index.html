@@ -11912,20 +11912,26 @@ function projCashflowNet(p,weeks){
   return {egreso,ingreso,net:ingreso-egreso};
 }
 // barras con valores negativos (línea cero al centro)
-function svgNetBars(items){
+function svgNetBars(items, zoom){
   if(!items.length)return '<div style="color:var(--t3);font-size:11px;padding:20px;text-align:center">Sin proyectos seleccionados</div>';
-  const H=210,padTop=22,padBot=34,groupW=92,W=items.length*groupW+30;
+  zoom=+zoom||1;
+  const H=210*zoom,padTop=22*zoom,padBot=34*zoom,groupW=92*zoom,padLeft=34*zoom;
+  const W=items.length*groupW+30*zoom+padLeft;
   const maxAbs=Math.max(1,...items.map(i=>Math.abs(i.value)));
   const half=(H-padTop-padBot)/2, zeroY=padTop+half;
-  let svg=chartGrid(W,H,padBot,padTop)+`<line x1="0" y1="${zeroY}" x2="${W}" y2="${zeroY}" stroke="var(--border2)"/>`;
+  const axisVals=[maxAbs,maxAbs/2,0,-maxAbs/2,-maxAbs].map(v=>({val:v,y:zeroY-(v/maxAbs)*half}));
+  let svg=chartYAxis(axisVals,padLeft,W,zoom)+`<line x1="${padLeft}" y1="${zeroY.toFixed(1)}" x2="${W}" y2="${zeroY.toFixed(1)}" stroke="var(--border2)"/>`;
   items.forEach((it,i)=>{
-    const x=28+i*groupW, h=Math.abs(it.value)/maxAbs*half, pos=it.value>=0;
+    const x=padLeft+10*zoom+i*groupW, h=Math.abs(it.value)/maxAbs*half, pos=it.value>=0;
     const y=pos?zeroY-h:zeroY, color=pos?'var(--grn)':'var(--red)';
-    svg+=`<rect x="${x}" y="${y.toFixed(1)}" width="44" height="${Math.max(1,h).toFixed(1)}" rx="6" fill="${color}"${chartMarkAttrs(it)}/>`;
-    svg+=`<text x="${x+22}" y="${(pos?y-4:y+h+12).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--t1)">${fmtShort(it.value)}</text>`;
-    svg+=`<text x="${x+22}" y="${H-10}" text-anchor="middle" font-size="9" fill="var(--t2)">${it.label.length>12?it.label.slice(0,11)+'…':it.label}</text>`;
+    svg+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(44*zoom).toFixed(1)}" height="${Math.max(1,h).toFixed(1)}" rx="${(6*zoom).toFixed(1)}" fill="${color}"${chartMarkAttrs(it)}/>`;
+    svg+=`<text x="${(x+22*zoom).toFixed(1)}" y="${(pos?y-4*zoom:y+h+12*zoom).toFixed(1)}" text-anchor="middle" font-size="${(9*zoom).toFixed(1)}" fill="var(--t1)">${fmtShort(it.value)}</text>`;
+    svg+=`<text x="${(x+22*zoom).toFixed(1)}" y="${(H-10*zoom).toFixed(1)}" text-anchor="middle" font-size="${(9*zoom).toFixed(1)}" fill="var(--t2)">${it.label.length>12?it.label.slice(0,11)+'…':it.label}</text>`;
   });
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto">${svg}</svg>`;
+  const svgTag = zoom>1
+    ? `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${svg}</svg>`
+    : `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto">${svg}</svg>`;
+  return zoom>1 ? `<div style="overflow-x:auto">${svgTag}</div>` : svgTag;
 }
 function svgChart1(items,showG,showP,zoom){
   if(!items.length)return '<div style="color:var(--t3);font-size:11px;padding:20px;text-align:center">Sin proyectos para el filtro seleccionado</div>';
