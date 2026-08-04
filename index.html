@@ -640,6 +640,9 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
 .stats-menu{position:absolute;top:calc(100% + 4px);right:0;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:8px;z-index:45;min-width:210px;box-shadow:0 8px 24px rgba(0,0,0,.4);max-height:260px;overflow:auto;}
 .stats-menu label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t1);padding:4px 2px;cursor:pointer;}
 .stats-menu input{width:auto;}
+#chart-tip{position:fixed;display:none;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:8px 12px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:10050;pointer-events:none;white-space:nowrap;}
+#chart-tip .ct-label{display:block;font-size:10px;font-weight:500;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px;}
+#chart-tip .ct-val{display:block;font-size:16px;font-weight:700;color:var(--t1);}
 /* ===== Mensajes internos ===== */
 .msg-wrap{display:flex;height:100%;overflow:hidden}
 .msg-side{width:260px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg1)}
@@ -9386,7 +9389,7 @@ function svgBars(items){
     const x=30+idx*gap;
     const h=(Math.abs(it.value)/max)*(H-pad-22);
     const y=H-pad-h;
-    bars+=`<rect x="${x}" y="${y}" width="${bw}" height="${Math.max(1,h)}" rx="7" fill="${it.color}"/>`;
+    bars+=`<rect x="${x}" y="${y}" width="${bw}" height="${Math.max(1,h)}" rx="7" fill="${it.color}"${chartMarkAttrs(it)}/>`;
     bars+=`<text x="${x+bw/2}" y="${y-7}" text-anchor="middle" font-size="10" font-weight="600" fill="var(--t1)">${it.disp||fmtShort(it.value)}</text>`;
     bars+=`<text x="${x+bw/2}" y="${H-12}" text-anchor="middle" font-size="9" fill="var(--t2)">${it.label}</text>`;
   });
@@ -9396,7 +9399,7 @@ function svgDonut(segs, centerLabel){
   const total=segs.reduce((s,x)=>s+Math.max(0,x.value),0)||1;
   const r=58,c=2*Math.PI*r,cx=78,cy=78; let off=0,arcs='';
   segs.forEach(s=>{ const len=Math.max(0,s.value)/total*c;
-    arcs+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="18" stroke-linecap="round" stroke-dasharray="${Math.max(0,len-3)} ${c-len+3}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cx} ${cy})"/>`;
+    arcs+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="18" stroke-linecap="round" stroke-dasharray="${Math.max(0,len-3)} ${c-len+3}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cx} ${cy})"${chartMarkAttrs(s)}/>`;
     off+=len; });
   return `<svg viewBox="0 0 156 156" width="156" height="156"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border)" stroke-width="18"/>${arcs}<text x="78" y="74" text-anchor="middle" font-size="20" font-weight="700" fill="var(--t1)">${centerLabel||''}</text><text x="78" y="92" text-anchor="middle" font-size="9" fill="var(--t2)">consumido</text></svg>`;
 }
@@ -9408,13 +9411,39 @@ function svgLine(pts){
   let path='',dots='',labels=''; const step=Math.ceil(pts.length/7)||1;
   pts.forEach((p,i)=>{ const x=X(i),y=Y(p.value);
     path+=(i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' ';
-    dots+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(--bg1)" stroke="#7c6fef" stroke-width="2"/>`;
+    dots+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(--bg1)" stroke="#7c6fef" stroke-width="2"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="10" fill="transparent"${chartMarkAttrs(p)}/>`;
     if(i%step===0)labels+=`<text x="${x.toFixed(1)}" y="${H-9}" text-anchor="middle" font-size="8" fill="var(--t2)">${p.label}</text>`; });
   const area=path+`L ${X(pts.length-1).toFixed(1)} ${H-pad} L ${X(0).toFixed(1)} ${H-pad} Z`;
   const gid='lg'+(_gid++);
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#7c6fef" stop-opacity=".28"/><stop offset="100%" stop-color="#7c6fef" stop-opacity="0"/></linearGradient></defs>${chartGrid(W,H,pad)}<line x1="0" y1="${H-pad}" x2="${W}" y2="${H-pad}" stroke="var(--border2)"/><path d="${area}" fill="url(#${gid})"/><path d="${path}" fill="none" stroke="#7c6fef" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}${labels}</svg>`;
 }
 function legend(items){ return `<div class="chart-legend">${items.map(i=>`<span><span class="lg-dot" style="background:${i.color}"></span>${i.label}</span>`).join('')}</div>`; }
+function chartTipEl(){
+  let el=document.getElementById('chart-tip');
+  if(!el){ el=document.createElement('div'); el.id='chart-tip'; el.innerHTML='<span class="ct-label"></span><span class="ct-val"></span>'; document.body.appendChild(el); }
+  return el;
+}
+function chartTipShow(e){
+  const t=e.currentTarget, label=t.dataset.label||'', value=+t.dataset.value||0;
+  const el=chartTipEl();
+  el.querySelector('.ct-label').textContent=label;
+  el.querySelector('.ct-val').textContent=fmt(value);
+  el.style.display='block';
+  chartTipMove(e);
+}
+function chartTipMove(e){
+  const el=document.getElementById('chart-tip'); if(!el||el.style.display==='none')return;
+  const pad=14, r=el.getBoundingClientRect();
+  let x=e.clientX+pad, y=e.clientY+pad;
+  if(x+r.width>window.innerWidth-8) x=e.clientX-r.width-pad;
+  if(y+r.height>window.innerHeight-8) y=e.clientY-r.height-pad;
+  el.style.left=Math.max(4,x)+'px'; el.style.top=Math.max(4,y)+'px';
+}
+function chartTipHide(){ const el=document.getElementById('chart-tip'); if(el)el.style.display='none'; }
+function chartMarkAttrs(it){
+  const clk=it.id!=null?` onclick="openProj(${it.id})" style="cursor:pointer"`:'';
+  return ` data-label="${esc(it.label)}" data-value="${it.value}" onmouseenter="chartTipShow(event)" onmousemove="chartTipMove(event)" onmouseleave="chartTipHide()"${clk}`;
+}
 
 // ---- Cards de gráficos (reutilizable en app y en informe) ----
 function infoCharts(p){
@@ -11872,7 +11901,7 @@ function svgNetBars(items){
   items.forEach((it,i)=>{
     const x=28+i*groupW, h=Math.abs(it.value)/maxAbs*half, pos=it.value>=0;
     const y=pos?zeroY-h:zeroY, color=pos?'var(--grn)':'var(--red)';
-    svg+=`<rect x="${x}" y="${y.toFixed(1)}" width="44" height="${Math.max(1,h).toFixed(1)}" rx="6" fill="${color}"/>`;
+    svg+=`<rect x="${x}" y="${y.toFixed(1)}" width="44" height="${Math.max(1,h).toFixed(1)}" rx="6" fill="${color}"${chartMarkAttrs(it)}/>`;
     svg+=`<text x="${x+22}" y="${(pos?y-4:y+h+12).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--t1)">${fmtShort(it.value)}</text>`;
     svg+=`<text x="${x+22}" y="${H-10}" text-anchor="middle" font-size="9" fill="var(--t2)">${it.label.length>12?it.label.slice(0,11)+'…':it.label}</text>`;
   });
@@ -11887,13 +11916,13 @@ function svgChart1(items,showG,showP){
   items.forEach((it,i)=>{
     const x=25+i*groupW;
     const vh=bh(it.venta);
-    svg+=`<rect x="${x}" y="${(H-pad-vh).toFixed(1)}" width="36" height="${Math.max(1,vh).toFixed(1)}" rx="6" fill="var(--acc)"/>`;
+    svg+=`<rect x="${x}" y="${(H-pad-vh).toFixed(1)}" width="36" height="${Math.max(1,vh).toFixed(1)}" rx="6" fill="var(--acc)"${chartMarkAttrs({label:'Venta · '+it.label,value:it.venta,id:it.id})}/>`;
     svg+=`<text x="${x+18}" y="${(H-pad-vh-4).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--t1)">${fmtShort(it.venta)}</text>`;
     if(dual){
       const x2=x+42;
-      if(showG){ const gh=bh(it.gastado); svg+=`<rect x="${x2}" y="${(H-pad-gh).toFixed(1)}" width="36" height="${Math.max(1,gh).toFixed(1)}" rx="6" fill="var(--org)"/>`;
-        if(showP){ const ph=bh(it.pendiente); svg+=`<rect x="${x2}" y="${(H-pad-gh-ph).toFixed(1)}" width="36" height="${Math.max(1,ph).toFixed(1)}" rx="6" fill="var(--amb)"/>`; }
-      } else if(showP){ const ph=bh(it.pendiente); svg+=`<rect x="${x2}" y="${(H-pad-ph).toFixed(1)}" width="36" height="${Math.max(1,ph).toFixed(1)}" rx="6" fill="var(--amb)"/>`; }
+      if(showG){ const gh=bh(it.gastado); svg+=`<rect x="${x2}" y="${(H-pad-gh).toFixed(1)}" width="36" height="${Math.max(1,gh).toFixed(1)}" rx="6" fill="var(--org)"${chartMarkAttrs({label:'Gastado · '+it.label,value:it.gastado,id:it.id})}/>`;
+        if(showP){ const ph=bh(it.pendiente); svg+=`<rect x="${x2}" y="${(H-pad-gh-ph).toFixed(1)}" width="36" height="${Math.max(1,ph).toFixed(1)}" rx="6" fill="var(--amb)"${chartMarkAttrs({label:'Pendiente · '+it.label,value:it.pendiente,id:it.id})}/>`; }
+      } else if(showP){ const ph=bh(it.pendiente); svg+=`<rect x="${x2}" y="${(H-pad-ph).toFixed(1)}" width="36" height="${Math.max(1,ph).toFixed(1)}" rx="6" fill="var(--amb)"${chartMarkAttrs({label:'Pendiente · '+it.label,value:it.pendiente,id:it.id})}/>`; }
     }
     svg+=`<text x="${x+(dual?39:18)}" y="${H-pad+14}" text-anchor="middle" font-size="9" fill="var(--t2)">${it.label.length>13?it.label.slice(0,12)+'…':it.label}</text>`;
   });
