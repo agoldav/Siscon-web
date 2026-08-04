@@ -6762,8 +6762,8 @@ function renderOCForm(){
   const chipsHtml = selectedHouses.map(h => {
     const hType = h.typeId ? p.types.find(x=>x.id===h.typeId) : null;
     const opts = allHouses.map(ah =>
-      `<option value="${ah.id}"${ah.id===h.id?' selected':''}${st.houseIds.includes(ah.id)&&ah.id!==h.id?' disabled':''}>
-        ${esc(ah.num)}${st.houseIds.includes(ah.id)&&ah.id!==h.id?' ✓':''}</option>`
+      `<option value="${ah.id}"${String(ah.id)===String(h.id)?' selected':''}${st.houseIds.includes(ah.id)&&String(ah.id)!==String(h.id)?' disabled':''}>
+        ${esc(ah.num)}${st.houseIds.includes(ah.id)&&String(ah.id)!==String(h.id)?' ✓':''}</option>`
     ).join('');
     return `<div class="oc-house-chip" style="flex-direction:column;align-items:flex-start;gap:1px;padding:5px 10px 5px 12px">
       <div style="display:flex;align-items:center;gap:0">
@@ -6791,7 +6791,7 @@ function renderOCForm(){
   } else {
     tabsHtml = `<button class="oc-mat-tab resumen${st.activeTab==='resumen'?' active':''}" onclick="ocSetTab('resumen')">Resumen</button>`;
     tabsHtml += selectedHouses.map(h =>
-      `<button class="oc-mat-tab${st.activeTab===h.id?' active':''}" onclick="ocSetTab(${h.id})">${esc(h.num)}</button>`
+      `<button class="oc-mat-tab${String(st.activeTab)===String(h.id)?' active':''}" onclick="ocSetTab(${h.id})">${esc(h.num)}</button>`
     ).join('');
   }
 
@@ -7097,7 +7097,7 @@ function ocSetTab(tab){
   const selectedHouses = p.houses.filter(h => st.houseIds.includes(h.id));
   bar.innerHTML = `<button class="oc-mat-tab resumen${st.activeTab==='resumen'?' active':''}" onclick="ocSetTab('resumen')">Resumen</button>` +
     selectedHouses.map(h =>
-      `<button class="oc-mat-tab${st.activeTab===h.id?' active':''}" onclick="ocSetTab(${h.id})">${esc(h.num)}</button>`
+      `<button class="oc-mat-tab${String(st.activeTab)===String(h.id)?' active':''}" onclick="ocSetTab(${h.id})">${esc(h.num)}</button>`
     ).join('');
 }
 function ocSelectVendor(v){
@@ -7531,7 +7531,7 @@ function ocOpenExtraModal(){
     </div>
     <div class="ff"><label>Casa asignada</label>
       <select id="oc-extra-house">
-        ${curProj.houses.filter(h=>st.houseIds.includes(h.id)).map(h=>`<option value="${h.id}"${h.id===houseId?' selected':''}>${esc(h.num)}</option>`).join('')}
+        ${curProj.houses.filter(h=>st.houseIds.includes(h.id)).map(h=>`<option value="${h.id}"${String(h.id)===String(houseId)?' selected':''}>${esc(h.num)}</option>`).join('')}
         <option value="all">Todas las casas</option>
       </select>
     </div>
@@ -10022,7 +10022,7 @@ function houseBilling(p,h){
   (p.invClient||[]).forEach(inv=>{
     if(inv.status==='Anulada') return;
     (inv.houseLines||[]).forEach(l=>{
-      if(l.houseId!==h.id) return;
+      if(String(l.houseId)!==String(h.id)) return;
       billedPct=Math.max(billedPct,l.pct||0);
       const imp=Math.max(0,((l.pct||0)-(l.prevPct||0))/100*sale);
       montoFact+=imp;
@@ -10121,7 +10121,7 @@ function ciFmt(usd){
 function ciAvailHouses(){
   const p=curProj;
   return p.houses.filter(h=>{
-    if(ciState.houseLines.some(l=>l.houseId===h.id)) return false;
+    if(ciState.houseLines.some(l=>String(l.houseId)===String(h.id))) return false;
     if(!h.typeId) return false;
     return houseBilledPct(p,h.id,ciState.id) < 100;
   });
@@ -10251,7 +10251,7 @@ function renderClientInvForm(){
   const chips=st.houseLines.map((l,idx)=>{
     const h=p.houses.find(x=>String(x.id)===String(l.houseId));
     const ht=h&&h.typeId?p.types.find(x=>x.id===h.typeId):null;
-    const opts=ciAvailHouses().concat(h?[h]:[]).map(ah=>`<option value="${ah.id}"${ah.id===l.houseId?' selected':''}>${esc(ah.num)}</option>`).join('');
+    const opts=ciAvailHouses().concat(h?[h]:[]).map(ah=>`<option value="${ah.id}"${String(ah.id)===String(l.houseId)?' selected':''}>${esc(ah.num)}</option>`).join('');
     return `<div class="oc-house-chip" style="flex-direction:column;align-items:flex-start;gap:1px;padding:5px 10px 5px 12px">
       <div style="display:flex;align-items:center;gap:0">
         <select class="oc-chip-sel" onchange="ciChangeHouse(${idx},parseInt(this.value))">${opts}</select>
@@ -11110,6 +11110,24 @@ function saveSubs(){ SYS.subcontractors=JSON.parse(JSON.stringify(subsWork)).map
 let calcState={ivaShow:false,sections:[]};
 let calcEditId=null; // id del avance en edición ('new' o id existente) o null = lista
 let calcListFilter={mode:'todos',from:'',to:''}; // filtro de periodo en la lista de avances
+let calcListSort='date', calcListSortDir=-1; // orden de la lista de avances
+let calcListSubFilter=[]; // ids de subcontratistas seleccionados (vacío = todos)
+let calcListProjFilter=''; // id de proyecto seleccionado ('' = todos)
+function calcSortBy(col){ if(calcListSort===col)calcListSortDir*=-1; else{calcListSort=col;calcListSortDir=(col==='date'?-1:1);} renderCalcList(); }
+function calcToggleSubFilter(id){
+  const sid=String(id);
+  if(calcListSubFilter.includes(sid)) calcListSubFilter=calcListSubFilter.filter(x=>x!==sid);
+  else calcListSubFilter.push(sid);
+  renderCalcList();
+  setTimeout(()=>{const d=document.getElementById('calc-sub-drop');if(d)d.style.display='block';},0);
+}
+function calcSetProjFilter(v){ calcListProjFilter=v; renderCalcList(); }
+function calcRecMatchesSub(r){ return !calcListSubFilter.length || calcListSubFilter.includes(String(r.subId)); }
+function calcRecMatchesProj(r){
+  if(!calcListProjFilter) return true;
+  const sections=(r.state&&r.state.sections)||[];
+  return sections.some(s=>String(s.projId)===String(calcListProjFilter));
+}
 function calcPeriodRange(mode){
   const now=new Date(); const y=now.getFullYear(), m=now.getMonth(), d=now.getDate();
   if(mode==='week'){
@@ -11149,21 +11167,44 @@ function openCalcWin(){
 function renderCalcWin(){
   if(calcEditId===null){ renderCalcList(); } else { renderCalcEditor(); }
 }
+function calcToggleSubDrop(e){ e.stopPropagation(); const d=document.getElementById('calc-sub-drop'); if(d)d.style.display=d.style.display==='block'?'none':'block'; }
+function closeCalcSubDrop(e){ const d=document.getElementById('calc-sub-drop'); if(d&&d.style.display==='block'&&!e.target.closest('#calc-sub-drop')&&!(e.target.textContent||'').includes('Contratista')) d.style.display='none'; }
 function renderCalcList(){
   if(!SYS.subAdvanceRecords)SYS.subAdvanceRecords=[];
-  const recs=SYS.subAdvanceRecords.filter(r=>calcInPeriod(r.date));
+  let recs=SYS.subAdvanceRecords.filter(r=>calcInPeriod(r.date)&&calcRecMatchesSub(r)&&calcRecMatchesProj(r));
+  recs=recs.slice().sort((a,b)=>{
+    if(calcListSort==='num') return calcListSortDir*((a.num||'').localeCompare(b.num||''));
+    if(calcListSort==='total') return calcListSortDir*((a.total||0)-(b.total||0));
+    return calcListSortDir*((a.date||'').localeCompare(b.date||''));
+  });
   const body=document.getElementById('calc-win'); const foot=document.getElementById('calc-foot');
   if(foot) foot.innerHTML=`<button class="btn-cancel" onclick="fwinClose('calc',true)">Cerrar</button><button class="btn-save" onclick="calcNew()">+ Crear Nuevo Avance</button>`;
   if(!body)return;
+  const sortBtn=(col,label)=>`<span onclick="calcSortBy('${col}')" style="cursor:pointer;font-size:11px;color:${calcListSort===col?'var(--acc)':'var(--t2)'};user-select:none;white-space:nowrap">${label}${calcListSort===col?(calcListSortDir>0?' ▲':' ▼'):''}</span>`;
   body.innerHTML=`
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
       <div style="font-size:12px;color:var(--t2)">${recs.length} avance(s) registrado(s)</div>
-      <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+      <div style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap">
+        <select style="font-size:12px" onchange="calcSetProjFilter(this.value)">
+          <option value=""${!calcListProjFilter?' selected':''}>Todos los proyectos</option>
+          ${projects.map(p=>`<option value="${p.id}"${String(calcListProjFilter)===String(p.id)?' selected':''}>${esc(p.name)}</option>`).join('')}
+        </select>
+        <div style="position:relative;display:inline-block">
+          <button class="btn-history" onclick="calcToggleSubDrop(event)">👷 Contratista${calcListSubFilter.length?` (${calcListSubFilter.length})`:''}</button>
+          <div id="calc-sub-drop" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);padding:8px;z-index:60;min-width:200px;max-height:260px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)">
+            <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">Contratistas</div>
+            ${SYS.subcontractors.length?SYS.subcontractors.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:12px;color:var(--t1);cursor:pointer"><input type="checkbox" ${calcListSubFilter.includes(String(s.id))?'checked':''} style="width:auto" onchange="calcToggleSubFilter('${s.id}')"/>${esc(s.name||'(Sin nombre)')}</label>`).join(''):`<div style="font-size:11px;color:var(--t3)">Sin contratistas</div>`}
+          </div>
+        </div>
         <select style="font-size:12px" onchange="calcSetFilterMode(this.value)">
           ${[['todos','Todos'],['week','Semana en Curso'],['month','Mes en Curso'],['range','Rango de fechas']].map(([v,l])=>`<option value="${v}"${calcListFilter.mode===v?' selected':''}>${l}</option>`).join('')}
         </select>
         ${calcListFilter.mode==='range'?`<input type="date" value="${calcListFilter.from||''}" onchange="calcSetFilterDate('from',this.value)" style="font-size:11px"/><input type="date" value="${calcListFilter.to||''}" onchange="calcSetFilterDate('to',this.value)" style="font-size:11px"/>`:''}
       </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;padding:0 2px">
+      <span style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px">Ordenar:</span>
+      ${sortBtn('date','Fecha')}${sortBtn('num','Consecutivo')}${sortBtn('total','Monto')}
     </div>
     ${recs.length?recs.map(r=>{
       const sub=SYS.subcontractors.find(s=>s.id===r.subId);
@@ -11172,8 +11213,9 @@ function renderCalcList(){
         <div style="flex:1"><div style="font-size:12px;color:var(--t1)">${r.title||'Avance'}</div><div style="font-size:10px;color:var(--t3)">${r.date} · ${r.lineCount} línea(s)${r.subName?' · '+r.subName:''}</div></div>
         <span style="font-size:12px;font-weight:600;color:var(--grn)">${fmt(r.total||0)}</span>
         <span class="qbo-badge${r.billed?'':' pending'}">${r.billed?'✓ Facturado':'Sin facturar'}</span>
-        ${!r.billed?`<button onclick="event.stopPropagation();calcDeleteAdvance('${r.id}')" style="background:transparent;border:none;color:var(--t3);font-size:12px;padding:4px 8px;cursor:pointer;border-radius:6px" title="Eliminar avance" onmouseenter="this.style.color='var(--red)'" onmouseleave="this.style.color='var(--t3)'">✕</button>`:''}
-      </div>`;}).join(''):`<div style="color:var(--t3);text-align:center;padding:30px;font-size:12px">${calcListFilter.mode==='todos'?'No hay avances. Crea uno con "+ Crear Nuevo Avance".':'No hay avances en el periodo seleccionado.'}</div>`}`;
+        ${(!r.billed||(currentUser&&currentUser.role==='Administrador'))?`<button onclick="event.stopPropagation();calcDeleteAdvance('${r.id}')" style="background:transparent;border:none;color:var(--t3);font-size:12px;padding:4px 8px;cursor:pointer;border-radius:6px" title="${r.billed?'Eliminar avance facturado (solo Admin)':'Eliminar avance'}" onmouseenter="this.style.color='var(--red)'" onmouseleave="this.style.color='var(--t3)'">✕</button>`:''}
+      </div>`;}).join(''):`<div style="color:var(--t3);text-align:center;padding:30px;font-size:12px">${calcListFilter.mode==='todos'&&!calcListSubFilter.length&&!calcListProjFilter?'No hay avances. Crea uno con "+ Crear Nuevo Avance".':'No hay avances con los filtros seleccionados.'}</div>`}`;
+  document.addEventListener('click',closeCalcSubDrop);
 }
 function calcNew(){
   calcEditId='new';
@@ -11218,8 +11260,8 @@ function calcLineHtml(p,si,l,li){
   const houseOpts=p.houses.map(h=>{
     const advPct=houseSubAdvancedPct(p,h.id);
     const statusBlocked=['Facturado','Pagado','Pagado Parcial'].includes(h.status);
-    const dis=(statusBlocked||advPct>=100)&&l.houseId!==h.id;
-    return `<option value="${h.id}"${l.houseId===h.id?' selected':''}${dis?' disabled':''}>${esc(h.num)}${dis?' (no disponible)':''}</option>`;
+    const dis=(statusBlocked||advPct>=100)&&String(l.houseId)!==String(h.id);
+    return `<option value="${h.id}"${String(l.houseId)===String(h.id)?' selected':''}${dis?' disabled':''}>${esc(h.num)}${dis?' (no disponible)':''}</option>`;
   }).join('');
   const h=p.houses.find(x=>String(x.id)===String(l.houseId)); const t=h&&p.types.find(x=>x.id===h.typeId);
   const price=t?installPricePerM2(p,t):0; const total=calcLineTotal(p,l); const iva=total*0.13;
@@ -11339,10 +11381,23 @@ function calcDeleteAdvance(id){
   const rec=(SYS.subAdvanceRecords||[]).find(x=>x.id===id);
   if(!rec)return;
   if(rec.billed){
-    // Buscar la factura relacionada para mostrar el número
-    let billInfo='';
-    projects.forEach(p=>{ const b=(p.billVendor||[]).find(x=>x.linkedAdvanceId===id); if(b)billInfo=`${b.num} de ${b.party||'proveedor'}`; });
-    alert(`No se puede eliminar este avance.\n\nPrimero debe borrar la factura ${billInfo||'relacionada'} antes de eliminar este avance.`);
+    const isAdmin=currentUser&&currentUser.role==='Administrador';
+    let linkedProj=null,linkedBill=null;
+    projects.forEach(p=>{ const b=(p.billVendor||[]).find(x=>x.linkedAdvanceId===id); if(b){linkedProj=p;linkedBill=b;} });
+    if(!isAdmin){
+      alert(`No se puede eliminar este avance.\n\nYa fue facturado (${linkedBill?`${linkedBill.num} de ${linkedBill.party||'proveedor'}`:'factura vinculada'}). Solo el Administrador puede eliminar avances ya facturados.`);
+      return;
+    }
+    const billInfo=linkedBill?`${linkedBill.num} de ${linkedBill.party||'proveedor'}`:'factura vinculada';
+    if(!confirm(`Este avance ya está facturado (${billInfo}).\n\nComo Administrador, esto eliminará TAMBIÉN esa factura de proveedor y revertirá el gasto asociado.\n\n¿Eliminar el avance ${rec.num} y su factura vinculada? Esta acción no se puede deshacer.`))return;
+    if(linkedProj&&linkedBill){
+      linkedProj.houses.forEach(h=>{ if(h.purchases){h.purchases=h.purchases.filter(pu=>pu.billId!==linkedBill.id);h.spent=h.purchases.reduce((s,pu)=>s+pu.qty*(pu.price||0),0);} });
+      if(linkedProj.bodega)linkedProj.bodega=linkedProj.bodega.filter(b=>b.billId!==linkedBill.id);
+      logAction(`Factura de Proveedor "${linkedBill.num}" eliminada (cascada desde avance ${rec.num} por Administrador)`,'log-delete','Factura de Proveedor',linkedBill,null);
+      linkedProj.billVendor=(linkedProj.billVendor||[]).filter(x=>String(x.id)!==String(linkedBill.id));
+    }
+    SYS.subAdvanceRecords=SYS.subAdvanceRecords.filter(x=>x.id!==id);
+    saveData(); showToast('Avance y factura vinculada eliminados'); renderCalcWin(); renderMetric();
     return;
   }
   if(!confirm(`¿Eliminar el avance ${rec.num}? Esta acción no se puede deshacer.`))return;
@@ -14479,7 +14534,7 @@ let bitaSort='priority', bitaSortDir=1;
 function bitaAdd(){ bitaNewModal(); }
 function bitaNewModal(editId){
   const b=editId?curProj.bitacora.find(x=>x.id===editId):null;
-  const houseOpts=(curProj.houses||[]).map(h=>`<option value="${h.id}"${b&&b.houseId===h.id?' selected':''}>${esc(h.num)}</option>`).join('');
+  const houseOpts=(curProj.houses||[]).map(h=>`<option value="${h.id}"${b&&String(b.houseId)===String(h.id)?' selected':''}>${esc(h.num)}</option>`).join('');
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">${editId?'Editar entrada':'Nueva entrada'} — Bitácora <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
