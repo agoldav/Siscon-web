@@ -2015,6 +2015,36 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] **Commits:** `dc0ac38` (tooltip), `2caf816` (click Dashboard), `792edd0` (filas
   Recuperación), `390fc7b` (zoom) en `agoldav/Siscon-web`.
 
+### Sesión 2026-08-03 (zoom en tiempo real + slider en las 3 gráficas restantes + eje Y)
+> Continuación pedida por el usuario sobre la sesión anterior. Spec/plan en
+> `docs/superpowers/specs/2026-08-03-charts-zoom-live-yaxis-design.md` y
+> `docs/superpowers/plans/2026-08-03-charts-zoom-live-yaxis.md`.
+- [x] **Slider de zoom en las 3 gráficas del Dashboard que no lo tenían:** "Proyección de Flujo
+  de Efectivo" (`svgNetBars`), "Gastos No Facturados" y "Facturas Pendientes de Pago"
+  (`svgBars`) — mismo mecanismo 1x-2.5x que ya tenía "Valor de Venta por Proyecto"
+  (`SYS.stats.zoomCash`/`zoomUnb`/`zoomPend`, con migración para instalaciones existentes).
+- [x] **Zoom en tiempo real (las 4 gráficas):** el zoom ahora se ve mientras se arrastra el
+  slider, no solo al soltarlo. Cada gráfica quedó envuelta en un contenedor con id fijo
+  (`chart-body-venta`/`cash`/`unb`/`pend`); el slider dispara `oninput` (cada tick) → función
+  nueva `chartZoomLive(which,val)` que solo reescribe el `innerHTML` de su propio contenedor
+  usando datos cacheados de `_statsChartData` (del último render completo), sin guardar ni
+  tocar el resto del DOM — así el slider nunca se destruye a medio arrastre. El `onchange` (al
+  soltar) se mantiene para persistir en `SYS.stats` igual que antes.
+- [x] **Números de referencia a la izquierda (eje Y) en las 4 gráficas:** helper compartido
+  `chartYAxis(vals,padLeft,W,zoom)` que dibuja línea + valor abreviado (`fmtShort`) en 4
+  referencias (`0, max/3, 2·max/3, max`) para `svgChart1`/`svgBars`, y 5 (`−max…max`, centradas
+  en cero) para `svgNetBars` (tiene valores negativos). Las posiciones se calculan con la misma
+  fórmula que ya usa cada gráfica para ubicar las barras (no una aproximación), así quedan
+  alineadas exactamente. En `svgBars`, el eje es opcional (`showAxis`) — las gráficas internas
+  de un proyecto (`infoCharts(p)`) no lo piden y quedan matemáticamente idénticas a antes
+  (verificado comparando el output viejo vs. nuevo carácter por carácter: la única diferencia es
+  formato numérico `"30"` → `"30.0"`, mismo valor, mismo render).
+- [x] **Verificado:** `node --check` tras cada tarea; en el Browser pane se confirmó que
+  `oninput` no destruye el nodo del slider (`stillInDom`/`sliderIsSameNode` true tras simular el
+  arrastre) y que `onchange` persiste el valor final en `dstats()`.
+- [x] **Commits:** `946735e` (svgBars), `4c7e70f` (svgNetBars), `69a252d` (svgChart1),
+  `b7f1a68` (zoom en vivo + sliders) en `agoldav/Siscon-web`.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
