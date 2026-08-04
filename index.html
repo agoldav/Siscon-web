@@ -11907,28 +11907,34 @@ function svgNetBars(items){
   });
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto">${svg}</svg>`;
 }
-function svgChart1(items,showG,showP){
+function svgChart1(items,showG,showP,zoom){
   if(!items.length)return '<div style="color:var(--t3);font-size:11px;padding:20px;text-align:center">Sin proyectos para el filtro seleccionado</div>';
-  const H=220,pad=42, dual=(showG||showP), groupW=dual?130:96, W=items.length*groupW+30;
+  zoom=+zoom||1;
+  const H=220*zoom,pad=42*zoom, dual=(showG||showP), groupW=(dual?130:96)*zoom, W=items.length*groupW+30*zoom;
+  const barW=36*zoom, gap2=42*zoom, fs=9*zoom;
   let max=1; items.forEach(it=>{ max=Math.max(max,it.venta,(showG?it.gastado:0)+(showG&&showP?it.pendiente:0),(showP&&!showG?it.pendiente:0)); });
-  const bh=v=>(v/max)*(H-pad-26);
-  let svg=chartGrid(W,H,pad)+`<line x1="0" y1="${H-pad}" x2="${W}" y2="${H-pad}" stroke="var(--border2)"/>`;
+  const bh=v=>(v/max)*(H-pad-26*zoom);
+  let svg=chartGrid(W,H,pad,18*zoom)+`<line x1="0" y1="${H-pad}" x2="${W}" y2="${H-pad}" stroke="var(--border2)"/>`;
   items.forEach((it,i)=>{
-    const x=25+i*groupW;
+    const x=25*zoom+i*groupW;
     const vh=bh(it.venta);
-    svg+=`<rect x="${x}" y="${(H-pad-vh).toFixed(1)}" width="36" height="${Math.max(1,vh).toFixed(1)}" rx="6" fill="var(--acc)"${chartMarkAttrs({label:'Venta · '+it.label,value:it.venta,id:it.id})}/>`;
-    svg+=`<text x="${x+18}" y="${(H-pad-vh-4).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--t1)">${fmtShort(it.venta)}</text>`;
+    svg+=`<rect x="${x.toFixed(1)}" y="${(H-pad-vh).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1,vh).toFixed(1)}" rx="${(6*zoom).toFixed(1)}" fill="var(--acc)"${chartMarkAttrs({label:'Venta · '+it.label,value:it.venta,id:it.id})}/>`;
+    svg+=`<text x="${(x+barW/2).toFixed(1)}" y="${(H-pad-vh-4*zoom).toFixed(1)}" text-anchor="middle" font-size="${fs.toFixed(1)}" fill="var(--t1)">${fmtShort(it.venta)}</text>`;
     if(dual){
-      const x2=x+42;
-      if(showG){ const gh=bh(it.gastado); svg+=`<rect x="${x2}" y="${(H-pad-gh).toFixed(1)}" width="36" height="${Math.max(1,gh).toFixed(1)}" rx="6" fill="var(--org)"${chartMarkAttrs({label:'Gastado · '+it.label,value:it.gastado,id:it.id})}/>`;
-        if(showP){ const ph=bh(it.pendiente); svg+=`<rect x="${x2}" y="${(H-pad-gh-ph).toFixed(1)}" width="36" height="${Math.max(1,ph).toFixed(1)}" rx="6" fill="var(--amb)"${chartMarkAttrs({label:'Pendiente · '+it.label,value:it.pendiente,id:it.id})}/>`; }
-      } else if(showP){ const ph=bh(it.pendiente); svg+=`<rect x="${x2}" y="${(H-pad-ph).toFixed(1)}" width="36" height="${Math.max(1,ph).toFixed(1)}" rx="6" fill="var(--amb)"${chartMarkAttrs({label:'Pendiente · '+it.label,value:it.pendiente,id:it.id})}/>`; }
+      const x2=x+gap2;
+      if(showG){ const gh=bh(it.gastado); svg+=`<rect x="${x2.toFixed(1)}" y="${(H-pad-gh).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1,gh).toFixed(1)}" rx="${(6*zoom).toFixed(1)}" fill="var(--org)"${chartMarkAttrs({label:'Gastado · '+it.label,value:it.gastado,id:it.id})}/>`;
+        if(showP){ const ph=bh(it.pendiente); svg+=`<rect x="${x2.toFixed(1)}" y="${(H-pad-gh-ph).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1,ph).toFixed(1)}" rx="${(6*zoom).toFixed(1)}" fill="var(--amb)"${chartMarkAttrs({label:'Pendiente · '+it.label,value:it.pendiente,id:it.id})}/>`; }
+      } else if(showP){ const ph=bh(it.pendiente); svg+=`<rect x="${x2.toFixed(1)}" y="${(H-pad-ph).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1,ph).toFixed(1)}" rx="${(6*zoom).toFixed(1)}" fill="var(--amb)"${chartMarkAttrs({label:'Pendiente · '+it.label,value:it.pendiente,id:it.id})}/>`; }
     }
-    svg+=`<text x="${x+(dual?39:18)}" y="${H-pad+14}" text-anchor="middle" font-size="9" fill="var(--t2)">${it.label.length>13?it.label.slice(0,12)+'…':it.label}</text>`;
+    const lblX=x+(dual?(barW/2+gap2+barW/2)/2:barW/2);
+    svg+=`<text x="${lblX.toFixed(1)}" y="${(H-pad+14*zoom).toFixed(1)}" text-anchor="middle" font-size="${fs.toFixed(1)}" fill="var(--t2)">${it.label.length>13?it.label.slice(0,12)+'…':it.label}</text>`;
   });
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto">${svg}</svg>`;
+  const svgTag = zoom>1
+    ? `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${svg}</svg>`
+    : `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto">${svg}</svg>`;
+  return zoom>1 ? `<div style="overflow-x:auto">${svgTag}</div>` : svgTag;
 }
-function dstats(){ if(!SYS.stats)SYS.stats={open:true,scope:'todos',time:'todo',from:'',to:'',showGastado:false,showPendiente:false,cashWindow:'1m',cashProjects:null,unbilledProjects:null}; return SYS.stats; }
+function dstats(){ if(!SYS.stats)SYS.stats={open:true,scope:'todos',time:'todo',from:'',to:'',showGastado:false,showPendiente:false,cashWindow:'1m',cashProjects:null,unbilledProjects:null,zoomVenta:1}; const s=SYS.stats; if(s.zoomVenta===undefined)s.zoomVenta=1; return s; }
 function updateStats(){ const el=document.getElementById('dash-stats'); if(el)el.innerHTML=renderDashStats(); }
 function statsSet(k,v){ dstats()[k]=v; saveData(); updateStats(); }
 function statsToggle(k){ const s=dstats(); s[k]=!s[k]; saveData(); updateStats(); }
@@ -11967,9 +11973,13 @@ function renderDashStats(){
             <div style="position:relative"><button class="btn-sm" onclick="statsToggle('_menuInfo')">+ Agregar Información</button>
               ${s._menuInfo?`<div class="stats-menu"><label><input type="checkbox" ${s.showGastado?'checked':''} onchange="statsToggle('showGastado')"/> Dinero gastado por proyecto</label><label><input type="checkbox" ${s.showPendiente?'checked':''} onchange="statsToggle('showPendiente')"/> Dinero pendiente de gastar</label></div>`:''}
             </div>
+            <div style="display:flex;align-items:center;gap:6px" title="Zoom de la gráfica">
+              <span style="font-size:11px;color:var(--t3)">🔍</span>
+              <input type="range" min="1" max="2.5" step="0.25" value="${s.zoomVenta}" onchange="statsSet('zoomVenta',this.value)" style="width:90px"/>
+            </div>
           </div>
         </div>
-        ${svgChart1(items,s.showGastado,s.showPendiente)}
+        ${svgChart1(items,s.showGastado,s.showPendiente,s.zoomVenta)}
         ${legend([{label:'Valor de venta',color:'#0d99ff'}].concat(s.showGastado?[{label:'Gastado',color:'#e8783a'}]:[]).concat(s.showPendiente?[{label:'Pendiente por gastar',color:'#d4941a'}]:[]))}
       </div>
       ${globalRecoveryCardHtml(list)}
