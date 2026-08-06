@@ -1482,11 +1482,12 @@ function _documentIdForUpload(upload){
 async function _flushPendingDocumentUploads(){
   for(const [blobId,file] of [..._pendingDocFiles.entries()]){
     const upload=_findUploadByBlobId(blobId);
-    const documentId=_documentIdForUpload(upload);
-    if(!upload||!documentId){
-      alert(`No se pudo asociar "${file.name}" con el documento guardado.`);
-      return false;
+    if(!upload){
+      _pendingDocFiles.delete(blobId);
+      continue;
     }
+    const documentId=_documentIdForUpload(upload);
+    if(!documentId)continue;
     // Si el archivo llegó mientras otro guardado ya estaba en vuelo, la fila se creará en
     // el guardado encolado. No intentar subir contra un documentId que aún no existe.
     if(!_documentSnapshots.has(String(documentId)))continue;
@@ -1817,6 +1818,7 @@ async function _syncNormalizedDocuments(){
   if(!_normalizedDocumentsLoaded)return true;
 
   const currentDocuments=new Map();
+  const currentDocumentKeys=new Set();
   try{
     for(const project of projects){
       for(const group of _documentGroups(project)){
@@ -1825,11 +1827,22 @@ async function _syncNormalizedDocuments(){
           return false;
         }
         currentDocuments.set(group.id,group);
+        [
+          group.id,group.logicalKey,
+          group.doc?.id,group.doc?.blobId,
+          group.upload?.id,group.upload?.blobId,
+        ].forEach(value=>{
+          if(value!==undefined&&value!==null&&value!=='')currentDocumentKeys.add(String(value));
+        });
       }
     }
   }catch(error){
     console.error('No se pudieron preparar los documentos:',error);
     return false;
+  }
+
+  for(const blobId of [..._pendingDocFiles.keys()]){
+    if(!currentDocumentKeys.has(String(blobId)))_pendingDocFiles.delete(blobId);
   }
 
   for(const id of [..._documentSnapshots.keys()]){
@@ -6032,7 +6045,7 @@ function renderDocs(){
           +'<div style="padding:4px 12px 2px;font-size:10px;color:var(--t3);text-transform:uppercase;border-top:1px solid var(--border);margin-top:4px">Cambiar categoría</div>'
           +DOC_CATS.map(c=>'<button onclick="docSetCat(\''+docKey+'\',\''+c+'\')" style="display:block;width:100%;background:transparent;border:none;color:'+(c===cat?'var(--grn)':'var(--t1)')+';text-align:left;padding:5px 12px 5px 20px;font-size:11px;cursor:pointer">'+(c===cat?'✓ ':'')+' '+c+'</button>').join('')
           +'<div style="border-top:1px solid var(--border);margin:4px 0"></div>'
-          +'<button onclick="if(confirm(\'¿Eliminar este documento?\')){curProj.docs=(curProj.docs||[]).filter(x=>x.id!==\''+docKey+'\'&&x.blobId!==\''+bId+'\');curProj.uploads=(curProj.uploads||[]).filter(u=>u.id!==\''+docKey+'\'&&u.blobId!==\''+bId+'\');docSelected.delete(\''+docKey+'\');saveData();renderDocs();}" style="display:block;width:100%;background:transparent;border:none;color:var(--red);text-align:left;padding:8px 12px;font-size:12px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg> Eliminar</button>'
+          +'<button onclick="docDelete(\''+docKey+'\',\''+bId+'\')" style="display:block;width:100%;background:transparent;border:none;color:var(--red);text-align:left;padding:8px 12px;font-size:12px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg> Eliminar</button>'
           +'</div>';
         return '<tr style="cursor:'+(hasClick?'pointer':'default')+';background:'+(isSel?'rgba(13,153,255,.08)':'')+'" data-cc="'+encodeURIComponent(clickCall)+'" data-key="'+docKey+'" onclick="docRowClick(event,this)">'
           +'<td onclick="event.stopPropagation()" style="text-align:center"><input type="checkbox" '+(isSel?'checked':'')+' onchange="docToggleSel(\''+docKey+'\',this.checked)" style="cursor:pointer"></td>'
@@ -6101,8 +6114,17 @@ function docBulkDelete(){
   if(!docSelected.size)return;
   if(!confirm('¿Eliminar '+docSelected.size+' documento(s) seleccionado(s)?'))return;
   const keys=new Set(docSelected);
-  curProj.docs=(curProj.docs||[]).filter(d=>!keys.has(d.id||d.blobId||''));
-  curProj.uploads=(curProj.uploads||[]).filter(u=>!keys.has(u.id||u.blobId||''));
+  const allDocuments=[...(curProj.docs||[]),...(curProj.uploads||[])];
+  const removedBlobIds=new Set(
+    allDocuments
+      .filter(item=>keys.has(item.id||item.blobId||''))
+      .map(item=>item.blobId)
+      .filter(Boolean)
+  );
+  removedBlobIds.forEach(blobId=>_pendingDocFiles.delete(blobId));
+  const keep=item=>!keys.has(item.id||item.blobId||'')&&!removedBlobIds.has(item.blobId);
+  curProj.docs=(curProj.docs||[]).filter(keep);
+  curProj.uploads=(curProj.uploads||[]).filter(keep);
   docSelected.clear();
   saveData(); renderDocs();
 }
@@ -6182,6 +6204,21 @@ function processDocFiles(){
   saveData();
   renderDocs();
 }
+function docDelete(docKey,blobId){
+  if(!confirm('¿Eliminar este documento?'))return;
+  const matches=item=>
+    item.id===docKey||item.blobId===docKey||(blobId&&item.blobId===blobId);
+  const removed=[...(curProj.docs||[]),...(curProj.uploads||[])].filter(matches);
+  removed.forEach(item=>{
+    if(item.blobId)_pendingDocFiles.delete(item.blobId);
+  });
+  if(blobId)_pendingDocFiles.delete(blobId);
+  curProj.docs=(curProj.docs||[]).filter(item=>!matches(item));
+  curProj.uploads=(curProj.uploads||[]).filter(item=>!matches(item));
+  docSelected.delete(docKey);
+  saveData();
+  renderDocs();
+}
 async function openPdfNewTab(blobId){
   // Buscar en todos los proyectos (no solo curProj) para el caso de importación
   const up=_findUploadByBlobId(blobId);
@@ -6191,6 +6228,11 @@ async function openPdfNewTab(blobId){
     if(remoteWindow&&!remoteWindow.closed)remoteWindow.location.replace(url);
     else window.open(url,'_blank');
   };
+  // Un blob de sesión tiene prioridad únicamente mientras el File todavía espera subida.
+  if(_pendingDocFiles.has(blobId)){
+    const pendingUrl=docBlobMap[blobId]||up?.url;
+    if(pendingUrl){showUrl(pendingUrl);return;}
+  }
   // Los PDFs permanentes salen de GET /api/files/documents/:documentId.
   if(up&&(up.storageKey||documentId)&&documentId){
     remoteWindow=window.open('about:blank','_blank');
@@ -6287,9 +6329,11 @@ function docMenuToggle(menuId,e){
 document.addEventListener('click',()=>document.querySelectorAll('.doc-menu-dd').forEach(el=>el.style.display='none'));
 let _dvCurrentBlobId=null, _dvCurrentExt=null;
 async function viewDoc(blobId,name,ext){
-  let url=docBlobMap[blobId];
   const up=_findUploadByBlobId(blobId);
   const documentId=_documentIdForUpload(up);
+  let url=null;
+  // Antes de persistir, el File local es la única fuente disponible.
+  if(_pendingDocFiles.has(blobId))url=docBlobMap[blobId]||up?.url||null;
   if(!url&&up&&(up.storageKey||documentId)&&documentId){
     try{
       url=await fetchDocumentBlobUrl(documentId);
@@ -6302,6 +6346,7 @@ async function viewDoc(blobId,name,ext){
     // Try rebuilding from pdfBase64
     if(up&&up.pdfBase64){ try{ const b=new Blob([Uint8Array.from(atob(up.pdfBase64),c=>c.charCodeAt(0))],{type:'application/pdf'}); url=URL.createObjectURL(b); docBlobMap[blobId]=url; }catch(e){} }
     if(!url&&up?.url)url=up.url;
+    if(!url)url=docBlobMap[blobId];
     if(!url){alert('El documento no está disponible. Puede haberse perdido al recargar la página.');return;}
   }
   _dvCurrentBlobId=blobId; _dvCurrentExt=ext;
