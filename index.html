@@ -1060,6 +1060,7 @@ const _houseTypeProjectIds=new Map();
 const _documentVersions=new Map();
 const _documentSnapshots=new Map();
 const _documentProjectIds=new Map();
+const _pendingDocFiles=new Map();
 const _projectItemVersions=new Map();
 const _projectItemSnapshots=new Map();
 const _projectItemProjectIds=new Map();
@@ -1211,7 +1212,7 @@ function _documentGroups(project){
     const field=collection==='docs'?'doc':'upload';
     if(group[field])throw new Error(`Clave duplicada ${key} en ${collection} del proyecto ${project.id}`);
     if(collection==='uploads'){
-      const {url,...persistent}=item;
+      const {url,pdfBase64,...persistent}=item;
       group.upload={...persistent};
       group.uploadSortOrder=sortOrder;
     }else{
@@ -1250,7 +1251,7 @@ function _documentCloudPayload(group){
 }
 function _documentGroupFromRow(row){
   const data=row&&row.data&&typeof row.data==='object'&&!Array.isArray(row.data)?row.data:{};
-  return {
+  const group={
     id:String(row.id),projectId:_restoreDbId(row.project_id),
     logicalKey:data.logical_key||String(row.id),
     doc:data.doc&&typeof data.doc==='object'?{...data.doc}:null,
@@ -1258,6 +1259,12 @@ function _documentGroupFromRow(row){
     docSortOrder:Number.isInteger(data.doc_sort_order)?data.doc_sort_order:null,
     uploadSortOrder:Number.isInteger(data.upload_sort_order)?data.upload_sort_order:null,
   };
+  const storageKey=row.storage_key??row.storageKey;
+  if(storageKey){
+    if(group.doc)group.doc.storageKey=storageKey;
+    if(group.upload)group.upload.storageKey=storageKey;
+  }
+  return group;
 }
 function _projectItemKey(table,id){return `${table}:${String(id)}`;}
 function _projectCollectionCloudPayload(item,projectId,sortOrder=0){
@@ -1429,6 +1436,89 @@ async function _dbRowRequest(method,path,body){
   const resp=await fetch(`${BACKEND_URL}${path}`,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
   const data=await resp.json().catch(()=>({}));
   return {resp,data};
+}
+async function uploadDocumentFile(documentId,file){
+  const formData=new FormData();
+  formData.append('file',file);
+  const resp=await fetch(`${BACKEND_URL}/api/files/documents/${encodeURIComponent(documentId)}`,{
+    method:'POST',
+    headers:{'Authorization':`Bearer ${_sbToken}`},
+    credentials:'include',
+    body:formData,
+  });
+  const data=await resp.json().catch(()=>({}));
+  if(!resp.ok)throw new Error(data.error||data.message||`Error ${resp.status} al subir el documento`);
+  return data;
+}
+async function fetchDocumentBlobUrl(documentId){
+  const resp=await fetch(`${BACKEND_URL}/api/files/documents/${encodeURIComponent(documentId)}`,{
+    headers:{'Authorization':`Bearer ${_sbToken}`},
+    credentials:'include',
+  });
+  if(!resp.ok){
+    const data=await resp.json().catch(()=>({}));
+    throw new Error(data.error||data.message||`Error ${resp.status} al abrir el documento`);
+  }
+  return URL.createObjectURL(await resp.blob());
+}
+function _findUploadByBlobId(blobId){
+  for(const project of projects){
+    const upload=(project.uploads||[]).find(item=>item.blobId===blobId);
+    if(upload)return upload;
+  }
+  return null;
+}
+function _documentIdForUpload(upload){
+  if(!upload)return null;
+  for(const project of projects){
+    for(const group of _documentGroups(project)){
+      if(!group.upload)continue;
+      if(upload.blobId&&group.upload.blobId===upload.blobId)return group.id;
+      if(upload.id&&group.upload.id===upload.id)return group.id;
+    }
+  }
+  return null;
+}
+async function _flushPendingDocumentUploads(){
+  for(const [blobId,file] of [..._pendingDocFiles.entries()]){
+    const upload=_findUploadByBlobId(blobId);
+    const documentId=_documentIdForUpload(upload);
+    if(!upload||!documentId){
+      alert(`No se pudo asociar "${file.name}" con el documento guardado.`);
+      return false;
+    }
+    // Si el archivo llegó mientras otro guardado ya estaba en vuelo, la fila se creará en
+    // el guardado encolado. No intentar subir contra un documentId que aún no existe.
+    if(!_documentSnapshots.has(String(documentId)))continue;
+    try{
+      const data=await uploadDocumentFile(documentId,file);
+      const storageKey=data.storageKey??data.document?.storage_key??data.document?.storageKey;
+      if(storageKey)upload.storageKey=storageKey;
+      let project=null;
+      let group=null;
+      for(const candidate of projects){
+        group=_documentGroups(candidate).find(item=>String(item.id)===String(documentId));
+        if(group){project=candidate;break;}
+      }
+      if(project&&group){
+        if(group.docSortOrder!==null&&project.docs?.[group.docSortOrder]&&storageKey){
+          project.docs[group.docSortOrder].storageKey=storageKey;
+        }
+        const refreshed=_documentGroups(project).find(item=>String(item.id)===String(documentId));
+        if(refreshed){
+          _documentSnapshots.set(String(documentId),_snapshot(_documentCloudPayload(refreshed)));
+          _documentProjectIds.set(String(documentId),String(project.id));
+        }
+      }
+      if(data.document?.updated_at)_documentVersions.set(String(documentId),data.document.updated_at);
+      _pendingDocFiles.delete(blobId);
+    }catch(error){
+      console.error('No se pudo subir el documento:',error);
+      alert(`No se pudo subir "${file.name}". ${error.message||''}`.trim());
+      return false;
+    }
+  }
+  return true;
 }
 // Una aprobación propia puede chocar con la versión que el administrador acaba de guardar. Ese caso
 // no requiere decidir entre recargar/sobrescribir: se informa con un solo OK y se toma la versión
@@ -1774,6 +1864,7 @@ async function _syncNormalizedDocuments(){
       _rememberDocumentRow(data,group);
     }
   }
+  if(!(await _flushPendingDocumentUploads()))return false;
   return true;
 }
 async function _syncNormalizedProjectCollections(){
@@ -6074,8 +6165,7 @@ function processDocFiles(){
   closeModal();
   const files=_pendingUploadFiles||[];
   _pendingUploadFiles=[];
-  let pending=files.length;
-  if(!pending){renderDocs();return;}
+  if(!files.length){renderDocs();return;}
   curProj.uploads=curProj.uploads||[];
   files.forEach((f,i)=>{
     const ext=f.name.split('.').pop().toUpperCase();
@@ -6085,25 +6175,33 @@ function processDocFiles(){
     const entry={id:'up-'+Date.now()+'_'+i+'_'+Math.random().toString(36).slice(2),name:docName,type:ext,category:cat,
       date:docDate,size:(f.size/1024).toFixed(0)+' KB',blobId,url:docBlobMap[blobId],notes};
     curProj.uploads.push(entry);
+    _pendingDocFiles.set(blobId,f);
     logAction(`Documento "${f.name}" subido`,'log-create','Documentos',null,{name:f.name,category:cat,notes});
-    // Read as base64 so it survives page reload
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const b64=ev.target.result.split(',')[1];
-      if(b64) entry.pdfBase64=b64;
-      pending--;
-      if(pending===0){ curProj.lastActivity=Date.now(); saveData(); renderDocs(); }
-    };
-    reader.onerror=()=>{ pending--; if(pending===0){ curProj.lastActivity=Date.now(); saveData(); renderDocs(); } };
-    reader.readAsDataURL(f);
   });
+  curProj.lastActivity=Date.now();
+  saveData();
+  renderDocs();
 }
-function openPdfNewTab(blobId){
+async function openPdfNewTab(blobId){
   // Buscar en todos los proyectos (no solo curProj) para el caso de importación
-  let up=null;
-  for(const p of projects){
-    up=(p.uploads||[]).find(u=>u.blobId===blobId);
-    if(up)break;
+  const up=_findUploadByBlobId(blobId);
+  const documentId=_documentIdForUpload(up);
+  let remoteWindow=null;
+  const showUrl=url=>{
+    if(remoteWindow&&!remoteWindow.closed)remoteWindow.location.replace(url);
+    else window.open(url,'_blank');
+  };
+  // Los PDFs permanentes salen de GET /api/files/documents/:documentId.
+  if(up&&(up.storageKey||documentId)&&documentId){
+    remoteWindow=window.open('about:blank','_blank');
+    try{
+      const url=await fetchDocumentBlobUrl(documentId);
+      up.url=url;docBlobMap[blobId]=url;
+      showUrl(url);
+      return;
+    }catch(error){
+      console.warn('No se pudo abrir el PDF desde R2; se intentará el respaldo local.',error);
+    }
   }
   // Si tiene base64 guardado, recrear blob URL al vuelo
   if(up&&up.pdfBase64){
@@ -6112,12 +6210,13 @@ function openPdfNewTab(blobId){
       const blob=new Blob([byteArr],{type:'application/pdf'});
       const url=URL.createObjectURL(blob);
       up.url=url; // cachear en sesión
-      window.open(url,'_blank'); return;
+      showUrl(url); return;
     }catch(e){ console.warn('Error recreating PDF blob',e); }
   }
   // Fallback: usar URL en memoria si existe
-  if(up&&up.url){ window.open(up.url,'_blank'); return; }
-  const url=docBlobMap[blobId]; if(url){ window.open(url,'_blank'); return; }
+  if(up&&up.url){ showUrl(up.url); return; }
+  const url=docBlobMap[blobId]; if(url){ showUrl(url); return; }
+  if(remoteWindow&&!remoteWindow.closed)remoteWindow.close();
   alert('El PDF no está disponible. Puede haberse perdido al recargar la página.');
 }
 function _findDoc(docId){
@@ -6187,13 +6286,23 @@ function docMenuToggle(menuId,e){
 }
 document.addEventListener('click',()=>document.querySelectorAll('.doc-menu-dd').forEach(el=>el.style.display='none'));
 let _dvCurrentBlobId=null, _dvCurrentExt=null;
-function viewDoc(blobId,name,ext){
+async function viewDoc(blobId,name,ext){
   let url=docBlobMap[blobId];
+  const up=_findUploadByBlobId(blobId);
+  const documentId=_documentIdForUpload(up);
+  if(!url&&up&&(up.storageKey||documentId)&&documentId){
+    try{
+      url=await fetchDocumentBlobUrl(documentId);
+      up.url=url;docBlobMap[blobId]=url;
+    }catch(error){
+      console.warn('No se pudo cargar el documento desde R2; se intentará el respaldo local.',error);
+    }
+  }
   if(!url){
     // Try rebuilding from pdfBase64
-    let up=null; for(const p of projects){ up=(p.uploads||[]).find(u=>u.blobId===blobId); if(up)break; }
     if(up&&up.pdfBase64){ try{ const b=new Blob([Uint8Array.from(atob(up.pdfBase64),c=>c.charCodeAt(0))],{type:'application/pdf'}); url=URL.createObjectURL(b); docBlobMap[blobId]=url; }catch(e){} }
-    if(!url)return;
+    if(!url&&up?.url)url=up.url;
+    if(!url){alert('El documento no está disponible. Puede haberse perdido al recargar la página.');return;}
   }
   _dvCurrentBlobId=blobId; _dvCurrentExt=ext;
   document.getElementById('dv-title').textContent=name;

@@ -87,9 +87,9 @@ function environment(initialProjects) {
     created.calls[0].method === 'POST' &&
     created.calls[0].url === '/api/db/documents');
   const createBody = created.calls[0].body;
-  ok('payload no contiene URL efímera y sí conserva pdfBase64',
+  ok('payload no contiene URL efímera ni pdfBase64',
     createBody.data.doc.id === 'meta-1' &&
-    createBody.data.upload.pdfBase64 === 'YWJj' &&
+    !('pdfBase64' in createBody.data.upload) &&
     !('url' in createBody.data.upload));
   ok('el proyecto no duplica docs/uploads',
     !('docs' in createBody) && createBody.projectId === 401);
