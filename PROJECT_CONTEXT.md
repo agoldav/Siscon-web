@@ -2045,6 +2045,21 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] **Commits:** `946735e` (svgBars), `4c7e70f` (svgNetBars), `69a252d` (svgChart1),
   `b7f1a68` (zoom en vivo + sliders) en `agoldav/Siscon-web`.
 
+### Sesión 2026-08-05 (Adjuntos permanentes en Cloudflare R2)
+> Cierra el ítem pendiente "Adjuntos permanentes": los binarios ya no dependen de URLs `blob:`
+> de una sesión del navegador.
+- [x] **R2 mediante proxy backend:** el navegador sube y descarga archivos exclusivamente por
+  rutas autenticadas del backend; las credenciales R2 nunca se exponen al frontend. `documents`
+  conserva `storage_key`, MIME y tamaño, sin persistir `pdfBase64`.
+- [x] **Migración de documentos existentes:** script one-shot con dry-run por defecto, paginación,
+  validación de base64, concurrencia optimista y cleanup best-effort si falla una actualización.
+- [x] **Outlook → documentos permanentes:** los PDF pendientes se guardan temporalmente en R2 y,
+  al asociarlos a un documento, se mueven a su llave definitiva y se eliminan los artefactos
+  temporales. Se mantiene fallback compatible para pendientes anteriores en base64.
+- [x] **Borrado consistente:** eliminar un documento borra su objeto R2 best-effort; eliminar un
+  proyecto recoge primero las llaves de sus documentos, ejecuta el cascade transaccional y luego
+  limpia sus objetos sin impedir el borrado lógico si R2 no responde.
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -2065,7 +2080,6 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 
 ### Integraciones pendientes
 - [ ] **Materiales por proveedor:** no existe asociación material↔proveedor en el modelo; se hará con catálogo de Items de QuickBooks
-- [ ] **Adjuntos permanentes:** blob URLs no persisten entre sesiones. Requiere storage en backend (Cloudflare R2, etc.)
 
 ### Infraestructura / Producción
 - [x] Persistencia cifrada de tokens QBO en Supabase (no en `/tmp`) — implementada y desplegada el 2026-08-01; el vault nunca se expone al frontend y el reinicio total lo elimina.
