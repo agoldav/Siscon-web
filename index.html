@@ -4990,7 +4990,7 @@ function updateHouseStatusSheet(id,sel){
 
 function getHouseSortVal(h,col,p){
   const t=p.types.find(x=>x.id===h.typeId);
-  if(col==='num') return h.num;
+  if(col==='num'){const m=String(h.num).match(/\d+/);return m?parseInt(m[0]):0;}
   if(col==='type') return t?t.name:'';
   if(col==='area') return t?t.area:0;
   if(col==='budget') return t?t.budget:0;
@@ -6607,7 +6607,7 @@ function txnSortArr(arr, getParty, getDate, getStatus, getNum, getProduct){
     case 'date-asc': a.sort((x,y)=>(getDate(x)||'').localeCompare(getDate(y)||'')); break;
     case 'date-desc': a.sort((x,y)=>(getDate(y)||'').localeCompare(getDate(x)||'')); break;
     case 'status': a.sort((x,y)=>(getStatus(x)||'').localeCompare(getStatus(y)||'')); break;
-    case 'num': a.sort((x,y)=>(getNum(x)||'').localeCompare(getNum(y)||'')); break;
+    case 'num': a.sort((x,y)=>{const nx=Number(getNum(x))||0,ny=Number(getNum(y))||0;return nx-ny;}); break;
     case 'party': a.sort((x,y)=>(getParty(x)||'').localeCompare(getParty(y)||'')); break;
     case 'product': a.sort((x,y)=>(getProduct(x)||'').localeCompare(getProduct(y)||'')); break;
   }
@@ -11281,7 +11281,7 @@ function renderCalcList(){
   if(!SYS.subAdvanceRecords)SYS.subAdvanceRecords=[];
   let recs=SYS.subAdvanceRecords.filter(r=>calcInPeriod(r.date)&&calcRecMatchesSub(r)&&calcRecMatchesProj(r));
   recs=recs.slice().sort((a,b)=>{
-    if(calcListSort==='num') return calcListSortDir*((a.num||'').localeCompare(b.num||''));
+    if(calcListSort==='num') return calcListSortDir*((Number(a.num)||0)-(Number(b.num)||0));
     if(calcListSort==='total') return calcListSortDir*((a.total||0)-(b.total||0));
     return calcListSortDir*((a.date||'').localeCompare(b.date||''));
   });
