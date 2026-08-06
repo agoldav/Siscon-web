@@ -1472,6 +1472,11 @@ function _documentIdForUpload(upload){
   if(!upload)return null;
   for(const project of projects){
     for(const group of _documentGroups(project)){
+      if(group.upload===upload)return group.id;
+    }
+  }
+  for(const project of projects){
+    for(const group of _documentGroups(project)){
       if(!group.upload)continue;
       if(upload.blobId&&group.upload.blobId===upload.blobId)return group.id;
       if(upload.id&&group.upload.id===upload.id)return group.id;
@@ -1520,6 +1525,31 @@ async function _linkPendingBillFiles(){
           _documentProjectIds.set(String(documentId),String(project.id));
         }
         if(data.document?.updated_at)_documentVersions.set(String(documentId),data.document.updated_at);
+        // Las copias lógicas multiproyecto apuntan al mismo PDF. Solo la copia preferida consume
+        // from-pending; las hermanas comparten su key y conservan su snapshot anterior para que el
+        // próximo sync persista el storageKey en cada fila de documents.
+        if(String(upload.blobId||'').startsWith('outlook-')){
+          for(const siblingProject of projects){
+            for(const sibling of (siblingProject.uploads||[])){
+              if(
+                sibling===upload||sibling.storageKey||
+                sibling.name!==upload.name||sibling.blobId!==upload.blobId
+              )continue;
+              sibling.storageKey=storageKey;
+              delete sibling.pendingBillId;
+              delete sibling.pendingStorageKey;
+              delete sibling.pdfBase64;
+              const siblingGroup=_documentGroups(siblingProject).find(item=>item.upload===sibling);
+              if(siblingGroup?.docSortOrder!==null&&siblingProject.docs?.[siblingGroup.docSortOrder]){
+                const siblingDoc=siblingProject.docs[siblingGroup.docSortOrder];
+                siblingDoc.storageKey=storageKey;
+                delete siblingDoc.pendingBillId;
+                delete siblingDoc.pendingStorageKey;
+                delete siblingDoc.pdfBase64;
+              }
+            }
+          }
+        }
       }catch(error){
         console.error('No se pudo enlazar el PDF pendiente de Outlook:',error);
         alert(`No se pudo guardar "${upload.name}" en Documentos. ${error.message||''}`.trim());
@@ -2301,6 +2331,14 @@ function saveData(){
     if(t){t.classList.add('show');clearTimeout(_saveToastTimer);_saveToastTimer=setTimeout(()=>t.classList.remove('show'),1800);}
     return savePromise;
   }catch(e){console.warn('Error guardando datos:',e);}
+}
+function saveDataForCurrentChanges(){
+  const saveWasInFlight=Boolean(_saveInFlight);
+  const firstSave=saveData();
+  if(!firstSave)return Promise.resolve(false);
+  // saveData() reutiliza la promesa en curso y solo marca un seguimiento. Encadenar otra llamada
+  // después obliga a esperar el guardado que sí tomó el estado mutado por el import de Outlook.
+  return saveWasInFlight?Promise.resolve(firstSave).then(()=>saveData()):firstSave;
 }
 
 async function loadDataFromAPI(){
@@ -13539,7 +13577,7 @@ function msPendingBillProbe(data){
     totalCRC:currency==='CRC'?total:0,totalUSD:currency==='USD'?total:0,
   };
 }
-function msAttachPendingPdf(proj,target,bill){
+function msAttachPendingPdf(proj,target,bill,consumePending=true){
   if(!bill.storageKey&&!bill.pdfBase64)return false;
   try{
     const stable=String(bill.id||bill.fileName||Date.now()).replace(/[^a-zA-Z0-9_-]/g,'');
@@ -13553,7 +13591,7 @@ function msAttachPendingPdf(proj,target,bill){
     if(!proj.uploads)proj.uploads=[];
     let upload=proj.uploads.find(u=>u.name===bill.fileName||u.blobId===blobId);
     if(!upload){upload={blobId,name:bill.fileName,type:'PDF'};proj.uploads.push(upload);}
-    if(bill.storageKey&&!upload.storageKey){
+    if(bill.storageKey&&!upload.storageKey&&consumePending){
       upload.pendingBillId=bill.id;
       upload.pendingStorageKey=bill.storageKey;
       delete upload.pdfBase64;
@@ -13581,7 +13619,7 @@ async function msPollPending(){
     const bills=d.bills||[];
     if(!bills.length)return;
     let imported=0, merged=0;
-    const toAck=[]; // IDs a confirmar en servidor — solo después de saveData exitoso
+    const pendingAckIds=[]; // candidatos; no se confirman hasta completar el guardado de este import
     for(const bill of bills){
       // Encontrar el proyecto por ref (num o id)
       const proj=projects.find(p=>p.num===bill.projectRef||String(p.id)===bill.projectRef||p.name===bill.projectRef);
@@ -13604,7 +13642,7 @@ async function msPollPending(){
           addNotif(`⚠ Factura "${bill.fileName}" sin proyecto (ref: "${bill.projectRef}") — agregada a Sin Clasificar`, 'unclassified');
           imported++;
         }
-        toAck.push(bill.id); // sí ackear para que no reaparezca
+        pendingAckIds.push(bill.id);
         continue;
       }
       // Si OCR falló, usar objeto vacío para importar como borrador (usuario completa manualmente)
@@ -13638,9 +13676,12 @@ async function msPollPending(){
             existingProject=qboProjectResolution.project;
           }
         }
-        logicalCopies.forEach(row=>msAttachPendingPdf(row.project||existingProject,row.bill,bill));
+        msAttachPendingPdf(preferredCopy.project||existingProject,preferredCopy.bill,bill);
+        logicalCopies
+          .filter(row=>row!==preferredCopy)
+          .forEach(row=>msAttachPendingPdf(row.project||existingProject,row.bill,bill,!bill.storageKey));
         if(String(existingProject.id)!==String(proj.id))addNotif(`Factura ${data.invoiceNumber||bill.fileName} ya existía en ${existingProject.name}; se adjuntó el PDF sin duplicarla.`);
-        toAck.push(bill.id);merged++;continue;
+        pendingAckIds.push(bill.id);merged++;continue;
       }
       // Crear borrador de factura de proveedor en ese proyecto
       const destinationProject=qboProjectResolution&&qboProjectResolution.status==='matched'?qboProjectResolution.project:proj;
@@ -13691,13 +13732,13 @@ async function msPollPending(){
       destinationProject.billVendor.push(newBill);
       destinationProject.lastActivity=Date.now();
       logAction(`Factura "${newBill.num}" importada desde Outlook (${bill.fileName})`,'log-create','Transacciones',null,{party:newBill.party,total:newBill.totalUSD});
-      toAck.push(bill.id); // marcar para ack post-save
+      pendingAckIds.push(bill.id);
       imported++;
     }
     if(imported>0||merged>0){
-      if(!(await saveData()))return; // guardar y enlazar el PDF primero
+      if(!(await saveDataForCurrentChanges()))return; // guardar y enlazar el PDF primero
       // Ackear en servidor SOLO después de que saveData haya persistido los datos
-      for(const id of toAck) await msAck(id,be);
+      for(const id of pendingAckIds) await msAck(id,be);
       if(imported)addNotif(`✓ ${imported} factura(s) importada(s) desde Outlook`);
       if(merged)addNotif(`✓ ${merged} factura(s) de Outlook unificada(s) sin duplicar`);
       updateBadges();

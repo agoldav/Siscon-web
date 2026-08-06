@@ -64,7 +64,8 @@ console.log('\nCableado sin duplicidad:');
 ok('Outlook usa el matcher fuerte antes de crear la factura',
   /const localMatch=qboFindBestBillMatch\(outlookProbe/.test(html));
 ok('Outlook adjunta el PDF al registro existente',
-  /if\(localMatch\.status==='matched'\)[\s\S]{0,1800}logicalCopies\.forEach\(row=>msAttachPendingPdf/.test(html));
+  /if\(localMatch\.status==='matched'\)[\s\S]{0,1800}msAttachPendingPdf\(preferredCopy/.test(html) &&
+  /logicalCopies[\s\S]{0,180}\.forEach\(row=>msAttachPendingPdf/.test(html));
 ok('Outlook busca duplicados en todos los proyectos, no solo en la carpeta destino',
   /projects\.forEach\(candidateProject=>\(candidateProject\.billVendor\|\|\[\]\)/.test(html));
 ok('QBO enlaza sobre billVendor existente',
