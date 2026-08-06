@@ -44,28 +44,25 @@ function ok(name, condition) {
     { id: 'sibling', uploads: [siblingUpload], docs: [siblingDoc] },
     { id: 'primary', uploads: [primaryUpload], docs: [primaryDoc] },
   ];
-  const groups = project => [{
-    id: `doc-${project.id}`,
-    projectId: project.id,
-    upload: project.uploads[0],
-    doc: project.docs[0],
-    docSortOrder: 0,
-  }];
-  const snapshots = new Map([
-    ['doc-sibling', 'old-sibling'],
-    ['doc-primary', 'old-primary'],
-  ]);
+  const snapshots = new Map();
   const calls = [];
+  // Se ejerce el _documentGroups real (no un stub que devuelva los uploads por referencia):
+  // ese stub ocultaba que _documentIdForUpload comparaba por referencia contra clones y nunca
+  // coincidía, y que sin acotar por proyecto un blobId compartido resolvía al proyecto
+  // equivocado.
   const factory = new Function(
-    'projects', '_documentGroups', '_documentSnapshots', '_documentProjectIds',
+    'projects', '_documentSnapshots', '_documentProjectIds',
     '_documentVersions', '_snapshot', '_documentCloudPayload', 'fetch', 'BACKEND_URL',
     '_sbToken', 'alert', 'console',
-    `${extractFunction('_documentIdForUpload')}
+    `${extractFunction('_documentLogicalKey')}
+     ${extractFunction('_documentRowId')}
+     ${extractFunction('_documentGroups')}
+     ${extractFunction('_documentIdForUpload')}
      ${extractFunction('_linkPendingBillFiles')}
-     return {_documentIdForUpload,_linkPendingBillFiles};`
+     return {_documentIdForUpload,_linkPendingBillFiles,_documentGroups,_documentRowId};`
   );
   const api = factory(
-    projects, groups, snapshots, new Map(), new Map(), JSON.stringify,
+    projects, snapshots, new Map(), new Map(), JSON.stringify,
     group => ({ storageKey: group.upload.storageKey || null }),
     async (url, options) => {
       calls.push({ url, options });
@@ -77,16 +74,25 @@ function ok(name, condition) {
     '', 'token', () => {}, console
   );
 
+  const primaryDocId = api._documentRowId('primary', 'outlook-pending-7');
+  const siblingDocId = api._documentRowId('sibling', 'outlook-pending-7');
+  snapshots.set(siblingDocId, 'old-sibling');
+  snapshots.set(primaryDocId, 'old-primary');
+
   ok('resuelve el documentId del objeto upload, aunque un hermano comparta blobId',
-    api._documentIdForUpload(primaryUpload) === 'doc-primary');
+    api._documentIdForUpload(primaryUpload, projects[1]) === primaryDocId);
+  ok('acota la resolución al proyecto dueño en vez del primero que aparezca en `projects`',
+    api._documentIdForUpload(siblingUpload, projects[0]) === siblingDocId &&
+    api._documentIdForUpload(primaryUpload, projects[1]) !== siblingDocId);
   ok('enlaza correctamente el PDF pendiente', await api._linkPendingBillFiles());
   ok('consume from-pending exactamente una vez y sobre el documento primario',
-    calls.length === 1 && calls[0].url === '/api/files/documents/doc-primary/from-pending');
+    calls.length === 1 &&
+    calls[0].url === `/api/files/documents/${encodeURIComponent(primaryDocId)}/from-pending`);
   ok('propaga el storageKey al upload y doc hermanos',
     siblingUpload.storageKey === 'documents/shared.pdf' &&
     siblingDoc.storageKey === 'documents/shared.pdf');
   ok('deja el snapshot hermano anterior para que el próximo sync haga PUT',
-    snapshots.get('doc-sibling') === 'old-sibling');
+    snapshots.get(siblingDocId) === 'old-sibling');
   const attach = new Function(`${extractFunction('msAttachPendingPdf')}; return msAttachPendingPdf;`)();
   const pending = { id: 'pending-8', fileName: 'otra.pdf', storageKey: 'pending/key.pdf' };
   const primaryProject = { uploads: [], docs: [] };

@@ -1462,25 +1462,27 @@ async function fetchDocumentBlobUrl(documentId){
   return URL.createObjectURL(await resp.blob());
 }
 function _findUploadByBlobId(blobId){
+  // Devuelve también el proyecto dueño: _documentIdForUpload necesita acotar la búsqueda a ese
+  // proyecto para no resolver contra un blobId compartido por una copia de Outlook en otro.
   for(const project of projects){
     const upload=(project.uploads||[]).find(item=>item.blobId===blobId);
-    if(upload)return upload;
+    if(upload)return {upload,project};
   }
   return null;
 }
-function _documentIdForUpload(upload){
-  if(!upload)return null;
-  for(const project of projects){
-    for(const group of _documentGroups(project)){
-      if(group.upload===upload)return group.id;
-    }
+function _documentIdForUpload(upload,project){
+  // _documentGroups siempre clona upload ({...persistent}), así que comparar por referencia
+  // nunca coincide; hay que resolver por blobId/id y, crucial, acotado al proyecto dueño del
+  // upload — si no, un blobId compartido entre copias de Outlook en varios proyectos resuelve
+  // al primer proyecto que aparezca en `projects`, no al que realmente pidió el id.
+  if(!upload||!project)return null;
+  for(const group of _documentGroups(project)){
+    if(group.upload===upload)return group.id;
   }
-  for(const project of projects){
-    for(const group of _documentGroups(project)){
-      if(!group.upload)continue;
-      if(upload.blobId&&group.upload.blobId===upload.blobId)return group.id;
-      if(upload.id&&group.upload.id===upload.id)return group.id;
-    }
+  for(const group of _documentGroups(project)){
+    if(!group.upload)continue;
+    if(upload.blobId&&group.upload.blobId===upload.blobId)return group.id;
+    if(upload.id&&group.upload.id===upload.id)return group.id;
   }
   return null;
 }
@@ -1488,7 +1490,7 @@ async function _linkPendingBillFiles(){
   for(const project of projects){
     for(const upload of (project.uploads||[])){
       if(!upload.pendingBillId||upload.storageKey)continue;
-      const documentId=_documentIdForUpload(upload);
+      const documentId=_documentIdForUpload(upload,project);
       if(!documentId||!_documentSnapshots.has(String(documentId)))continue;
       try{
         const resp=await fetch(
@@ -1539,7 +1541,12 @@ async function _linkPendingBillFiles(){
               delete sibling.pendingBillId;
               delete sibling.pendingStorageKey;
               delete sibling.pdfBase64;
-              const siblingGroup=_documentGroups(siblingProject).find(item=>item.upload===sibling);
+              // Igual que arriba: `_documentGroups` clona, así que hay que resolver por id
+              // (acotado a siblingProject) en vez de comparar la referencia de `sibling`.
+              const siblingDocId=_documentIdForUpload(sibling,siblingProject);
+              const siblingGroup=siblingDocId
+                ?_documentGroups(siblingProject).find(item=>String(item.id)===String(siblingDocId))
+                :null;
               if(siblingGroup?.docSortOrder!==null&&siblingProject.docs?.[siblingGroup.docSortOrder]){
                 const siblingDoc=siblingProject.docs[siblingGroup.docSortOrder];
                 siblingDoc.storageKey=storageKey;
@@ -1561,12 +1568,13 @@ async function _linkPendingBillFiles(){
 }
 async function _flushPendingDocumentUploads(){
   for(const [blobId,file] of [..._pendingDocFiles.entries()]){
-    const upload=_findUploadByBlobId(blobId);
-    if(!upload){
+    const found=_findUploadByBlobId(blobId);
+    if(!found){
       _pendingDocFiles.delete(blobId);
       continue;
     }
-    const documentId=_documentIdForUpload(upload);
+    const {upload,project:uploadProject}=found;
+    const documentId=_documentIdForUpload(upload,uploadProject);
     if(!documentId)continue;
     // Si el archivo llegó mientras otro guardado ya estaba en vuelo, la fila se creará en
     // el guardado encolado. No intentar subir contra un documentId que aún no existe.
@@ -6310,8 +6318,9 @@ function docDelete(docKey,blobId){
 }
 async function openPdfNewTab(blobId){
   // Buscar en todos los proyectos (no solo curProj) para el caso de importación
-  const up=_findUploadByBlobId(blobId);
-  const documentId=_documentIdForUpload(up);
+  const _found=_findUploadByBlobId(blobId);
+  const up=_found?.upload||null;
+  const documentId=_documentIdForUpload(up,_found?.project);
   let remoteWindow=null;
   const showUrl=url=>{
     if(remoteWindow&&!remoteWindow.closed)remoteWindow.location.replace(url);
@@ -6418,8 +6427,9 @@ function docMenuToggle(menuId,e){
 document.addEventListener('click',()=>document.querySelectorAll('.doc-menu-dd').forEach(el=>el.style.display='none'));
 let _dvCurrentBlobId=null, _dvCurrentExt=null;
 async function viewDoc(blobId,name,ext){
-  const up=_findUploadByBlobId(blobId);
-  const documentId=_documentIdForUpload(up);
+  const _found=_findUploadByBlobId(blobId);
+  const up=_found?.upload||null;
+  const documentId=_documentIdForUpload(up,_found?.project);
   let url=null;
   // Antes de persistir, el File local es la única fuente disponible.
   if(_pendingDocFiles.has(blobId))url=docBlobMap[blobId]||up?.url||null;

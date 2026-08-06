@@ -49,13 +49,20 @@ ok('viewDoc prioriza R2 y base64 antes del fallback de sesión',
   viewDocSource.indexOf('pdfBase64') <
     viewDocSource.lastIndexOf('docBlobMap[blobId]'));
 ok('flush descarta pendientes cuyo upload ya fue eliminado',
-  /if\(!upload\)\{\s*_pendingDocFiles\.delete\(blobId\);\s*continue;\s*\}/.test(flushSource));
+  /if\(!found\)\{\s*_pendingDocFiles\.delete\(blobId\);\s*continue;\s*\}/.test(flushSource));
+ok('flush resuelve el documentId acotado al proyecto dueño del upload (no global)',
+  /_documentIdForUpload\(upload,uploadProject\)/.test(flushSource));
 ok('sync elimina pendientes que ya no existen en documentos actuales',
   /_pendingDocFiles\.delete\(blobId\)/.test(syncSource));
 ok('borrado UI individual limpia el archivo pendiente',
   /function docDelete\([\s\S]{0,800}_pendingDocFiles\.delete\(/.test(html));
 ok('borrado UI masivo limpia los archivos pendientes',
   /function docBulkDelete\([\s\S]{0,1200}_pendingDocFiles\.delete\(/.test(html));
+ok('openPdfNewTab y viewDoc resuelven documentId acotado al proyecto dueño del upload',
+  /_documentIdForUpload\(up,_found\?\.project\)/.test(openPdfSource) &&
+  /_documentIdForUpload\(up,_found\?\.project\)/.test(viewDocSource));
+ok('_findUploadByBlobId expone también el proyecto dueño del upload',
+  /function _findUploadByBlobId\(blobId\)\{[\s\S]{0,500}return \{upload,project\};/.test(html));
 
 console.log(`\n${pass} ok, ${fail} fail`);
 if (fail) process.exit(1);
