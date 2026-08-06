@@ -2979,12 +2979,14 @@ async function bootstrapCloudflareAuth(){
       if(resp.status===403){
         // Tres causas posibles, todas devuelven 403 y hay que distinguirlas (ver `reason`):
         //  - no_account: Cloudflare Access validó al usuario, pero ese correo no tiene cuenta en Siscon.
-        //  - invalid_jwt / missing_jwt: la cookie/JWT de Cloudflare Access está rota, expirada o
-        //    ausente (sesión de Access inconsistente) — nada que ver con tener o no cuenta en Siscon.
+        //  - invalid_jwt: la cookie/JWT de Access está rota o vencida → reautenticarse sí ayuda.
+        //  - missing_jwt: el header ni siquiera llegó → Cloudflare no está delante (config), y
+        //    reautenticarse NO ayuda; es una falla del sistema que afecta a todos por igual.
         let info={};
         try{ info=await resp.json(); }catch(e){}
         console.log('[FASE2] 403 en /api/me — reason:', info.reason, 'email:', info.email, 'detail:', info.detail);
-        const changeAccountBtn=info.logoutUrl?'<button class="btn-sec" style="width:auto" onclick="window.location.href=\''+info.logoutUrl+'\'">🔀 Cambiar de cuenta</button>':'';
+        // Solo se ofrece "Cambiar de cuenta" cuando reautenticarse puede realmente resolverlo.
+        const changeAccountBtn=(info.logoutUrl&&info.reason!=='missing_jwt')?'<button class="btn-sec" style="width:auto" onclick="window.location.href=\''+info.logoutUrl+'\'">🔀 Cambiar de cuenta</button>':'';
         let title, bodyHtml;
         if(info.reason==='no_account'){
           title='❌ Sin acceso a Siscon';
@@ -2992,6 +2994,15 @@ async function bootstrapCloudflareAuth(){
           bodyHtml=emailLine
             +'<p>Tu cuenta de Microsoft se autenticó correctamente, pero todavía no tiene una cuenta creada dentro de Siscon.</p>'
             +'<p>Pide a un administrador que la cree en <b>Ajustes ⚙ → Usuarios → Nuevo Usuario</b> con este mismo correo. Luego pulsa Reintentar.</p>';
+        }else if(info.reason==='missing_jwt'){
+          // Caso real visto en producción (2026-08-06): el registro DNS de app.sisconcr.com quedó
+          // en "DNS only" en vez de "Proxied", así que el tráfico se saltaba Cloudflare entero.
+          // Sin Cloudflare delante no hay login de Microsoft ni header Cf-Access-Jwt-Assertion, y
+          // NADIE puede entrar. No es sesión vencida: "Cambiar de cuenta" no arregla nada aquí,
+          // por eso este caso no ofrece ese botón — el arreglo es de configuración.
+          title='⚠️ La app no está pasando por Cloudflare Access';
+          bodyHtml='<p>Tu solicitud llegó al servidor <b>sin pasar por Cloudflare Access</b>, así que nunca se te pidió iniciar sesión con Microsoft.</p>'
+            +'<p>Esto es un problema de configuración del sistema, no de tu cuenta — le está pasando a todos los usuarios. Avisa al administrador: hay que revisar que el registro DNS de <code>app.sisconcr.com</code> esté en modo <b>Proxied</b> (nube naranja) en Cloudflare y que la aplicación de Access esté activa.</p>';
         }else{
           title='⚠️ No se pudo verificar tu sesión';
           bodyHtml='<p>Cloudflare Access no envió una sesión válida con esta solicitud (motivo: '+(info.reason||resp.status)+').</p>'
