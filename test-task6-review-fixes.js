@@ -103,6 +103,20 @@ function ok(name, condition) {
     primaryProject.uploads[0].pendingBillId === 'pending-8' &&
     !('pendingBillId' in siblingProject.uploads[0]));
 
+  console.log('\nVer PDF / viewDoc con blobId duplicado:');
+  const findFactory = new Function(
+    'projects',
+    `${extractFunction('_findUploadByBlobId')}
+     return _findUploadByBlobId;`
+  );
+  const findUpload = findFactory(projects);
+  const curProj = projects[1];
+  ok('_findUploadByBlobId con curProj devuelve el upload del proyecto actual, no el primero',
+    findUpload('outlook-pending-7', curProj).project.id === 'primary' &&
+    findUpload('outlook-pending-7', curProj).upload === primaryUpload);
+  ok('_findUploadByBlobId sin preferredProject conserva el fallback global',
+    findUpload('outlook-pending-7').project.id === 'sibling');
+
   console.log('\nCola de guardado y ack:');
   let resolveEarlier, resolveImported;
   const earlier = new Promise(resolve => { resolveEarlier = resolve; });

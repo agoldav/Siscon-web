@@ -62,7 +62,12 @@ ok('openPdfNewTab y viewDoc resuelven documentId acotado al proyecto dueño del 
   /_documentIdForUpload\(up,_found\?\.project\)/.test(openPdfSource) &&
   /_documentIdForUpload\(up,_found\?\.project\)/.test(viewDocSource));
 ok('_findUploadByBlobId expone también el proyecto dueño del upload',
-  /function _findUploadByBlobId\(blobId\)\{[\s\S]{0,500}return \{upload,project\};/.test(html));
+  /function _findUploadByBlobId\(blobId(?:,preferredProject)?\)\{[\s\S]{0,800}return \{upload,project\};/.test(html));
+ok('_findUploadByBlobId prefiere preferredProject antes del barrido global',
+  /function _findUploadByBlobId\(blobId(?:,preferredProject)?\)\{[\s\S]{0,400}if\(preferredProject\)/.test(html));
+ok('openPdfNewTab y viewDoc pasan curProj al resolver upload duplicado',
+  /_findUploadByBlobId\(blobId,curProj\)/.test(openPdfSource) &&
+  /_findUploadByBlobId\(blobId,curProj\)/.test(viewDocSource));
 
 console.log(`\n${pass} ok, ${fail} fail`);
 if (fail) process.exit(1);

@@ -1461,14 +1461,21 @@ async function fetchDocumentBlobUrl(documentId){
   }
   return URL.createObjectURL(await resp.blob());
 }
-function _findUploadByBlobId(blobId){
+function _findUploadByBlobId(blobId,preferredProject){
   // Devuelve también el proyecto dueño: _documentIdForUpload necesita acotar la búsqueda a ese
   // proyecto para no resolver contra un blobId compartido por una copia de Outlook en otro.
+  if(preferredProject){
+    const upload=(preferredProject.uploads||[]).find(item=>item.blobId===blobId);
+    if(upload)return {upload,project:preferredProject};
+  }
+  let fallback=null;
   for(const project of projects){
     const upload=(project.uploads||[]).find(item=>item.blobId===blobId);
-    if(upload)return {upload,project};
+    if(!upload)continue;
+    if(preferredProject&&project.id===preferredProject.id)return {upload,project};
+    if(!fallback)fallback={upload,project};
   }
-  return null;
+  return fallback;
 }
 function _documentIdForUpload(upload,project){
   // _documentGroups siempre clona upload ({...persistent}), así que comparar por referencia
@@ -6317,8 +6324,7 @@ function docDelete(docKey,blobId){
   renderDocs();
 }
 async function openPdfNewTab(blobId){
-  // Buscar en todos los proyectos (no solo curProj) para el caso de importación
-  const _found=_findUploadByBlobId(blobId);
+  const _found=_findUploadByBlobId(blobId,curProj);
   const up=_found?.upload||null;
   const documentId=_documentIdForUpload(up,_found?.project);
   let remoteWindow=null;
@@ -6427,7 +6433,7 @@ function docMenuToggle(menuId,e){
 document.addEventListener('click',()=>document.querySelectorAll('.doc-menu-dd').forEach(el=>el.style.display='none'));
 let _dvCurrentBlobId=null, _dvCurrentExt=null;
 async function viewDoc(blobId,name,ext){
-  const _found=_findUploadByBlobId(blobId);
+  const _found=_findUploadByBlobId(blobId,curProj);
   const up=_found?.upload||null;
   const documentId=_documentIdForUpload(up,_found?.project);
   let url=null;
