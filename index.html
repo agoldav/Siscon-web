@@ -2977,8 +2977,35 @@ async function bootstrapCloudflareAuth(){
     const resp=await fetch(BACKEND_URL+'/api/me',{method:'GET',credentials:'include'});
     if(!resp.ok){
       if(resp.status===403){
-        console.log('[FASE2] No autorizado (fuera de allowlist de Cloudflare Access)');
-        document.getElementById('login-screen').innerHTML='<div style="text-align:center;padding:40px;max-width:600px"><h1>❌ No Autorizado</h1><p>Tu cuenta de Outlook no está autorizada para acceder a Siscon.</p><p>Contacta al administrador para ser agregado a la allowlist de Cloudflare Access.</p><pre style="background:var(--bg1);padding:20px;border-radius:8px;overflow-x:auto;font-size:12px;white-space:pre-wrap;text-align:left"></pre></div>';
+        // Tres causas posibles, todas devuelven 403 y hay que distinguirlas (ver `reason`):
+        //  - no_account: Cloudflare Access validó al usuario, pero ese correo no tiene cuenta en Siscon.
+        //  - invalid_jwt / missing_jwt: la cookie/JWT de Cloudflare Access está rota, expirada o
+        //    ausente (sesión de Access inconsistente) — nada que ver con tener o no cuenta en Siscon.
+        let info={};
+        try{ info=await resp.json(); }catch(e){}
+        console.log('[FASE2] 403 en /api/me — reason:', info.reason, 'email:', info.email, 'detail:', info.detail);
+        const changeAccountBtn=info.logoutUrl?'<button class="btn-sec" style="width:auto" onclick="window.location.href=\''+info.logoutUrl+'\'">🔀 Cambiar de cuenta</button>':'';
+        let title, bodyHtml;
+        if(info.reason==='no_account'){
+          title='❌ Sin acceso a Siscon';
+          const emailLine=info.email?'<p style="font-weight:600;color:var(--t1)">'+info.email+'</p>':'';
+          bodyHtml=emailLine
+            +'<p>Tu cuenta de Microsoft se autenticó correctamente, pero todavía no tiene una cuenta creada dentro de Siscon.</p>'
+            +'<p>Pide a un administrador que la cree en <b>Ajustes ⚙ → Usuarios → Nuevo Usuario</b> con este mismo correo. Luego pulsa Reintentar.</p>';
+        }else{
+          title='⚠️ No se pudo verificar tu sesión';
+          bodyHtml='<p>Cloudflare Access no envió una sesión válida con esta solicitud (motivo: '+(info.reason||resp.status)+').</p>'
+            +'<p>Esto suele pasar cuando la sesión de Cloudflare Access quedó vencida, corrupta, o quedó asociada a otra cuenta de Microsoft. Prueba <b>Cambiar de cuenta</b> para reautenticarte desde cero; si el problema sigue, avisa al administrador con este detalle: <code>'+(info.detail||info.error||resp.status)+'</code>.</p>';
+        }
+        document.getElementById('login-screen').innerHTML=
+          '<div class="login-box" style="text-align:center;width:420px">'
+          +'<h1 style="font-size:20px;margin:0 0 12px">'+title+'</h1>'
+          +bodyHtml
+          +'<div style="display:flex;gap:10px;justify-content:center;margin-top:20px;flex-wrap:wrap">'
+          +'<button class="btn-pri" style="width:auto" onclick="bootstrapCloudflareAuth()">🔄 Reintentar</button>'
+          +changeAccountBtn
+          +'</div>'
+          +'</div>';
         return;
       }
       console.log('[FASE2] Error:', resp.status, resp.statusText);
