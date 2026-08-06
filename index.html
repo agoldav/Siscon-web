@@ -1479,6 +1479,56 @@ function _documentIdForUpload(upload){
   }
   return null;
 }
+async function _linkPendingBillFiles(){
+  for(const project of projects){
+    for(const upload of (project.uploads||[])){
+      if(!upload.pendingBillId||upload.storageKey)continue;
+      const documentId=_documentIdForUpload(upload);
+      if(!documentId||!_documentSnapshots.has(String(documentId)))continue;
+      try{
+        const resp=await fetch(
+          `${BACKEND_URL}/api/files/documents/${encodeURIComponent(documentId)}/from-pending`,
+          {
+            method:'POST',
+            headers:{
+              'Authorization':`Bearer ${_sbToken}`,
+              'Content-Type':'application/json',
+            },
+            credentials:'include',
+            body:JSON.stringify({pendingBillId:upload.pendingBillId}),
+          }
+        );
+        const data=await resp.json().catch(()=>({}));
+        if(!resp.ok)throw new Error(data.error||data.message||`Error ${resp.status} al enlazar el documento`);
+        const storageKey=data.storageKey??data.document?.storage_key??data.document?.storageKey;
+        if(!storageKey)throw new Error('El servidor no devolvió la ubicación del documento');
+        upload.storageKey=storageKey;
+        delete upload.pendingBillId;
+        delete upload.pendingStorageKey;
+        delete upload.pdfBase64;
+        const group=_documentGroups(project).find(item=>String(item.id)===String(documentId));
+        if(group?.docSortOrder!==null&&project.docs?.[group.docSortOrder]){
+          const doc=project.docs[group.docSortOrder];
+          doc.storageKey=storageKey;
+          delete doc.pendingBillId;
+          delete doc.pendingStorageKey;
+          delete doc.pdfBase64;
+        }
+        const refreshed=_documentGroups(project).find(item=>String(item.id)===String(documentId));
+        if(refreshed){
+          _documentSnapshots.set(String(documentId),_snapshot(_documentCloudPayload(refreshed)));
+          _documentProjectIds.set(String(documentId),String(project.id));
+        }
+        if(data.document?.updated_at)_documentVersions.set(String(documentId),data.document.updated_at);
+      }catch(error){
+        console.error('No se pudo enlazar el PDF pendiente de Outlook:',error);
+        alert(`No se pudo guardar "${upload.name}" en Documentos. ${error.message||''}`.trim());
+        return false;
+      }
+    }
+  }
+  return true;
+}
 async function _flushPendingDocumentUploads(){
   for(const [blobId,file] of [..._pendingDocFiles.entries()]){
     const upload=_findUploadByBlobId(blobId);
@@ -1519,7 +1569,7 @@ async function _flushPendingDocumentUploads(){
       return false;
     }
   }
-  return true;
+  return _linkPendingBillFiles();
 }
 // Una aprobación propia puede chocar con la versión que el administrador acaba de guardar. Ese caso
 // no requiere decidir entre recargar/sobrescribir: se informa con un solo OK y se toma la versión
@@ -2246,9 +2296,10 @@ function saveData(){
       const projectsNoPdf=projectsClean.map(p=>({...p,uploads:(p.uploads||[]).map(({pdfBase64,...u})=>u)}));
       localStorage.setItem(LS_KEY,JSON.stringify({projects:projectsNoPdf,SYS,activityLog}));
     }
-    saveDataToAPI();
+    const savePromise=saveDataToAPI();
     const t=document.getElementById('save-toast');
     if(t){t.classList.add('show');clearTimeout(_saveToastTimer);_saveToastTimer=setTimeout(()=>t.classList.remove('show'),1800);}
+    return savePromise;
   }catch(e){console.warn('Error guardando datos:',e);}
 }
 
@@ -13489,20 +13540,31 @@ function msPendingBillProbe(data){
   };
 }
 function msAttachPendingPdf(proj,target,bill){
-  if(!bill.pdfBase64)return false;
+  if(!bill.storageKey&&!bill.pdfBase64)return false;
   try{
-    const byteArr=Uint8Array.from(atob(bill.pdfBase64),c=>c.charCodeAt(0));
-    const blob=new Blob([byteArr],{type:'application/pdf'});
     const stable=String(bill.id||bill.fileName||Date.now()).replace(/[^a-zA-Z0-9_-]/g,'');
     const blobId='outlook-'+stable;
-    const url=URL.createObjectURL(blob);
+    let blob=null,url=null;
+    if(!bill.storageKey){
+      const byteArr=Uint8Array.from(atob(bill.pdfBase64),c=>c.charCodeAt(0));
+      blob=new Blob([byteArr],{type:'application/pdf'});
+      url=URL.createObjectURL(blob);
+    }
     if(!proj.uploads)proj.uploads=[];
     let upload=proj.uploads.find(u=>u.name===bill.fileName||u.blobId===blobId);
-    if(!upload){upload={blobId,url,pdfBase64:bill.pdfBase64,name:bill.fileName,type:'PDF'};proj.uploads.push(upload);}
-    else if(!upload.pdfBase64){upload.pdfBase64=bill.pdfBase64;upload.url=url;}
+    if(!upload){upload={blobId,name:bill.fileName,type:'PDF'};proj.uploads.push(upload);}
+    if(bill.storageKey&&!upload.storageKey){
+      upload.pendingBillId=bill.id;
+      upload.pendingStorageKey=bill.storageKey;
+      delete upload.pdfBase64;
+      delete upload.url;
+    }else if(!bill.storageKey&&!upload.storageKey){
+      upload.pdfBase64=bill.pdfBase64;
+      upload.url=url;
+    }
     if(!proj.docs)proj.docs=[];
     let doc=proj.docs.find(d=>d.name===bill.fileName||d.blobId===blobId);
-    if(!doc){doc={id:'doc-'+Date.now(),name:bill.fileName,category:'Factura de Gastos',docType:'Factura de Gastos',date:new Date().toISOString().slice(0,10),size:blob.size,blobId};proj.docs.push(doc);}
+    if(!doc){doc={id:'doc-'+Date.now(),name:bill.fileName,category:'Factura de Gastos',docType:'Factura de Gastos',date:new Date().toISOString().slice(0,10),size:blob?.size??bill.sizeBytes??bill.size??'—',blobId};proj.docs.push(doc);}
     target.pdfBlobId=upload.blobId;
     target.pdfName=bill.fileName;
     return true;
@@ -13535,7 +13597,8 @@ async function msPollPending(){
             invoiceNumber:bill.data&&bill.data.invoiceNumber||'',
             vendor:bill.data&&bill.data.vendor||'', date:bill.data&&bill.data.date||'',
             total:bill.data&&bill.data.total||0, currency:bill.data&&bill.data.currency||'CRC',
-            pdfBase64:bill.pdfBase64||null, ocrData:bill.data||null,
+            storageKey:bill.storageKey||null,
+            pdfBase64:bill.storageKey?null:(bill.pdfBase64||null), ocrData:bill.data||null,
             _pending:true
           });
           addNotif(`⚠ Factura "${bill.fileName}" sin proyecto (ref: "${bill.projectRef}") — agregada a Sin Clasificar`, 'unclassified');
@@ -13632,7 +13695,7 @@ async function msPollPending(){
       imported++;
     }
     if(imported>0||merged>0){
-      saveData(); // guardar primero
+      if(!(await saveData()))return; // guardar y enlazar el PDF primero
       // Ackear en servidor SOLO después de que saveData haya persistido los datos
       for(const id of toAck) await msAck(id,be);
       if(imported)addNotif(`✓ ${imported} factura(s) importada(s) desde Outlook`);
