@@ -3185,8 +3185,46 @@ async function bootstrapCloudflareAuth(){
     const resp=await fetch(BACKEND_URL+'/api/me',{method:'GET',credentials:'include'});
     if(!resp.ok){
       if(resp.status===403){
-        console.log('[FASE2] No autorizado (fuera de allowlist de Cloudflare Access)');
-        document.getElementById('login-screen').innerHTML='<div style="text-align:center;padding:40px;max-width:600px"><h1>❌ No Autorizado</h1><p>Tu cuenta de Outlook no está autorizada para acceder a Siscon.</p><p>Contacta al administrador para ser agregado a la allowlist de Cloudflare Access.</p><pre style="background:var(--bg1);padding:20px;border-radius:8px;overflow-x:auto;font-size:12px;white-space:pre-wrap;text-align:left"></pre></div>';
+        // Tres causas posibles, todas devuelven 403 y hay que distinguirlas (ver `reason`):
+        //  - no_account: Cloudflare Access validó al usuario, pero ese correo no tiene cuenta en Siscon.
+        //  - invalid_jwt: la cookie/JWT de Access está rota o vencida → reautenticarse sí ayuda.
+        //  - missing_jwt: el header ni siquiera llegó → Cloudflare no está delante (config), y
+        //    reautenticarse NO ayuda; es una falla del sistema que afecta a todos por igual.
+        let info={};
+        try{ info=await resp.json(); }catch(e){}
+        console.log('[FASE2] 403 en /api/me — reason:', info.reason, 'email:', info.email, 'detail:', info.detail);
+        // Solo se ofrece "Cambiar de cuenta" cuando reautenticarse puede realmente resolverlo.
+        const changeAccountBtn=(info.logoutUrl&&info.reason!=='missing_jwt')?'<button class="btn-sec" style="width:auto" onclick="window.location.href=\''+info.logoutUrl+'\'">🔀 Cambiar de cuenta</button>':'';
+        let title, bodyHtml;
+        if(info.reason==='no_account'){
+          title='❌ Sin acceso a Siscon';
+          const emailLine=info.email?'<p style="font-weight:600;color:var(--t1)">'+info.email+'</p>':'';
+          bodyHtml=emailLine
+            +'<p>Tu cuenta de Microsoft se autenticó correctamente, pero todavía no tiene una cuenta creada dentro de Siscon.</p>'
+            +'<p>Pide a un administrador que la cree en <b>Ajustes ⚙ → Usuarios → Nuevo Usuario</b> con este mismo correo. Luego pulsa Reintentar.</p>';
+        }else if(info.reason==='missing_jwt'){
+          // Caso real visto en producción (2026-08-06): el registro DNS de app.sisconcr.com quedó
+          // en "DNS only" en vez de "Proxied", así que el tráfico se saltaba Cloudflare entero.
+          // Sin Cloudflare delante no hay login de Microsoft ni header Cf-Access-Jwt-Assertion, y
+          // NADIE puede entrar. No es sesión vencida: "Cambiar de cuenta" no arregla nada aquí,
+          // por eso este caso no ofrece ese botón — el arreglo es de configuración.
+          title='⚠️ La app no está pasando por Cloudflare Access';
+          bodyHtml='<p>Tu solicitud llegó al servidor <b>sin pasar por Cloudflare Access</b>, así que nunca se te pidió iniciar sesión con Microsoft.</p>'
+            +'<p>Esto es un problema de configuración del sistema, no de tu cuenta — le está pasando a todos los usuarios. Avisa al administrador: hay que revisar que el registro DNS de <code>app.sisconcr.com</code> esté en modo <b>Proxied</b> (nube naranja) en Cloudflare y que la aplicación de Access esté activa.</p>';
+        }else{
+          title='⚠️ No se pudo verificar tu sesión';
+          bodyHtml='<p>Cloudflare Access no envió una sesión válida con esta solicitud (motivo: '+(info.reason||resp.status)+').</p>'
+            +'<p>Esto suele pasar cuando la sesión de Cloudflare Access quedó vencida, corrupta, o quedó asociada a otra cuenta de Microsoft. Prueba <b>Cambiar de cuenta</b> para reautenticarte desde cero; si el problema sigue, avisa al administrador con este detalle: <code>'+(info.detail||info.error||resp.status)+'</code>.</p>';
+        }
+        document.getElementById('login-screen').innerHTML=
+          '<div class="login-box" style="text-align:center;width:420px">'
+          +'<h1 style="font-size:20px;margin:0 0 12px">'+title+'</h1>'
+          +bodyHtml
+          +'<div style="display:flex;gap:10px;justify-content:center;margin-top:20px;flex-wrap:wrap">'
+          +'<button class="btn-pri" style="width:auto" onclick="bootstrapCloudflareAuth()">🔄 Reintentar</button>'
+          +changeAccountBtn
+          +'</div>'
+          +'</div>';
         return;
       }
       console.log('[FASE2] Error:', resp.status, resp.statusText);
@@ -5160,7 +5198,7 @@ function updateHouseStatusSheet(id,sel){
 
 function getHouseSortVal(h,col,p){
   const t=p.types.find(x=>x.id===h.typeId);
-  if(col==='num') return h.num;
+  if(col==='num'){const m=String(h.num).match(/\d+/);return m?parseInt(m[0]):0;}
   if(col==='type') return t?t.name:'';
   if(col==='area') return t?t.area:0;
   if(col==='budget') return t?t.budget:0;
@@ -6828,7 +6866,7 @@ function txnSortArr(arr, getParty, getDate, getStatus, getNum, getProduct){
     case 'date-asc': a.sort((x,y)=>(getDate(x)||'').localeCompare(getDate(y)||'')); break;
     case 'date-desc': a.sort((x,y)=>(getDate(y)||'').localeCompare(getDate(x)||'')); break;
     case 'status': a.sort((x,y)=>(getStatus(x)||'').localeCompare(getStatus(y)||'')); break;
-    case 'num': a.sort((x,y)=>(getNum(x)||'').localeCompare(getNum(y)||'')); break;
+    case 'num': a.sort((x,y)=>{const nx=Number(getNum(x))||0,ny=Number(getNum(y))||0;return nx-ny;}); break;
     case 'party': a.sort((x,y)=>(getParty(x)||'').localeCompare(getParty(y)||'')); break;
     case 'product': a.sort((x,y)=>(getProduct(x)||'').localeCompare(getProduct(y)||'')); break;
   }
@@ -11502,7 +11540,7 @@ function renderCalcList(){
   if(!SYS.subAdvanceRecords)SYS.subAdvanceRecords=[];
   let recs=SYS.subAdvanceRecords.filter(r=>calcInPeriod(r.date)&&calcRecMatchesSub(r)&&calcRecMatchesProj(r));
   recs=recs.slice().sort((a,b)=>{
-    if(calcListSort==='num') return calcListSortDir*((a.num||'').localeCompare(b.num||''));
+    if(calcListSort==='num') return calcListSortDir*((Number(a.num)||0)-(Number(b.num)||0));
     if(calcListSort==='total') return calcListSortDir*((a.total||0)-(b.total||0));
     return calcListSortDir*((a.date||'').localeCompare(b.date||''));
   });
