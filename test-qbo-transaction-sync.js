@@ -236,9 +236,13 @@ ok('el frontend consulta el General Ledger filtrado por proyecto y aplica su COG
   /group\.costSource='GeneralLedgerProject'/.test(html) && /slice\.documentCostUSD\?\?receipt\.cogsTotal/.test(html));
 ok('al terminar QB actualiza inmediatamente el dashboard o proyecto visible',
   /if\(curProj\)\{renderMetric\(\);renderTab\(\);\}\s*else renderDash\(\)/.test(html));
-ok('Facturas de Proveedores muestra y contabiliza explícitamente los Recibos de venta QBO',
-  /Recibos de venta QBO: \$\{inventoryReceipts\.length\}/.test(html) && /qboCostPending/.test(html) &&
+ok('Requisición de Materiales muestra y contabiliza explícitamente los Recibos de venta QBO',
+  /Recibos de venta QBO: \$\{receipts\.length\}/.test(html) && /qboCostPending/.test(html) &&
+  /type==='requis'\?renderInventoryReceiptsSection\(\)/.test(html) &&
   /El documento debe ser visible aunque el reporte de COGS falle/.test(html));
+ok('las líneas de Recibo QBO defaultan IVA de proyecto al 13%',
+  /ivaRate:0\.13/.test(html) && /qboEntity==='SalesReceipt'/.test(html) &&
+  /Number\(l\.qboTaxUSD\)>0/.test(html));
 ok('la lista explica el monto aplicado frente al documento completo',
   /Total \$\{fmt\(qboProjectCost\)\} de \$\{fmt\(qboDocumentCost\)\}/.test(html) &&
   /Proyecto: "\$\{esc\(l\.qboLineProjectName/.test(html) && /esta línea no suma/.test(html));

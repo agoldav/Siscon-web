@@ -9241,7 +9241,7 @@ function qboSalesReceiptLinesForSlice(receipt,slice,existingLines){
     const cost=active?(rawActiveTotal>0?rawCost*activeScale:Math.max(0,Number(slice.costUSD)||0)/activeCount):rawCost;
     const qty=Number(line.quantity)||1,projectName=resolution.project&&resolution.project.name||resolution.name||'';
     return {productId:String(line.item&&line.item.id||''),desc:String(line.item&&line.item.name||line.description||'Material de inventario'),
-      qty,price:qty?cost/qty:cost,discPct:0,assign:Array.isArray(previous.assign)?previous.assign:[],ivaRate:0,qboTaxUSD:0,
+      qty,price:qty?cost/qty:cost,discPct:0,assign:Array.isArray(previous.assign)?previous.assign:[],ivaRate:0.13,
       qboLineId:String(line.id||index),qboCostUSD:cost,qboLineProjectId:resolution.id||'',qboLineProjectName:projectName,
       qboProjectActive:active};
   });
@@ -12769,7 +12769,13 @@ function openVendorBill(id){
   const tx=txnArr('proveedor').find(x=>String(x.id)===String(id)); if(!tx)return;
   vbState=JSON.parse(JSON.stringify(tx));
   if(!vbState.lines||!vbState.lines.length)vbState.lines=[{productId:'',desc:'',qty:1,price:0,discPct:0,assign:[],ivaRate:0.13}];
-  vbState.lines.forEach(l=>{ if(!l.assign)l.assign=[]; if(l.discPct===undefined)l.discPct=0; if(l.ivaRate===undefined)l.ivaRate=0.13; });
+  vbState.lines.forEach(l=>{
+    if(!l.assign)l.assign=[];
+    if(l.discPct===undefined)l.discPct=0;
+    if(vbState.qboEntity==='SalesReceipt'){
+      if(!(Number(l.qboTaxUSD)>0)){ delete l.qboTaxUSD; if(l.ivaRate===0||l.ivaRate==null)l.ivaRate=0.13; }
+    } else if(l.ivaRate===undefined)l.ivaRate=0.13;
+  });
   renderVendorBill();
 }
 let vbActiveTab='resumen'; // 'resumen' | houseId
@@ -12801,12 +12807,18 @@ function vbPrefillFromOC(oc){
   });
   if(lines.length) vbState.lines=lines;
 }
-function vbLineNet(l){ const gross=(l.qty||0)*(l.price||0); return gross*(1-(l.discPct||0)/100); }
+function vbLineNet(l){
+  if(Number(l.qboCostUSD)>0)return Number(l.qboCostUSD)*(1-(l.discPct||0)/100);
+  const gross=(l.qty||0)*(l.price||0);
+  return gross*(1-(l.discPct||0)/100);
+}
 function vbLineDisc(l){ const gross=(l.qty||0)*(l.price||0); return gross*(l.discPct||0)/100; }
 function vbProjectLineActive(l){return !(vbState&&vbState.qboMultiProject)||l.qboProjectActive!==false;}
 function vbSub(){ let s=0; vbState.lines.filter(vbProjectLineActive).forEach(l=>s+=vbLineNet(l)); return s; }
 function vbLineIVARate(l){
-  if(l&&l.qboTaxUSD!==undefined&&l.qboTaxUSD!==null&&Number.isFinite(Number(l.qboTaxUSD))&&vbLineNet(l))return Number(l.qboTaxUSD)/vbLineNet(l);
+  // Impuesto QBO de factura solo cuando hay monto real; qboTaxUSD=0 de Recibos
+  // no debe forzar "Sin IVA" (las requisiciones/recibos usan 13% de proyecto).
+  if(l&&Number(l.qboTaxUSD)>0&&vbLineNet(l))return Number(l.qboTaxUSD)/vbLineNet(l);
   return (l.ivaRate===0?0:(l.ivaRate||0.13));
 }
 function vbIVATotal(){ let s=0; vbState.lines.filter(vbProjectLineActive).forEach(l=>{ s+=Number.isFinite(Number(l.qboTaxUSD))?Number(l.qboTaxUSD):vbLineNet(l)*vbLineIVARate(l); }); return s; }
@@ -12814,6 +12826,16 @@ function vbDiscTotal(){ let s=0; vbState.lines.filter(vbProjectLineActive).forEa
 function vbAssignedQty(l){ return (l.assign||[]).reduce((s,a)=>s+(a.qty||0),0); }
 function vbIsCRC(){ return (vbState.currencyBill||'USD')==='CRC'; }
 function vbMoneyInput(val){ return (val||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function vbFormatUnitPrice(val){
+  const n=Number(val)||0,abs=Math.abs(n);
+  if(abs>0&&abs<0.01)return n.toFixed(6);
+  if(abs>0&&abs<1)return n.toFixed(4);
+  return n.toFixed(2);
+}
+function vbLineUnitUSD(l){
+  if(Number(l.qboCostUSD)>0&&Number(l.qty)>0)return Number(l.qboCostUSD)/Number(l.qty);
+  return Number(l.price)||0;
+}
 
 function vbSetTab(tab){ vbActiveTab=tab; renderVendorBill(); }
 function vbHouseTabBody(houseId){
@@ -12855,9 +12877,12 @@ function renderVendorBill(){
     const assignedTxt=(l.assign&&l.assign.length)?l.assign.map(a=>vbAssignLabel(a.houseId)+': '+a.qty).join(' · '):'sin asignar';
     const assignOk=Math.abs(vbAssignedQty(l)-(l.qty||0))<0.001 && l.assign && l.assign.length;
     const isCRC=vbIsCRC();
-    // Para CRC: mostrar precio en colones; el campo guarda en USD internamente
-    const priceDisp=isCRC?(l.priceCRC!=null?l.priceCRC:l.price*vbXr):l.price;
-    const subNetDisp=isCRC?(vbLineNet(l)*vbXr):vbLineNet(l);
+    // Para CRC: mostrar precio en colones; el campo guarda en USD internamente.
+    // En Recibos QBO el unitario sale de qboCostUSD/qty para no perder decimales FIFO.
+    const unitUSD=vbLineUnitUSD(l);
+    const priceDisp=isCRC?(l.priceCRC!=null?l.priceCRC:unitUSD*vbXr):unitUSD;
+    const lineNetUSD=Number(l.qboCostUSD)>0?Number(l.qboCostUSD)*(1-(l.discPct||0)/100):vbLineNet(l);
+    const subNetDisp=isCRC?(lineNetUSD*vbXr):lineNetUSD;
     const subFmt=isCRC?`₡${subNetDisp.toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}`:fmt(subNetDisp);
     const curItem=items.find(it=>String(it.id)===String(l.productId));
     const curItemName=(curItem||{}).name||'';
@@ -12880,8 +12905,8 @@ function renderVendorBill(){
       <input list="vb-items-list" class="oc-cell-inp" style="text-align:left" value="${curItemName.replace(/"/g,'&quot;')}" placeholder="Buscar producto QB..." onchange="vbSetProductByName(${i},this.value)"/>
       <input class="oc-cell-inp" style="text-align:left" value="${(l.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción..." oninput="vbState.lines[${i}].desc=this.value"/>
       <input type="number" class="oc-cell-inp" value="${l.qty}" min="0" step="0.01" onchange="vbState.lines[${i}].qty=parseFloat(this.value)||0;renderVendorBill()"/>
-      <input type="number" class="oc-cell-inp" value="${priceDisp.toFixed(2)}" min="0" step="0.01"
-        onchange="(function(v){if(vbIsCRC()){const xr=vbState.exchangeRate||tcGet();vbState.lines[${i}].priceCRC=v;vbState.lines[${i}].price=v/xr;}else{vbState.lines[${i}].price=v;vbState.lines[${i}].priceCRC=null;}renderVendorBill();})(parseFloat(this.value)||0)"
+      <input type="number" class="oc-cell-inp" value="${vbFormatUnitPrice(priceDisp)}" min="0" step="any"
+        onchange="(function(v){if(vbIsCRC()){const xr=vbState.exchangeRate||tcGet();vbState.lines[${i}].priceCRC=v;vbState.lines[${i}].price=v/xr;}else{vbState.lines[${i}].price=v;vbState.lines[${i}].priceCRC=null;}delete vbState.lines[${i}].qboCostUSD;renderVendorBill();})(parseFloat(this.value)||0)"
         title="${isCRC?'₡':'$'} ${vbMoneyInput(priceDisp)}"/>
       <input type="number" class="oc-cell-inp" value="${l.discPct||0}" min="0" max="100" step="0.1" onchange="vbState.lines[${i}].discPct=parseFloat(this.value)||0;renderVendorBill()" title="% descuento"/>
       <div class="oc-subtotal">${subFmt}</div>
