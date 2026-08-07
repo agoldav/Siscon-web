@@ -5492,8 +5492,13 @@ function renderHPBody(){
   // All budgeted lines from all categories (only lines with actual material defined)
   const allBudgeted=t?t.categories.flatMap(cat=>cat.lines.filter(l=>l.matId||l.manualName)):[];
   // Unbudgeted = purchases that have no matching lineId in the type
-  const budLineIds=new Set(allBudgeted.map(l=>l.id));
-  const unbudgeted=h.purchases.filter(pu=>!budLineIds.has(pu.lineId));
+  const budLineIds=new Set(allBudgeted.map(l=>String(l.id)));
+  const unbudgeted=h.purchases.filter(pu=>{
+    if(budLineIds.has(String(pu.lineId))) return false;
+    // Legacy: compra con lineId sintético (bill-…) pero el material sí está en presupuesto
+    if(!pu.nonBudgeted && vbFindBudgetLineForProduct(curProj,h.id,pu.matId,pu.manualName)) return false;
+    return true;
+  });
 
   // "buy all" state: check if all quantities filled
   const allFilled=allBudgeted.length>0&&allBudgeted.every(l=>{
@@ -5770,16 +5775,38 @@ function h_setStatus(id,sel){
 }
 
 function hpMatBoughtData(houseId, lineId){
-  // Suma qty y gasto de facturas de proveedor que asignan ese lineId a esa casa
+  // Fuente principal: compras aplicadas a la casa (vbApplyToHouses / solicitar / etc.)
   let qty=0, spent=0;
+  const h=(curProj.houses||[]).find(x=>String(x.id)===String(houseId));
+  if(h&&h.purchases){
+    h.purchases.forEach(pu=>{
+      if(String(pu.lineId)!==String(lineId)) return;
+      qty+=pu.qty||0;
+      spent+=(pu.qty||0)*(pu.price||0);
+    });
+  }
+  if(qty||spent) return {qty,spent};
+
+  // Fallback: facturas (p.ej. OC con lineId en la línea/assign, o Outlook sin purchases aún)
+  const t=h&&h.typeId?(curProj.types||[]).find(x=>String(x.id)===String(h.typeId)):null;
+  let budLine=null;
+  if(t&&t.categories){
+    for(const c of t.categories){ const hit=(c.lines||[]).find(l=>String(l.id)===String(lineId)); if(hit){ budLine=hit; break; } }
+  }
   (curProj.billVendor||[]).forEach(bill=>{
     (bill.lines||[]).forEach(l=>{
-      if(l.lineId!==lineId) return;
       (l.assign||[]).forEach(a=>{
-        if(a.houseId===houseId){
-          qty+=a.qty||0;
-          spent+=(a.qty||0)*(l.price||0)*(1-(l.discPct||0)/100);
+        if(String(a.houseId)!==String(houseId)) return;
+        const aLine=(a.lineId!=null&&a.lineId!=='')?a.lineId:l.lineId;
+        let matched=aLine!=null&&aLine!==''&&String(aLine)===String(lineId);
+        if(!matched && (aLine==null||aLine==='') && budLine){
+          const budName=budLine.manualName||lineName(budLine);
+          matched=!!((l.productId&&budLine.matId&&String(budLine.matId)===String(l.productId))
+            ||(l.desc&&budName&&(budName===l.desc||vbMatNamesMatch(budName,l.desc))));
         }
+        if(!matched) return;
+        qty+=a.qty||0;
+        spent+=(a.qty||0)*(l.price||0)*(1-(l.discPct||0)/100);
       });
     });
   });
@@ -10386,7 +10413,7 @@ function getHouseRecovery(houseId, p){
   (p.billVendor||[]).forEach(bill=>{
     (bill.lines||[]).forEach(l=>{
       (l.assign||[]).forEach(a=>{
-        if(a.houseId===houseId) spent+=(a.qty||0)*(l.price||0)*(1-(l.discPct||0)/100);
+        if(String(a.houseId)===String(houseId)) spent+=(a.qty||0)*(l.price||0)*(1-(l.discPct||0)/100);
       });
     });
   });
@@ -10395,10 +10422,10 @@ function getHouseRecovery(houseId, p){
   let billed=0;
   const invoices=[];
   const h=p.houses.find(x=>String(x.id)===String(houseId));
-  const t=h&&h.typeId?p.types.find(x=>x.id===h.typeId):null;
+  const t=h&&h.typeId?p.types.find(x=>String(x.id)===String(h.typeId)):null;
   (p.invClient||[]).filter(inv=>inv.status!=='Anulada').forEach(inv=>{
     (inv.houseLines||[]).forEach(l=>{
-      if(l.houseId!==houseId)return;
+      if(String(l.houseId)!==String(houseId))return;
       const amt=t?Math.max(0,(l.pct-(l.prevPct||0))/100*t.salePrice):0;
       if(amt>0){
         billed+=amt;
@@ -13105,38 +13132,38 @@ function vbAssignProjForHouse(houseId){
   for(const p of projects){ if(p.houses&&p.houses.find(h=>String(h.id)===String(houseId)))return p; }
   return curProj;
 }
+// Normaliza nombres de material para comparar factura ↔ presupuesto
+function vbMatNameKey(s){
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[–—−]/g,'-').replace(/\s+/g,' ').trim();
+}
+function vbMatNamesMatch(a,b){
+  const ka=vbMatNameKey(a), kb=vbMatNameKey(b);
+  return !!ka && ka===kb;
+}
 // verifica si el producto existe en la lista de materiales de la casa
 function isProductInHouseBudget(p,houseId,productId,desc){
-  const h=p.houses.find(x=>String(x.id)===String(houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); if(!t||!t.categories)return false;
-  for(const c of t.categories) for(const l of c.lines){
-    const match=(productId&&String(l.matId)===String(productId))||(desc&&(l.manualName||lineName(l))===desc);
-    if(match) return true;
-  }
-  return false;
+  return !!vbFindBudgetLineForProduct(p,houseId,productId,desc);
 }
 // Material ya autorizado fuera de lista para la casa (aprobado por el admin → h.purchases)
 function isProductAuthorizedForHouse(p,houseId,productId,desc){
   const h=p.houses.find(x=>String(x.id)===String(houseId)); if(!h||!h.purchases)return false;
-  return h.purchases.some(pu=>pu.nonBudgeted && ((productId&&String(pu.matId)===String(productId))||(desc&&pu.manualName===desc)));
+  return h.purchases.some(pu=>pu.nonBudgeted && ((productId&&pu.matId&&String(pu.matId)===String(productId))||(desc&&(pu.manualName===desc||vbMatNamesMatch(pu.manualName,desc)))));
 }
 // presupuesto disponible del producto para una casa (cantidad)
 function houseBudgetQtyForProduct(p,houseId,productId,desc){
-  const h=p.houses.find(x=>String(x.id)===String(houseId)); const t=h&&p.types.find(x=>x.id===h.typeId); if(!t||!t.categories)return Infinity;
-  let bud=0;
-  t.categories.forEach(c=>c.lines.forEach(l=>{ const match=(productId&&String(l.matId)===String(productId))||(desc&&(l.manualName||lineName(l))===desc); if(match)bud+=(l.qty||0); }));
-  return bud||Infinity;
+  const bud=vbFindBudgetLineForProduct(p,houseId,productId,desc);
+  return bud?(bud.qty||0):Infinity;
 }
 // Precio unitario PRESUPUESTADO (USD) de un material en el tipo de una casa (null si no está en presupuesto)
 function houseBudgetPriceForProduct(p,houseId,productId,desc){
+  const l=vbFindBudgetLineForProduct(p,houseId,productId,desc);
+  if(!l) return null;
   const h=(p.houses||[]).find(x=>String(x.id)===String(houseId));
-  const t=h&&(p.types||[]).find(x=>x.id===h.typeId);
-  if(!t||!t.categories) return null;
-  const xr=t.exchangeRate||p.exchangeRate||SYS.exchangeRate||1;
-  for(const c of t.categories) for(const l of (c.lines||[])){
-    const match=(productId&&String(l.matId)===String(productId))||(desc&&(l.manualName||lineName(l))===desc);
-    if(match){ const up=linePrice(l); return (l.currency==='CRC')?up/(xr||1):up; }
-  }
-  return null;
+  const t=h&&(p.types||[]).find(x=>String(x.id)===String(h.typeId));
+  const xr=(t&&t.exchangeRate)||p.exchangeRate||SYS.exchangeRate||1;
+  const up=linePrice(l);
+  return (l.currency==='CRC')?up/(xr||1):up;
 }
 // Costo PRESUPUESTADO (USD) de una línea de factura según las casas asignadas
 function vbLineBudgetCostUSD(l){
@@ -13365,12 +13392,28 @@ function vbValidateAssignments(){
 // Busca la línea de presupuesto de una casa que coincide con productId o descripción
 function vbFindBudgetLineForProduct(p,houseId,productId,desc){
   const h=(p.houses||[]).find(x=>String(x.id)===String(houseId));
-  const t=h&&(p.types||[]).find(x=>x.id===h.typeId);
+  const t=h&&(p.types||[]).find(x=>String(x.id)===String(h.typeId));
   if(!t||!t.categories) return null;
-  for(const c of t.categories) for(const l of (c.lines||[])){
-    if((productId&&String(l.matId)===String(productId))||(desc&&(l.manualName||lineName(l))===desc)) return l;
+  if(productId){
+    for(const c of t.categories) for(const l of (c.lines||[])){
+      if(l.matId&&String(l.matId)===String(productId)) return l;
+    }
+  }
+  if(desc){
+    for(const c of t.categories) for(const l of (c.lines||[])){
+      const nm=l.manualName||lineName(l);
+      if(nm&&(nm===desc||vbMatNamesMatch(nm,desc))) return l;
+    }
   }
   return null;
+}
+function vbBudgetLineIdInHouse(p,houseId,lineId){
+  if(lineId==null||lineId==='') return false;
+  const h=(p.houses||[]).find(x=>String(x.id)===String(houseId));
+  const t=h&&(p.types||[]).find(x=>String(x.id)===String(h.typeId));
+  if(!t||!t.categories) return false;
+  for(const c of t.categories) if((c.lines||[]).some(l=>String(l.id)===String(lineId))) return true;
+  return false;
 }
 // #10: al guardar, aplica las compras a las casas → debita el gasto
 function vbApplyToHouses(data){
@@ -13392,10 +13435,16 @@ function vbApplyToHouses(data){
       }
       const h=(aProj.houses||[]).find(x=>String(x.id)===String(a.houseId)); if(!h)return;
       if(!h.purchases)h.purchases=[];
-      // Preferir lineId del OC; si no hay (Outlook/manual), resolver por producto/nombre en el presupuesto de la casa
-      const budLine=(!a.lineId && !l.lineId) ? vbFindBudgetLineForProduct(aProj,a.houseId,l.productId,l.desc) : null;
-      const budgetLineId = a.lineId || l.lineId || (budLine&&budLine.id) || ('bill-'+data.id+'-'+Math.random().toString(36).slice(2,5));
-      const existing = h.purchases.find(pu=>pu.lineId===budgetLineId&&pu.billId===data.id);
+      // Resolver lineId del presupuesto: OC (si es válido) → match por producto/nombre → sintético
+      const budLine=vbFindBudgetLineForProduct(aProj,a.houseId,l.productId,l.desc);
+      let budgetLineId=null;
+      if(a.lineId&&vbBudgetLineIdInHouse(aProj,a.houseId,a.lineId)) budgetLineId=a.lineId;
+      else if(l.lineId&&vbBudgetLineIdInHouse(aProj,a.houseId,l.lineId)) budgetLineId=l.lineId;
+      else if(budLine) budgetLineId=budLine.id;
+      else budgetLineId='bill-'+data.id+'-'+Math.random().toString(36).slice(2,5);
+      // Sellar en el assign para que hpMatBoughtData / re-aperturas lo vean
+      a.lineId=budgetLineId;
+      const existing = h.purchases.find(pu=>String(pu.lineId)===String(budgetLineId)&&String(pu.billId)===String(data.id));
       if(existing){ existing.qty=(existing.qty||0)+a.qty; existing.price=unitNet; }
       else {
         const matId=budLine?(budLine.matId||0):(parseInt(l.productId)||0);

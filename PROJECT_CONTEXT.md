@@ -2075,6 +2075,11 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   y reaplica).
 - [x] **Aplicación multi-proyecto:** `vbApplyToHouses` / `deleteVendorBill` / `markHouseMovement`
   al guardar respetan `a.projId` (antes solo tocaban `curProj`).
+- [x] **CANTIDAD COMPRADA seguía en 0 tras asignar (Casa 7/8):** `hpMatBoughtData` solo sumaba
+  facturas con `bill.lines[].lineId` (típico de OC). Facturas Outlook no lo traen → gastado sí
+  ($ vía assigns/purchases) pero comprado=0. Ahora prioriza `h.purchases` por `lineId`, con
+  fallback a assigns (`a.lineId`/`l.lineId` o match por nombre). Al guardar se sella `a.lineId`
+  con la línea de presupuesto resuelta; match de nombres normalizado (acentos/guiones).
 
 ## 10. ⏳ Pendiente
 
