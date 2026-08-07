@@ -2060,6 +2060,22 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   proyecto recoge primero las llaves de sus documentos, ejecuta el cascade transaccional y luego
   limpia sus objetos sin impedir el borrado lógico si R2 no responde.
 
+### Sesión 2026-08-07 (fix: Asignar destino multi-proyecto + compras presupuestadas desde Outlook)
+> Corrección pedida por el usuario sobre el modal Asignar de Factura de Proveedor (feature en Completado).
+- [x] **Dropdown de proyecto se quedaba en el primero de la lista (p.ej. "116 Este"):** el `<select>`
+  guardaba `projId` como string (`this.value`) y al re-renderizar `p.id===selId` fallaba → ninguna
+  opción quedaba `selected` y el navegador mostraba la primera. Fix: `vbNormProjId` /
+  `vbAssignSetProj` / `vbAssignAddRow` normalizan al id real de `projects`; comparaciones con
+  `String(...)`; filas nuevas usan `curProj.id` tipado correctamente.
+- [x] **Facturas desde Outlook marcaban material presupuestado como fuera de presupuesto:** al
+  guardar, `vbApplyToHouses` usaba `a.lineId || l.lineId || 'bill-…aleatorio'`; sin `lineId` de OC
+  generaba un id que no existía en el tipo de casa. Ahora `vbFindBudgetLineForProduct` resuelve
+  la línea de presupuesto por `productId`/nombre (misma lógica que la validación al asignar) y
+  usa ese `id`. Re-guardar una factura ya guardada mal corrige las compras (limpia por `billId`
+  y reaplica).
+- [x] **Aplicación multi-proyecto:** `vbApplyToHouses` / `deleteVendorBill` / `markHouseMovement`
+  al guardar respetan `a.projId` (antes solo tocaban `curProj`).
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.

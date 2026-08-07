@@ -13145,7 +13145,7 @@ function vbLineBudgetCostUSD(l){
   assigns.forEach(a=>{
     const q=a.qty||0;
     if(a.houseId==null||a.houseId==='__bodega__'){ cost+=q*price; return; } // sin presupuesto → neutral
-    const aProj=(a.projId&&projects.find(x=>x.id===a.projId))||p;
+    const aProj=(a.projId&&projects.find(x=>String(x.id)===String(a.projId)))||p;
     let bp=houseBudgetPriceForProduct(aProj,a.houseId,l.productId,l.desc);
     if(bp==null){ bp=price; } else { hasBudget=true; }
     cost+=q*bp;
@@ -13169,23 +13169,38 @@ function vbBudgetSealBadge(bill){
     ? `<span title="Costo mayor a presupuesto (Δ +${fmt(bc.diff)})" style="background:rgba(212,148,26,.16);color:var(--amb);border:1px solid rgba(212,148,26,.4);font-size:9px;font-weight:600;padding:1px 7px;border-radius:10px;white-space:nowrap;flex-shrink:0">⚠ Sobre presup.</span>`
     : `<span title="Costos según presupuesto (Δ ${fmt(bc.diff)})" style="background:rgba(29,184,122,.16);color:var(--grn);border:1px solid rgba(29,184,122,.4);font-size:9px;font-weight:600;padding:1px 7px;border-radius:10px;white-space:nowrap;flex-shrink:0">✓ Según presup.</span>`;
 }
+function vbNormProjId(val){
+  if(val==null||val==='') return curProj.id;
+  const hit=projects.find(p=>String(p.id)===String(val));
+  return hit?hit.id:curProj.id;
+}
+function vbAssignAddRow(i){
+  const l=vbState.lines[i]; if(!l.assign)l.assign=[];
+  l.assign.push({projId:curProj.id,houseId:'__bodega__',qty:0});
+  vbRenderAssignModal(i);
+}
+function vbAssignSetProj(i,j,val){
+  vbState.lines[i].assign[j].projId=vbNormProjId(val);
+  vbState.lines[i].assign[j].houseId='__bodega__';
+  vbRenderAssignModal(i);
+}
 function vbOpenAssign(i){
   const l=vbState.lines[i];
   if(!l.assign||!l.assign.length)l.assign=[{projId:curProj.id,houseId:curProj.houses[0]?curProj.houses[0].id:'__bodega__',qty:l.qty||0}];
-  // Asegurar que todas las filas tengan projId
-  l.assign.forEach(a=>{ if(!a.projId)a.projId=curProj.id; });
+  // Asegurar que todas las filas tengan projId del tipo correcto (mismo id que en projects)
+  l.assign.forEach(a=>{ a.projId=vbNormProjId(a.projId!=null&&a.projId!==''?a.projId:curProj.id); });
   vbRenderAssignModal(i);
 }
 function vbAssignHouseOpts(projId, selHouseId){
-  const p=projects.find(x=>x.id===projId)||curProj;
+  const p=projects.find(x=>String(x.id)===String(projId))||curProj;
   return `<option value="__bodega__"${selHouseId==='__bodega__'?' selected':''}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M3 8 12 3l9 5-9 5-9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg> Bodega</option>`
-    +(p.houses||[]).map(h=>`<option value="${h.id}"${h.id===selHouseId?' selected':''}>${esc(h.num)}</option>`).join('');
+    +(p.houses||[]).map(h=>`<option value="${h.id}"${String(h.id)===String(selHouseId)?' selected':''}>${esc(h.num)}</option>`).join('');
 }
 function vbRenderAssignModal(i){
   const l=vbState.lines[i];
   const assigned=vbAssignedQty(l), diff=Math.abs(assigned-(l.qty||0));
   const activeProjs=projects.filter(p=>p.status!=='Completado'&&p.status!=='Cancelado');
-  const projOpts=(selId)=>activeProjs.map(p=>`<option value="${p.id}"${p.id===selId?' selected':''}>${esc(p.name)}</option>`).join('');
+  const projOpts=(selId)=>activeProjs.map(p=>`<option value="${p.id}"${String(p.id)===String(selId)?' selected':''}>${esc(p.name)}</option>`).join('');
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title">Asignar destino — ${esc(l.desc||'línea')} <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="font-size:12px;color:var(--t2);margin-bottom:10px">Cantidad en factura: <strong>${l.qty||0}</strong>. La suma de asignaciones debe ser igual.</div>
@@ -13197,16 +13212,16 @@ function vbRenderAssignModal(i){
     </div>
     <div id="vb-assign-rows">
       ${l.assign.map((a,j)=>{
-        const aProjId=a.projId||curProj.id;
+        const aProjId=vbNormProjId(a.projId!=null&&a.projId!==''?a.projId:curProj.id);
         return `<div style="display:grid;grid-template-columns:90px 1fr 1fr 28px;gap:6px;margin-bottom:6px;align-items:center">
           <input type="number" value="${a.qty}" min="0" step="0.01" style="font-size:12px" onchange="vbState.lines[${i}].assign[${j}].qty=parseFloat(this.value)||0;vbAssignRecalc(${i})"/>
-          <select style="font-size:12px" onchange="vbState.lines[${i}].assign[${j}].projId=this.value;vbState.lines[${i}].assign[${j}].houseId='__bodega__';vbRenderAssignModal(${i})">${projOpts(aProjId)}</select>
-          <select style="font-size:12px" onchange="vbState.lines[${i}].assign[${j}].houseId=(this.value==='__bodega__'?'__bodega__':parseInt(this.value));vbAssignRecalc(${i})">${vbAssignHouseOpts(aProjId,a.houseId)}</select>
+          <select style="font-size:12px" onchange="vbAssignSetProj(${i},${j},this.value)">${projOpts(aProjId)}</select>
+          <select style="font-size:12px" onchange="vbState.lines[${i}].assign[${j}].houseId=(this.value==='__bodega__'?'__bodega__':(Number.isFinite(Number(this.value))?Number(this.value):this.value));vbAssignRecalc(${i})">${vbAssignHouseOpts(aProjId,a.houseId)}</select>
           <button class="oc-btn-del" onclick="vbState.lines[${i}].assign.splice(${j},1);vbRenderAssignModal(${i})">✕</button>
         </div>`;
       }).join('')}
     </div>
-    <button class="btn-sm" onclick="vbState.lines[${i}].assign.push({projId:'${curProj.id}',houseId:'__bodega__',qty:0});vbRenderAssignModal(${i})">+ Agregar destino</button>
+    <button class="btn-sm" onclick="vbAssignAddRow(${i})">+ Agregar destino</button>
     <div id="vb-assign-msg" style="font-size:11px;margin-top:10px;color:${diff<0.001?'var(--grn)':'var(--red)'}">${diff<0.001?'✓ Cantidades cuadran':'La suma debe ser igual a '+( l.qty||0)+' (asignado: '+assigned+')'}</div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
@@ -13225,8 +13240,8 @@ function vbAssignConfirm(i){
   // validación: producto debe estar en lista de materiales de la casa (solo si es el mismo proyecto)
   for(const a of l.assign){
     if(a.houseId==='__bodega__')continue;
-    const aProjId=a.projId||curProj.id;
-    const aProj=projects.find(p=>p.id===aProjId)||curProj;
+    a.projId=vbNormProjId(a.projId!=null&&a.projId!==''?a.projId:curProj.id);
+    const aProj=projects.find(p=>String(p.id)===String(a.projId))||curProj;
     if(!isProductInHouseBudget(aProj,a.houseId,l.productId,l.desc) && !isProductAuthorizedForHouse(aProj,a.houseId,l.productId,l.desc)){
       vbShowMatOutOfList(i,a); return;
     }
@@ -13234,8 +13249,8 @@ function vbAssignConfirm(i){
   // validación de presupuesto por casa
   for(const a of l.assign){
     if(a.houseId==='__bodega__')continue;
-    const aProjId=a.projId||curProj.id;
-    const aProj=projects.find(p=>p.id===aProjId)||curProj;
+    const aProjId=vbNormProjId(a.projId!=null&&a.projId!==''?a.projId:curProj.id);
+    const aProj=projects.find(p=>String(p.id)===String(aProjId))||curProj;
     const bud=houseBudgetQtyForProduct(aProj,a.houseId,l.productId,l.desc);
     const already=vbHouseProductQtyOtherLines(i,a.houseId,l);
     if(a.qty+already>bud+0.001){
@@ -13347,26 +13362,55 @@ function vbValidateAssignments(){
   }
   return null;
 }
+// Busca la línea de presupuesto de una casa que coincide con productId o descripción
+function vbFindBudgetLineForProduct(p,houseId,productId,desc){
+  const h=(p.houses||[]).find(x=>String(x.id)===String(houseId));
+  const t=h&&(p.types||[]).find(x=>x.id===h.typeId);
+  if(!t||!t.categories) return null;
+  for(const c of t.categories) for(const l of (c.lines||[])){
+    if((productId&&String(l.matId)===String(productId))||(desc&&(l.manualName||lineName(l))===desc)) return l;
+  }
+  return null;
+}
 // #10: al guardar, aplica las compras a las casas → debita el gasto
 function vbApplyToHouses(data){
-  // limpia compras previas de esta factura (por si se re-guarda)
-  curProj.houses.forEach(h=>{ if(h.purchases)h.purchases=h.purchases.filter(pu=>pu.billId!==data.id); h.spent=(h.purchases||[]).reduce((s,pu)=>s+pu.qty*(pu.price||0),0); });
-  if(!curProj.bodega)curProj.bodega=[];
-  curProj.bodega=curProj.bodega.filter(b=>b.billId!==data.id);
+  // limpia compras previas de esta factura (por si se re-guarda) en todos los proyectos
+  projects.forEach(p=>{
+    (p.houses||[]).forEach(h=>{
+      if(h.purchases){ h.purchases=h.purchases.filter(pu=>pu.billId!==data.id); h.spent=(h.purchases||[]).reduce((s,pu)=>s+pu.qty*(pu.price||0),0); }
+    });
+    if(p.bodega) p.bodega=p.bodega.filter(b=>b.billId!==data.id);
+  });
   data.lines.filter(l=>!data.qboMultiProject||l.qboProjectActive!==false).forEach(l=>{ const unitNet=(l.qty?vbLineNet(l)/l.qty:(l.price||0));
     (l.assign||[]).forEach(a=>{
-      if(a.houseId==='__bodega__'){ curProj.bodega.push({id:'bod-'+Date.now()+Math.random().toString(36).slice(2,5),billId:data.id,productId:l.productId,name:l.desc,qty:a.qty,price:unitNet,date:data.date,project:curProj.name,vendor:data.party||''}); return; }
-      const h=curProj.houses.find(x=>String(x.id)===String(a.houseId)); if(!h)return;
+      const aProj=projects.find(p=>String(p.id)===String(a.projId!=null&&a.projId!==''?a.projId:curProj.id))||curProj;
+      if(!aProj) return;
+      if(a.houseId==='__bodega__'){
+        if(!aProj.bodega)aProj.bodega=[];
+        aProj.bodega.push({id:'bod-'+Date.now()+Math.random().toString(36).slice(2,5),billId:data.id,productId:l.productId,name:l.desc,qty:a.qty,price:unitNet,date:data.date,project:aProj.name,vendor:data.party||''});
+        return;
+      }
+      const h=(aProj.houses||[]).find(x=>String(x.id)===String(a.houseId)); if(!h)return;
       if(!h.purchases)h.purchases=[];
-      // Usar el lineId original del presupuesto (viene del OC assign) para que aparezca como material presupuestado en HP
-      const budgetLineId = a.lineId || l.lineId || ('bill-'+data.id+'-'+Math.random().toString(36).slice(2,5));
+      // Preferir lineId del OC; si no hay (Outlook/manual), resolver por producto/nombre en el presupuesto de la casa
+      const budLine=(!a.lineId && !l.lineId) ? vbFindBudgetLineForProduct(aProj,a.houseId,l.productId,l.desc) : null;
+      const budgetLineId = a.lineId || l.lineId || (budLine&&budLine.id) || ('bill-'+data.id+'-'+Math.random().toString(36).slice(2,5));
       const existing = h.purchases.find(pu=>pu.lineId===budgetLineId&&pu.billId===data.id);
       if(existing){ existing.qty=(existing.qty||0)+a.qty; existing.price=unitNet; }
-      else { h.purchases.push({lineId:budgetLineId,billId:data.id,matId:parseInt(l.productId)||0,manualName:l.desc,qty:a.qty,price:unitNet}); }
+      else {
+        const matId=budLine?(budLine.matId||0):(parseInt(l.productId)||0);
+        h.purchases.push({lineId:budgetLineId,billId:data.id,matId,manualName:l.desc,qty:a.qty,price:unitNet});
+      }
       h.spent=h.purchases.reduce((s,pu)=>s+pu.qty*(pu.price||0),0);
     });
   });
-  curProj.areaInstalled=curProj.houses.reduce((s,x)=>s+(x.areaInstalled||0),0);
+  const touched=new Set();
+  data.lines.forEach(l=>(l.assign||[]).forEach(a=>{ touched.add(String(a.projId!=null&&a.projId!==''?a.projId:curProj.id)); }));
+  if(!touched.size && curProj) touched.add(String(curProj.id));
+  touched.forEach(pid=>{
+    const p=projects.find(x=>String(x.id)===pid);
+    if(p) p.areaInstalled=(p.houses||[]).reduce((s,x)=>s+(x.areaInstalled||0),0);
+  });
 }
 // ===== Flujo de PAGO de factura de proveedor (Borrador → Pendiente de Pago → Pagada) =====
 function vbPersistBill(){
@@ -13453,7 +13497,12 @@ function saveVendorBill(sync){
   // #10: debitar gasto a las casas SOLO ahora (al guardar la factura)
   vbApplyToHouses(data);
   // Fix 19: casas afectadas pasan a "Iniciado"
-  data.lines.filter(l=>!data.qboMultiProject||l.qboProjectActive!==false).forEach(l=>{ (l.assign||[]).forEach(a=>{ if(a.houseId&&a.houseId!=='__bodega__') markHouseMovement(curProj,a.houseId); }); });
+  data.lines.filter(l=>!data.qboMultiProject||l.qboProjectActive!==false).forEach(l=>{ (l.assign||[]).forEach(a=>{
+    if(a.houseId&&a.houseId!=='__bodega__'){
+      const ap=projects.find(p=>String(p.id)===String(a.projId!=null&&a.projId!==''?a.projId:curProj.id))||curProj;
+      markHouseMovement(ap,a.houseId);
+    }
+  }); });
   // marca la OC ligada como facturada
   if(data.linkedOcId){ const oc=(curProj.ocs||[]).find(o=>o.id===data.linkedOcId); if(oc){oc.status='Facturada';oc.billId=data.id;} }
   curProj.lastActivity=Date.now(); autoStartProj(); saveData(); renderMetric();
@@ -13462,9 +13511,11 @@ function saveVendorBill(sync){
 function deleteVendorBill(id){
   if(!confirm('¿Eliminar esta factura?'))return;
   const arr=txnArr('proveedor'); const tx=arr.find(x=>String(x.id)===String(id));
-  // revertir gasto
-  curProj.houses.forEach(h=>{ if(h.purchases){h.purchases=h.purchases.filter(pu=>pu.billId!==id);h.spent=h.purchases.reduce((s,pu)=>s+pu.qty*(pu.price||0),0);} });
-  if(curProj.bodega)curProj.bodega=curProj.bodega.filter(b=>b.billId!==id);
+  // revertir gasto en todos los proyectos (asignaciones multi-proyecto)
+  projects.forEach(p=>{
+    (p.houses||[]).forEach(h=>{ if(h.purchases){h.purchases=h.purchases.filter(pu=>pu.billId!==id);h.spent=h.purchases.reduce((s,pu)=>s+pu.qty*(pu.price||0),0);} });
+    if(p.bodega)p.bodega=p.bodega.filter(b=>b.billId!==id);
+  });
   logAction(`Factura de Proveedor "${tx?.num}" eliminada`,'log-delete','Factura de Proveedor',tx,null);
   curProj.billVendor=arr.filter(x=>String(x.id)!==String(id));
   saveData(); renderMetric(); curTxnId=null; renderTxnSub();
