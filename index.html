@@ -2048,7 +2048,8 @@ async function _syncNormalizedProjectsHouses(){
       for(const [sortOrder,houseType] of (project.types||[]).entries()){
         const id=String(houseType.id);
         if(currentHouseTypes.has(id)){
-          console.error('ID de tipo de vivienda duplicado; no se guardó:',id);
+          _lastSaveError='ID de tipo de vivienda duplicado (dos Tipos con el mismo id="'+id+'" en el mismo proyecto). No se guardó NADA de este guardado (ni tipos, ni casas, ni nada posterior) hasta resolver el duplicado.';
+          console.error(_lastSaveError);
           return false;
         }
         currentHouseTypes.set(id,{houseType,projectId:project.id,sortOrder});
@@ -2125,23 +2126,37 @@ async function _syncNormalizedProjectsHouses(){
       const snap=_snapshot(payload);
       if(!_houseTypeSnapshots.has(id)){
         const {resp,data}=await _dbRowRequest('POST','/api/db/house_types',payload);
-        if(!resp.ok){console.error('No se pudo crear tipo de vivienda',id,data);return false;}
+        if(!resp.ok){
+          _lastSaveError='No se pudo CREAR el tipo de vivienda "'+(houseType.name||id)+'" (id='+id+'): HTTP '+resp.status+' — '+JSON.stringify(data);
+          console.error(_lastSaveError);
+          return false;
+        }
         _rememberHouseTypeRow(data,houseType,projectId,sortOrder);
       }else if(_houseTypeSnapshots.get(id)!==snap){
         if(_houseTypeProjectIds.get(id)!==String(projectId)){
-          console.error('No se puede mover un tipo de vivienda entre proyectos:',id);
+          _lastSaveError='No se puede mover el tipo de vivienda "'+(houseType.name||id)+'" (id='+id+') entre proyectos.';
+          console.error(_lastSaveError);
           return false;
         }
         const body={...payload,replace_data:true,expected_updated_at:_houseTypeVersions.get(id)};
         let {resp,data}=await _dbRowRequest('PUT',`/api/db/house_types/${encodeURIComponent(id)}`,body);
         if(resp.status===409||resp.status===428){
+          console.warn('[house_types] conflicto de versión al guardar "'+(houseType.name||id)+'" (id='+id+'), status='+resp.status+'. expected_updated_at enviado='+_houseTypeVersions.get(id));
           data=await _handleRowConflict(
             'este tipo de vivienda',id,payload,`/api/db/house_types/${encodeURIComponent(id)}`
           );
-          if(!data)return false;
+          if(!data){
+            _lastSaveError='Conflicto de versión al guardar el tipo de vivienda "'+(houseType.name||id)+'" (id='+id+', HTTP '+resp.status+'). Esto pasa cuando el servidor tenía una versión más nueva de este Tipo que la que tenía cargada tu sesión (p.ej. otra pestaña/usuario guardó algo, o tu sesión llevaba rato abierta). Si en el diálogo de conflicto elegiste "Aceptar/cargar la versión del servidor", tu edición se descartó y se recargaron los datos del servidor.';
+            console.error(_lastSaveError);
+            return false;
+          }
           resp={ok:true};
         }
-        if(!resp.ok){console.error('No se pudo actualizar tipo de vivienda',id,data);return false;}
+        if(!resp.ok){
+          _lastSaveError='No se pudo ACTUALIZAR el tipo de vivienda "'+(houseType.name||id)+'" (id='+id+'): HTTP '+resp.status+' — '+JSON.stringify(data);
+          console.error(_lastSaveError);
+          return false;
+        }
         _rememberHouseTypeRow(data,houseType,projectId,sortOrder);
       }
     }
@@ -2273,6 +2288,9 @@ async function _handleSaveConflict(){
 // fresca en cuanto el actual termina.
 let _saveInFlight=null;
 let _saveQueued=false;
+// Diagnóstico temporal: motivo legible del último fallo de guardado de un Tipo de vivienda
+// (house_types), para poder avisar al usuario en vez de fallar en silencio (ver saveType()).
+let _lastSaveError=null;
 function saveDataToAPI(forzar){
   if(_saveInFlight){
     _saveQueued=true;               // ya hay uno en curso: pedir un guardado más al terminar
@@ -4763,8 +4781,22 @@ function saveType(){
   }
   curProj.lastActivity=Date.now();
   showCreate=false; typeEditId=null;
-  saveData();
+  _lastSaveError=null;
+  const _savePromise=saveData();
   renderMetric(); renderBreadcrumb(); renderTypes();
+  // Diagnóstico temporal: el toast de "guardado" (dentro de saveData()) se muestra siempre,
+  // sin esperar la respuesta real del servidor. Este chequeo adicional avisa explícitamente
+  // si el guardado del Tipo falló de verdad, en vez de fallar en silencio.
+  if(_savePromise&&typeof _savePromise.then==='function'){
+    _savePromise.then(ok=>{
+      if(ok===false){
+        alert('⚠ El Tipo NO se guardó en el servidor (solo quedó en este navegador).\n\n'+
+          (_lastSaveError||'Sin detalle adicional — revisa la consola (F12).')+
+          '\n\nSi recargas la página o cierras sesión ahora, este cambio se PERDERÁ. '+
+          'Vuelve a intentar guardar antes de salir.');
+      }
+    });
+  }
 }
 
 // ========== IMPORTAR TIPO (cotización PDF/Excel) ==========
