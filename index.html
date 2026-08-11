@@ -2038,7 +2038,8 @@ async function _syncNormalizedProjectCollections(){
   return true;
 }
 async function _syncNormalizedProjectsHouses(){
-  if(!_normalizedProjectsLoaded)return true;
+  console.log('[TypeSaveDebug] _syncNormalizedProjectsHouses start. _normalizedProjectsLoaded='+_normalizedProjectsLoaded+' _normalizedHouseTypesLoaded='+_normalizedHouseTypesLoaded);
+  if(!_normalizedProjectsLoaded){ console.log('[TypeSaveDebug] SALIDA TEMPRANA: _normalizedProjectsLoaded es false — NINGÚN tipo/casa/proyecto se sincroniza por esta vía.'); return true; }
 
   const currentProjects=new Map(projects.map(project=>[String(project.id),project]));
   const currentHouseTypes=new Map();
@@ -2124,7 +2125,13 @@ async function _syncNormalizedProjectsHouses(){
     for(const [id,{houseType,projectId,sortOrder}] of currentHouseTypes){
       const payload=_houseTypeCloudPayload(houseType,projectId,sortOrder);
       const snap=_snapshot(payload);
-      if(!_houseTypeSnapshots.has(id)){
+      const hadSnap=_houseTypeSnapshots.has(id);
+      const oldSnap=_houseTypeSnapshots.get(id);
+      const changed=hadSnap&&oldSnap!==snap;
+      console.log('[TypeSaveDebug] tipo id='+id+' name="'+(houseType.name||'')+'" hadSnap='+hadSnap+' changed='+changed
+        +(hadSnap?' | snapIgual='+(oldSnap===snap):'')
+        +' | payload.categories[perfil]='+JSON.stringify((payload.categories||[]).flatMap(c=>(c.lines||[])).filter(l=>/perfil/i.test(l.manualName||''))));
+      if(!hadSnap){
         const {resp,data}=await _dbRowRequest('POST','/api/db/house_types',payload);
         if(!resp.ok){
           _lastSaveError='No se pudo CREAR el tipo de vivienda "'+(houseType.name||id)+'" (id='+id+'): HTTP '+resp.status+' — '+JSON.stringify(data);
@@ -2132,14 +2139,16 @@ async function _syncNormalizedProjectsHouses(){
           return false;
         }
         _rememberHouseTypeRow(data,houseType,projectId,sortOrder);
-      }else if(_houseTypeSnapshots.get(id)!==snap){
+      }else if(changed){
         if(_houseTypeProjectIds.get(id)!==String(projectId)){
           _lastSaveError='No se puede mover el tipo de vivienda "'+(houseType.name||id)+'" (id='+id+') entre proyectos.';
           console.error(_lastSaveError);
           return false;
         }
         const body={...payload,replace_data:true,expected_updated_at:_houseTypeVersions.get(id)};
+        console.log('[TypeSaveDebug] enviando PUT house_types/'+id+' expected_updated_at='+_houseTypeVersions.get(id));
         let {resp,data}=await _dbRowRequest('PUT',`/api/db/house_types/${encodeURIComponent(id)}`,body);
+        console.log('[TypeSaveDebug] respuesta PUT house_types/'+id+': status='+resp.status+' body.categories[perfil]='+JSON.stringify(((data&&data.categories)||[]).flatMap(c=>(c.lines||[])).filter(l=>/perfil/i.test(l.manualName||''))));
         if(resp.status===409||resp.status===428){
           console.warn('[house_types] conflicto de versión al guardar "'+(houseType.name||id)+'" (id='+id+'), status='+resp.status+'. expected_updated_at enviado='+_houseTypeVersions.get(id));
           data=await _handleRowConflict(
