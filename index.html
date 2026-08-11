@@ -2361,20 +2361,34 @@ async function _saveDataToAPICore(forzar){
 }
 
 function saveData(){
+  // El caché local (localStorage) es solo un respaldo de lectura offline; la fuente de verdad
+  // es la nube (saveDataToAPI). BUG real encontrado en vivo (2026-08-11): si localStorage está
+  // lleno incluso SIN pdfBase64, el segundo intento también lanzaba QuotaExceededError sin su
+  // propio try/catch — la excepción escapaba hasta el catch más externo, que solo hacía
+  // console.warn y JAMÁS llegaba a llamar saveDataToAPI(). Resultado: cero guardados en la nube,
+  // en silencio, para CUALQUIER cambio de la app, mientras el toast de "guardado" ni siquiera
+  // llegaba a mostrarse (tampoco se veía error). El caché local nunca debe poder bloquear el
+  // guardado real; por eso ahora está aislado en su propio try/catch, sin poder detener lo de abajo.
   try{
     const projectsClean=projects.map(p=>({...p,uploads:(p.uploads||[]).map(({blobId,url,...u})=>u)}));
     try{
       localStorage.setItem(LS_KEY,JSON.stringify({projects:projectsClean,SYS,activityLog}));
     }catch(quotaErr){
       console.warn('localStorage quota excedida, guardando sin pdfBase64:',quotaErr);
-      const projectsNoPdf=projectsClean.map(p=>({...p,uploads:(p.uploads||[]).map(({pdfBase64,...u})=>u)}));
-      localStorage.setItem(LS_KEY,JSON.stringify({projects:projectsNoPdf,SYS,activityLog}));
+      try{
+        const projectsNoPdf=projectsClean.map(p=>({...p,uploads:(p.uploads||[]).map(({pdfBase64,...u})=>u)}));
+        localStorage.setItem(LS_KEY,JSON.stringify({projects:projectsNoPdf,SYS,activityLog}));
+      }catch(quotaErr2){
+        console.warn('localStorage sigue lleno incluso sin pdfBase64 — se omite el caché local; el guardado en la nube continúa igual:',quotaErr2);
+      }
     }
-    const savePromise=saveDataToAPI();
-    const t=document.getElementById('save-toast');
-    if(t){t.classList.add('show');clearTimeout(_saveToastTimer);_saveToastTimer=setTimeout(()=>t.classList.remove('show'),1800);}
-    return savePromise;
-  }catch(e){console.warn('Error guardando datos:',e);}
+  }catch(e){
+    console.warn('Error guardando caché local (localStorage) — el guardado en la nube continúa igual:',e);
+  }
+  const savePromise=saveDataToAPI();
+  const t=document.getElementById('save-toast');
+  if(t){t.classList.add('show');clearTimeout(_saveToastTimer);_saveToastTimer=setTimeout(()=>t.classList.remove('show'),1800);}
+  return savePromise;
 }
 function saveDataForCurrentChanges(){
   const saveWasInFlight=Boolean(_saveInFlight);
