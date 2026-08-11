@@ -13291,15 +13291,71 @@ function vbAssignConfirm(i){
   }
   closeModal(); renderVendorBill();
 }
+// Diagnóstico temporal: arma un volcado legible de cómo se está comparando
+// el producto de la factura contra las líneas de presupuesto de la casa.
+// Nada de esto participa en la lógica normal; solo sirve para depurar
+// mismatches invisibles (espacios especiales, guiones distintos, matId=0, etc).
+function vbAssignDebugInfo(lineIdx, assignment){
+  const l=vbState.lines[lineIdx]||{};
+  const aProjId=vbNormProjId(assignment.projId!=null&&assignment.projId!==''?assignment.projId:curProj.id);
+  const aProj=projects.find(p=>String(p.id)===String(aProjId))||curProj;
+  const h=(aProj.houses||[]).find(x=>String(x.id)===String(assignment.houseId));
+  const t=h&&(aProj.types||[]).find(x=>String(x.id)===String(h.typeId));
+  const codes=s=>Array.from(String(s||'')).map(ch=>ch.codePointAt(0));
+  const desc=l.desc||'';
+  const out=[];
+  out.push('=== FACTURA (línea seleccionada) ===');
+  out.push('productId: '+JSON.stringify(l.productId||''));
+  out.push('desc: '+JSON.stringify(desc));
+  out.push('desc.length: '+desc.length);
+  out.push('desc charCodes: ['+codes(desc).join(',')+']');
+  out.push('');
+  out.push('=== DESTINO ===');
+  out.push('proyecto: '+(aProj&&aProj.name)+' (id='+aProjId+')');
+  out.push('casa: '+(h?h.num:'?')+' (id='+assignment.houseId+', typeId='+(h&&h.typeId)+')');
+  out.push('tipo encontrado: '+(t?(t.name||t.id):'NINGUNO — h.typeId no coincide con ningún type.id'));
+  out.push('');
+  out.push('=== LÍNEAS DE PRESUPUESTO DEL TIPO (candidatas) ===');
+  if(t&&t.categories){
+    t.categories.forEach(c=>{
+      (c.lines||[]).forEach(bl=>{
+        const nm=bl.manualName||lineName(bl);
+        if(!nm)return;
+        const matchById=!!(l.productId&&bl.matId&&String(bl.matId)===String(l.productId));
+        const matchByNameExact=nm===desc;
+        const matchByNameNorm=vbMatNamesMatch(nm,desc);
+        out.push('- categoría: '+(c.name||c.id));
+        out.push('  manualName: '+JSON.stringify(nm));
+        out.push('  matId: '+JSON.stringify(bl.matId));
+        out.push('  nm charCodes: ['+codes(nm).join(',')+']');
+        out.push('  matchById='+matchById+' | matchByNameExact='+matchByNameExact+' | matchByNameNormalizado='+matchByNameNorm);
+        out.push('  normKey(nm)  = '+JSON.stringify(vbMatNameKey(nm)));
+        out.push('  normKey(desc)= '+JSON.stringify(vbMatNameKey(desc)));
+        out.push('');
+      });
+    });
+    if(!t.categories.some(c=>(c.lines||[]).length)) out.push('(el tipo no tiene categorías/líneas)');
+  } else {
+    out.push('(no se pudo resolver el tipo de la casa — ver "tipo encontrado" arriba)');
+  }
+  return out.join('\n');
+}
 function vbShowMatOutOfList(lineIdx, assignment){
   const l=vbState.lines[lineIdx];
   const houseName=vbAssignLabel(assignment.houseId);
+  const dbg=vbAssignDebugInfo(lineIdx,assignment);
+  console.log('[vbAssignDebugInfo]\n'+dbg);
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--red)">⚠ Producto fuera de lista<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="font-size:13px;color:var(--t1);margin-bottom:14px;line-height:1.6">
       Este producto no se encuentra dentro de la lista de materiales de <strong>${houseName}</strong>.<br>
       Si aún así requiere agregarlo debe solicitar autorización de un administrador.
     </div>
+    <details style="margin-bottom:14px" open>
+      <summary style="cursor:pointer;font-size:11px;color:var(--t3)">Diagnóstico técnico (temporal) — copia y comparte este texto</summary>
+      <textarea readonly style="width:100%;height:220px;margin-top:8px;font-family:monospace;font-size:10px;background:var(--bg3);color:var(--t1);border:1px solid var(--border);border-radius:6px;padding:8px;white-space:pre" onclick="this.select()">${dbg.replace(/</g,'&lt;')}</textarea>
+      <button class="btn-sm" style="margin-top:6px" onclick="(function(btn){const ta=btn.parentElement.querySelector('textarea');ta.select();document.execCommand('copy');btn.textContent='✓ Copiado';setTimeout(()=>btn.textContent='Copiar diagnóstico',1500);})(this)">Copiar diagnóstico</button>
+    </details>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
       <button class="btn-save" style="background:var(--amb)" onclick="vbRequestMatAuth(${lineIdx},${JSON.stringify(assignment.houseId)})">Solicitar Autorización</button>
