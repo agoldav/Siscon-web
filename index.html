@@ -2038,8 +2038,7 @@ async function _syncNormalizedProjectCollections(){
   return true;
 }
 async function _syncNormalizedProjectsHouses(){
-  console.log('[TypeSaveDebug] _syncNormalizedProjectsHouses start. _normalizedProjectsLoaded='+_normalizedProjectsLoaded+' _normalizedHouseTypesLoaded='+_normalizedHouseTypesLoaded);
-  if(!_normalizedProjectsLoaded){ console.log('[TypeSaveDebug] SALIDA TEMPRANA: _normalizedProjectsLoaded es false — NINGÚN tipo/casa/proyecto se sincroniza por esta vía.'); return true; }
+  if(!_normalizedProjectsLoaded)return true;
 
   const currentProjects=new Map(projects.map(project=>[String(project.id),project]));
   const currentHouseTypes=new Map();
@@ -2049,8 +2048,7 @@ async function _syncNormalizedProjectsHouses(){
       for(const [sortOrder,houseType] of (project.types||[]).entries()){
         const id=String(houseType.id);
         if(currentHouseTypes.has(id)){
-          _lastSaveError='ID de tipo de vivienda duplicado (dos Tipos con el mismo id="'+id+'" en el mismo proyecto). No se guardó NADA de este guardado (ni tipos, ni casas, ni nada posterior) hasta resolver el duplicado.';
-          console.error(_lastSaveError);
+          console.error('ID de tipo de vivienda duplicado; no se guardó:',id);
           return false;
         }
         currentHouseTypes.set(id,{houseType,projectId:project.id,sortOrder});
@@ -2125,47 +2123,25 @@ async function _syncNormalizedProjectsHouses(){
     for(const [id,{houseType,projectId,sortOrder}] of currentHouseTypes){
       const payload=_houseTypeCloudPayload(houseType,projectId,sortOrder);
       const snap=_snapshot(payload);
-      const hadSnap=_houseTypeSnapshots.has(id);
-      const oldSnap=_houseTypeSnapshots.get(id);
-      const changed=hadSnap&&oldSnap!==snap;
-      console.log('[TypeSaveDebug] tipo id='+id+' name="'+(houseType.name||'')+'" hadSnap='+hadSnap+' changed='+changed
-        +(hadSnap?' | snapIgual='+(oldSnap===snap):'')
-        +' | payload.categories[perfil]='+JSON.stringify((payload.categories||[]).flatMap(c=>(c.lines||[])).filter(l=>/perfil/i.test(l.manualName||''))));
-      if(!hadSnap){
+      if(!_houseTypeSnapshots.has(id)){
         const {resp,data}=await _dbRowRequest('POST','/api/db/house_types',payload);
-        if(!resp.ok){
-          _lastSaveError='No se pudo CREAR el tipo de vivienda "'+(houseType.name||id)+'" (id='+id+'): HTTP '+resp.status+' — '+JSON.stringify(data);
-          console.error(_lastSaveError);
-          return false;
-        }
+        if(!resp.ok){console.error('No se pudo crear tipo de vivienda',id,data);return false;}
         _rememberHouseTypeRow(data,houseType,projectId,sortOrder);
-      }else if(changed){
+      }else if(_houseTypeSnapshots.get(id)!==snap){
         if(_houseTypeProjectIds.get(id)!==String(projectId)){
-          _lastSaveError='No se puede mover el tipo de vivienda "'+(houseType.name||id)+'" (id='+id+') entre proyectos.';
-          console.error(_lastSaveError);
+          console.error('No se puede mover un tipo de vivienda entre proyectos:',id);
           return false;
         }
         const body={...payload,replace_data:true,expected_updated_at:_houseTypeVersions.get(id)};
-        console.log('[TypeSaveDebug] enviando PUT house_types/'+id+' expected_updated_at='+_houseTypeVersions.get(id));
         let {resp,data}=await _dbRowRequest('PUT',`/api/db/house_types/${encodeURIComponent(id)}`,body);
-        console.log('[TypeSaveDebug] respuesta PUT house_types/'+id+': status='+resp.status+' body.categories[perfil]='+JSON.stringify(((data&&data.categories)||[]).flatMap(c=>(c.lines||[])).filter(l=>/perfil/i.test(l.manualName||''))));
         if(resp.status===409||resp.status===428){
-          console.warn('[house_types] conflicto de versión al guardar "'+(houseType.name||id)+'" (id='+id+'), status='+resp.status+'. expected_updated_at enviado='+_houseTypeVersions.get(id));
           data=await _handleRowConflict(
             'este tipo de vivienda',id,payload,`/api/db/house_types/${encodeURIComponent(id)}`
           );
-          if(!data){
-            _lastSaveError='Conflicto de versión al guardar el tipo de vivienda "'+(houseType.name||id)+'" (id='+id+', HTTP '+resp.status+'). Esto pasa cuando el servidor tenía una versión más nueva de este Tipo que la que tenía cargada tu sesión (p.ej. otra pestaña/usuario guardó algo, o tu sesión llevaba rato abierta). Si en el diálogo de conflicto elegiste "Aceptar/cargar la versión del servidor", tu edición se descartó y se recargaron los datos del servidor.';
-            console.error(_lastSaveError);
-            return false;
-          }
+          if(!data)return false;
           resp={ok:true};
         }
-        if(!resp.ok){
-          _lastSaveError='No se pudo ACTUALIZAR el tipo de vivienda "'+(houseType.name||id)+'" (id='+id+'): HTTP '+resp.status+' — '+JSON.stringify(data);
-          console.error(_lastSaveError);
-          return false;
-        }
+        if(!resp.ok){console.error('No se pudo actualizar tipo de vivienda',id,data);return false;}
         _rememberHouseTypeRow(data,houseType,projectId,sortOrder);
       }
     }
@@ -2297,9 +2273,6 @@ async function _handleSaveConflict(){
 // fresca en cuanto el actual termina.
 let _saveInFlight=null;
 let _saveQueued=false;
-// Diagnóstico temporal: motivo legible del último fallo de guardado de un Tipo de vivienda
-// (house_types), para poder avisar al usuario en vez de fallar en silencio (ver saveType()).
-let _lastSaveError=null;
 function saveDataToAPI(forzar){
   if(_saveInFlight){
     _saveQueued=true;               // ya hay uno en curso: pedir un guardado más al terminar
@@ -4804,22 +4777,8 @@ function saveType(){
   }
   curProj.lastActivity=Date.now();
   showCreate=false; typeEditId=null;
-  _lastSaveError=null;
-  const _savePromise=saveData();
+  saveData();
   renderMetric(); renderBreadcrumb(); renderTypes();
-  // Diagnóstico temporal: el toast de "guardado" (dentro de saveData()) se muestra siempre,
-  // sin esperar la respuesta real del servidor. Este chequeo adicional avisa explícitamente
-  // si el guardado del Tipo falló de verdad, en vez de fallar en silencio.
-  if(_savePromise&&typeof _savePromise.then==='function'){
-    _savePromise.then(ok=>{
-      if(ok===false){
-        alert('⚠ El Tipo NO se guardó en el servidor (solo quedó en este navegador).\n\n'+
-          (_lastSaveError||'Sin detalle adicional — revisa la consola (F12).')+
-          '\n\nSi recargas la página o cierras sesión ahora, este cambio se PERDERÁ. '+
-          'Vuelve a intentar guardar antes de salir.');
-      }
-    });
-  }
 }
 
 // ========== IMPORTAR TIPO (cotización PDF/Excel) ==========
@@ -13346,71 +13305,15 @@ function vbAssignConfirm(i){
   }
   closeModal(); renderVendorBill();
 }
-// Diagnóstico temporal: arma un volcado legible de cómo se está comparando
-// el producto de la factura contra las líneas de presupuesto de la casa.
-// Nada de esto participa en la lógica normal; solo sirve para depurar
-// mismatches invisibles (espacios especiales, guiones distintos, matId=0, etc).
-function vbAssignDebugInfo(lineIdx, assignment){
-  const l=vbState.lines[lineIdx]||{};
-  const aProjId=vbNormProjId(assignment.projId!=null&&assignment.projId!==''?assignment.projId:curProj.id);
-  const aProj=projects.find(p=>String(p.id)===String(aProjId))||curProj;
-  const h=(aProj.houses||[]).find(x=>String(x.id)===String(assignment.houseId));
-  const t=h&&(aProj.types||[]).find(x=>String(x.id)===String(h.typeId));
-  const codes=s=>Array.from(String(s||'')).map(ch=>ch.codePointAt(0));
-  const desc=l.desc||'';
-  const out=[];
-  out.push('=== FACTURA (línea seleccionada) ===');
-  out.push('productId: '+JSON.stringify(l.productId||''));
-  out.push('desc: '+JSON.stringify(desc));
-  out.push('desc.length: '+desc.length);
-  out.push('desc charCodes: ['+codes(desc).join(',')+']');
-  out.push('');
-  out.push('=== DESTINO ===');
-  out.push('proyecto: '+(aProj&&aProj.name)+' (id='+aProjId+')');
-  out.push('casa: '+(h?h.num:'?')+' (id='+assignment.houseId+', typeId='+(h&&h.typeId)+')');
-  out.push('tipo encontrado: '+(t?(t.name||t.id):'NINGUNO — h.typeId no coincide con ningún type.id'));
-  out.push('');
-  out.push('=== LÍNEAS DE PRESUPUESTO DEL TIPO (candidatas) ===');
-  if(t&&t.categories){
-    t.categories.forEach(c=>{
-      (c.lines||[]).forEach(bl=>{
-        const nm=bl.manualName||lineName(bl);
-        if(!nm)return;
-        const matchById=!!(l.productId&&bl.matId&&String(bl.matId)===String(l.productId));
-        const matchByNameExact=nm===desc;
-        const matchByNameNorm=vbMatNamesMatch(nm,desc);
-        out.push('- categoría: '+(c.name||c.id));
-        out.push('  manualName: '+JSON.stringify(nm));
-        out.push('  matId: '+JSON.stringify(bl.matId));
-        out.push('  nm charCodes: ['+codes(nm).join(',')+']');
-        out.push('  matchById='+matchById+' | matchByNameExact='+matchByNameExact+' | matchByNameNormalizado='+matchByNameNorm);
-        out.push('  normKey(nm)  = '+JSON.stringify(vbMatNameKey(nm)));
-        out.push('  normKey(desc)= '+JSON.stringify(vbMatNameKey(desc)));
-        out.push('');
-      });
-    });
-    if(!t.categories.some(c=>(c.lines||[]).length)) out.push('(el tipo no tiene categorías/líneas)');
-  } else {
-    out.push('(no se pudo resolver el tipo de la casa — ver "tipo encontrado" arriba)');
-  }
-  return out.join('\n');
-}
 function vbShowMatOutOfList(lineIdx, assignment){
   const l=vbState.lines[lineIdx];
   const houseName=vbAssignLabel(assignment.houseId);
-  const dbg=vbAssignDebugInfo(lineIdx,assignment);
-  console.log('[vbAssignDebugInfo]\n'+dbg);
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--red)">⚠ Producto fuera de lista<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="font-size:13px;color:var(--t1);margin-bottom:14px;line-height:1.6">
       Este producto no se encuentra dentro de la lista de materiales de <strong>${houseName}</strong>.<br>
       Si aún así requiere agregarlo debe solicitar autorización de un administrador.
     </div>
-    <details style="margin-bottom:14px" open>
-      <summary style="cursor:pointer;font-size:11px;color:var(--t3)">Diagnóstico técnico (temporal) — copia y comparte este texto</summary>
-      <textarea readonly style="width:100%;height:220px;margin-top:8px;font-family:monospace;font-size:10px;background:var(--bg3);color:var(--t1);border:1px solid var(--border);border-radius:6px;padding:8px;white-space:pre" onclick="this.select()">${dbg.replace(/</g,'&lt;')}</textarea>
-      <button class="btn-sm" style="margin-top:6px" onclick="(function(btn){const ta=btn.parentElement.querySelector('textarea');ta.select();document.execCommand('copy');btn.textContent='✓ Copiado';setTimeout(()=>btn.textContent='Copiar diagnóstico',1500);})(this)">Copiar diagnóstico</button>
-    </details>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
       <button class="btn-save" style="background:var(--amb)" onclick="vbRequestMatAuth(${lineIdx},${JSON.stringify(assignment.houseId)})">Solicitar Autorización</button>
