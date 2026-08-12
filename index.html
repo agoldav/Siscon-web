@@ -4022,8 +4022,8 @@ function saveNewProj(){
   closeModal(); renderDash();
 }
 
-function closeModal(){ document.getElementById('modal').classList.add('hidden'); }
-document.getElementById('modal').addEventListener('click',e=>{ if(e.target===document.getElementById('modal'))closeModal(); });
+function closeModal(){ const m=document.getElementById('modal'); m.classList.add('hidden'); delete m.dataset.noOutsideClose; }
+document.getElementById('modal').addEventListener('click',e=>{ if(e.target===document.getElementById('modal')&&!e.currentTarget.dataset.noOutsideClose)closeModal(); });
 
 // ========== PROJECT ==========
 function openProj(id){
@@ -4491,7 +4491,7 @@ function renderCreateType(){
           </div>
           <div class="ff"><label>Impuestos IVA 13% ($)</label><input value="${fmt(impuesto)}" readonly style="color:var(--pur)"/></div>
           <div class="ff"><label>Precio de Venta <span style="font-size:9px;color:var(--t3)">${ctIVA?'con IVA':'sin IVA'}</span></label>
-            <input id="ct-sale" type="number" value="${salePrice.toFixed(2)}" onchange="ctForm.salePrice=parseFloat(this.value)||0"/>
+            <input id="ct-sale" type="number" value="${salePrice.toFixed(2)}" ${lockUA?'disabled style="opacity:.5"':''} onchange="updateCtFromSalePrice()"/>
           </div>
           <div class="ff"><label>Notas</label><textarea id="ct-notes" rows="2" onchange="ctForm.notes=this.value">${esc(ctForm.notes||'')}</textarea></div>
           <div class="ff"><label>Color</label>
@@ -4799,6 +4799,23 @@ function updateCtMargen(){
   const util=parseFloat(uEl.value)||0;
   ctForm.utilidad=util;
   const matCost=calcAllCatCosts();
+  const base=matCost+util;
+  ctForm.margen=base>0?(util/base*100):0;
+  renderCreateType();
+}
+// Precio de Venta editado a mano: despeja la utilidad implícita (y de ahí el margen) a partir
+// de salePrice = (matCost+utilidad)*(1+adminPct/100)*(ctIVA?1.13:1) — misma fórmula que renderCreateType.
+function updateCtFromSalePrice(){
+  const sEl=document.getElementById('ct-sale'); if(!sEl)return;
+  const salePrice=parseFloat(sEl.value)||0;
+  ctForm.salePrice=salePrice;
+  const isGar=!!garBudgetGid, billable=isGar?!!ctForm.billable:true;
+  if(isGar&&!billable)return;   // utilidad/admin bloqueados en garantía no facturable
+  const matCost=calcAllCatCosts();
+  const adminPct=parseFloat(document.getElementById('ct-adm')?.value)||ctForm.adminPct||2;
+  const divisor=(1+adminPct/100)*(ctIVA?1.13:1);
+  const util=divisor>0?(salePrice/divisor-matCost):0;
+  ctForm.utilidad=util;
   const base=matCost+util;
   ctForm.margen=base>0?(util/base*100):0;
   renderCreateType();
@@ -5143,7 +5160,7 @@ function casasCellTD(col,h,t,p,bill){
   switch(col){
     case 'num': return `<td onclick="event.stopPropagation()" style="white-space:nowrap"><input class="cell-input" value="${esc(h.num)}" style="width:78px" onchange="updateHouseNum(${h.id},this.value)"/>${h.typeLocked?`<span class="lock-ico" title="Tipo bloqueado — clic para desbloquear" onclick="houseUnlockReq(event,${h.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>`:''}</td>`;
     case 'type':
-      if(h.typeLocked) return `<td onclick="event.stopPropagation()" style="color:${tc};font-weight:500">${t?esc(t.name):'—'}</td>`;
+      if(h.typeLocked) return `<td style="color:${tc};font-weight:500">${t?esc(t.name):'—'}</td>`;
       return `<td onclick="event.stopPropagation()"><select class="cell-select" style="color:${tc}" onchange="updateHouseTypeFromSheet(${h.id},this.value)"><option value="">— Tipo —</option>${p.types.map(tp=>`<option value="${tp.id}" style="color:${tp.color}"${h.typeId===tp.id?' selected':''}>${esc(tp.name)}</option>`).join('')}</select></td>`;
     case 'subcontractor': { const sub=SYS.subcontractors.find(s=>s.id===h.subcontractorId); return `<td>${sub?esc(sub.name):'—'}</td>`; }
     case 'area': return `<td>${area||'—'}</td>`;
@@ -5724,7 +5741,7 @@ function renderHPBody(){
         ${unbudgeted.map(pu=>{
           const mat=pu.matId?MATS.find(x=>x.id===pu.matId):null;
           return `<tr>
-            <td>${pu.manualName||(mat?mat.name:'—')}${pu.note?` <span class="note-cloud" title="Ver motivo" onclick="showMatNote(event,${h.id},'${pu.lineId}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8A8.5 8.5 0 1 1 21 11.5z"/></svg></span>`:''}</td>
+            <td>${pu.manualName||(mat?mat.name:'—')}${pu.note?` <span class="note-cloud" title="Ver motivo" onclick="showMatNote(event,${h.id},'${pu.lineId}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8A8.5 8.5 0 1 1 21 11.5z"/></svg></span>`:''}${pu.substitutesName?`<div style="font-size:9px;color:var(--amb);margin-top:1px">Sustituye "${pu.substitutesName}"</div>`:''}</td>
             <td class="num">${pu.qty}</td><td class="num">${fmt(pu.price)}</td>
             <td class="num" style="color:var(--org)">${fmt(pu.qty*pu.price)}</td>
             <td><button onclick="removeUnbudgeted(${h.id},'${pu.lineId}')" style="background:transparent;border:none;color:var(--t3);font-size:11px;cursor:pointer">✕</button></td>
@@ -5850,16 +5867,22 @@ function h_setStatus(id,sel){
 
 function hpMatBoughtData(houseId, lineId){
   // Fuente principal: compras aplicadas a la casa (vbApplyToHouses / solicitar / etc.)
-  let qty=0, spent=0;
+  let qty=0, spent=0, subQty=0;
   const h=(curProj.houses||[]).find(x=>String(x.id)===String(houseId));
   if(h&&h.purchases){
     h.purchases.forEach(pu=>{
-      if(String(pu.lineId)!==String(lineId)) return;
-      qty+=pu.qty||0;
-      spent+=(pu.qty||0)*(pu.price||0);
+      if(String(pu.lineId)===String(lineId)){
+        qty+=pu.qty||0;
+        spent+=(pu.qty||0)*(pu.price||0);
+      } else if(pu.substitutesLineId!=null&&String(pu.substitutesLineId)===String(lineId)){
+        // Material aprobado como sustituto de este renglón: rebaja la cantidad disponible para
+        // comprar (ya no se puede pedir más del presupuestado), pero el gasto queda registrado
+        // en la fila del sustituto (Materiales No Presupuestados), no acá — evita duplicarlo.
+        subQty+=pu.qty||0;
+      }
     });
   }
-  if(qty||spent) return {qty,spent};
+  if(qty||spent||subQty) return {qty:qty+subQty,spent};
 
   // Fallback: facturas (p.ej. OC con lineId en la línea/assign, o Outlook sin purchases aún)
   const t=h&&h.typeId?(curProj.types||[]).find(x=>String(x.id)===String(h.typeId)):null;
@@ -8092,7 +8115,17 @@ function showPendingAuthPopup(reqId){
   }
 
   if(req.type==='vb-extra-material'){
-    const vhName=req.houseName||(curProj&&curProj.houses?((curProj.houses.find(h=>String(h.id)===String(req.houseId))||{}).num||req.houseId):'Casa');
+    // Compat: solicitudes viejas traían una sola casa (req.houseId/req.qty) en lugar de req.houses[].
+    const houses=Array.isArray(req.houses)&&req.houses.length?req.houses
+      :(req.houseId?[{houseId:req.houseId,houseName:req.houseName,qty:req.qty||0,substitutesPriceUSD:null}]:[]);
+    const totalQty=houses.reduce((s,h)=>s+(h.qty||0),0);
+    const repSub=houses.find(h=>h.substitutesPriceUSD!=null);
+    const subPrice=repSub?repSub.substitutesPriceUSD:null;
+    const diffUnit=(req.substitutesName&&subPrice!=null)?(req.price-subPrice):null;
+    const diffTotal=req.substitutesName?houses.reduce((s,h)=>{
+      const sp=h.substitutesPriceUSD!=null?h.substitutesPriceUSD:subPrice;
+      return s+(sp!=null?(h.qty||0)*(req.price-sp):0);
+    },0):null;
     document.getElementById('modal-inner').innerHTML=`
       <div class="modal-title" style="color:var(--amb)">⚠ Solicitud de material fuera de lista (Factura de Gasto)
         <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
@@ -8101,12 +8134,18 @@ function showPendingAuthPopup(reqId){
         <strong style="color:var(--t1)">${req.requestedBy}</strong> solicita agregar un material fuera de lista en
         <strong style="color:var(--t1)">${req.projName}</strong>${req.vbNum?` · Factura <strong>${req.vbNum}</strong>`:''}
       </div>
-      <div style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">
-        <div><span style="color:var(--t3)">Material:</span> <strong>${req.matName}</strong></div>
-        <div><span style="color:var(--t3)">Cantidad:</span> ${req.qty}</div>
-        <div><span style="color:var(--t3)">Precio:</span> ${fmt(req.price)}</div>
-        <div><span style="color:var(--t3)">Casa:</span> ${vhName}</div>
-        <div style="grid-column:1/-1"><span style="color:var(--t3)">Motivo:</span> <em>${req.comment}</em></div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:10px;display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">
+        <div><span style="color:var(--t3)">Producto solicitado:</span> <strong>${req.matName}</strong></div>
+        <div><span style="color:var(--t3)">Precio unitario:</span> ${fmt(req.price)}</div>
+        <div><span style="color:var(--t3)">Sustituye a:</span> <strong>${req.substitutesName||'Ninguno (no sustituye)'}</strong></div>
+        <div><span style="color:var(--t3)">Precio del sustituido:</span> ${subPrice!=null?fmt(subPrice):'—'}</div>
+        <div><span style="color:var(--t3)">Diferencia por unidad:</span> ${diffUnit!=null?((diffUnit>=0?'+':'')+fmt(diffUnit)):'—'}</div>
+        <div><span style="color:var(--t3)">Diferencia total (${totalQty} unid.):</span> <strong style="color:${diffTotal>0?'var(--red)':diffTotal<0?'var(--grn)':'var(--t1)'}">${diffTotal!=null?((diffTotal>=0?'+':'')+fmt(diffTotal)):'—'}</strong></div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:10px 12px;margin-bottom:12px;font-size:12px">
+        <div style="color:var(--t3);margin-bottom:4px">Casas (${houses.length}):</div>
+        <ul style="margin:0;padding-left:18px">${houses.map(h=>`<li>${h.houseName||h.houseId} — ${h.qty} unid.</li>`).join('')}</ul>
+        <div style="margin-top:6px"><span style="color:var(--t3)">Motivo:</span> <em>${req.comment}</em></div>
       </div>
       <div class="modal-actions" style="gap:8px">
         <button class="btn-cancel" onclick="resolveExtraAuth('${reqId}','rechazado')" style="border-color:var(--red);color:var(--red)">✗ Rechazar</button>
@@ -8165,6 +8204,9 @@ function applyApprovedExtra(req){
   return true;
 }
 async function resolveExtraAuth(reqId, decision){
+  // Cerrar la ventana YA: el usuario decidió, no debe esperar los round-trips de red de abajo
+  // para ver que su clic tuvo efecto (antes tardaba un par de segundos en desaparecer).
+  closeModal();
   // Aprobar/rechazar: refrescar primero desde el backend para actuar sobre el estado más reciente
   // de `projects` (donde vive el efecto real — OC/tipo/casa/garantía). La solicitud en sí ya no
   // viaja en ese blob: se resuelve aparte, con su propia fila (pendingAuthResolve más abajo).
@@ -8225,7 +8267,7 @@ async function resolveExtraAuth(reqId, decision){
     // sentido guardar si de verdad se aplicó algo a `projects`.
     if(ok) saveData(); // persiste el efecto en `projects` (línea de OC, desbloqueo, garantía) — sigue en el blob
     closeModal();
-    showToast(ok?(req.type==='house-unlock'||req.type==='type-unlock'?'🔓 Desbloqueado':req.type==='garantia-budget'?'✅ Garantía aprobada':'✅ Material aprobado y agregado a la OC'):'Solicitud aprobada');
+    showToast(ok?(req.type==='house-unlock'||req.type==='type-unlock'?'🔓 Desbloqueado':req.type==='garantia-budget'?'✅ Garantía aprobada':req.type==='vb-extra-material'?'✅ Material aprobado':'✅ Material aprobado y agregado a la OC'):'Solicitud aprobada');
     updateNotifBadge();
     if(req.type==='garantia-budget'&&curTab==='garantias')renderGarantias();
     // Detener recordatorio solo si no quedan más solicitudes pendientes
@@ -13211,9 +13253,63 @@ function vbMatNameKey(s){
   return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .replace(/[–—−]/g,'-').replace(/\s+/g,' ').trim();
 }
-function vbMatNamesMatch(a,b){
+// Tokeniza el nombre normalizado para comparar por palabras/medidas compartidas (no exige texto
+// idéntico): p.ej. "Perfil Base Y Tapa PC 11.60m" vs "Perfil Base Y Tapa Gen 11.60M - 8Mm Color -
+// Humo" comparten "perfil base y tapa 11.60m" aunque el resto del texto difiera.
+function vbMatNameTokens(s){
+  return vbMatNameKey(s).split(/[\s-]+/).filter(Boolean);
+}
+// Similitud 0..1 por coeficiente de Dice sobre el set de palabras (2×intersección / suma de tamaños).
+function vbMatMatchScore(a,b){
   const ka=vbMatNameKey(a), kb=vbMatNameKey(b);
-  return !!ka && ka===kb;
+  if(!ka||!kb)return 0;
+  if(ka===kb)return 1;
+  const ta=vbMatNameTokens(a), tb=vbMatNameTokens(b);
+  if(!ta.length||!tb.length)return 0;
+  const setB=new Set(tb);
+  let inter=0; ta.forEach(tok=>{ if(setB.has(tok))inter++; });
+  return (2*inter)/(ta.length+tb.length);
+}
+// Umbral de auto-match (≥70% se considera el mismo material sin preguntar). Entre 50% y 70% se le
+// pregunta al usuario en el momento de asignar (vbAssignConfirm/vbFindFuzzyCandidate); por debajo,
+// se trata como material distinto.
+const VB_MAT_AUTO_THRESHOLD=0.70;
+const VB_MAT_CONFIRM_THRESHOLD=0.50;
+function vbMatNamesMatch(a,b){
+  return vbMatMatchScore(a,b)>=VB_MAT_AUTO_THRESHOLD;
+}
+// Alias de material confirmados manualmente por el usuario (coincidencia 50-70%, ver vbConfirmMatAlias).
+// Viven en curProj.matAliases:[{typeId, descKey, lineId}] — se guardan con saveData() como el resto
+// del proyecto. Clave por tipo (no por casa) porque el presupuesto de materiales vive en el Tipo.
+function vbResolveAlias(typeId, descKey){
+  const aliases=(curProj&&curProj.matAliases)||[];
+  const hit=aliases.find(x=>String(x.typeId)===String(typeId)&&x.descKey===descKey);
+  return hit?hit.lineId:null;
+}
+function vbConfirmMatAlias(typeId, descKey, lineId){
+  if(!curProj)return;
+  if(!curProj.matAliases)curProj.matAliases=[];
+  const existing=curProj.matAliases.find(x=>String(x.typeId)===String(typeId)&&x.descKey===descKey);
+  if(existing) existing.lineId=lineId;
+  else curProj.matAliases.push({typeId,descKey,lineId});
+}
+// Mejor candidato en la banda "dudosa" (50-70%) de la lista de materiales presupuestados de la casa,
+// para preguntarle al usuario antes de mandarlo al flujo de fuera de lista. null si no hay ninguno
+// en ese rango (ya sea porque no hay candidato o porque alguno ya calzó automáticamente ≥70%).
+function vbFindFuzzyCandidate(p,houseId,desc){
+  if(!desc)return null;
+  const h=(p.houses||[]).find(x=>String(x.id)===String(houseId));
+  const t=h&&(p.types||[]).find(x=>String(x.id)===String(h.typeId));
+  if(!t||!t.categories)return null;
+  let best=null;
+  for(const c of t.categories) for(const l of (c.lines||[])){
+    const nm=l.manualName||lineName(l); if(!nm)continue;
+    const score=vbMatMatchScore(nm,desc);
+    if(score>=VB_MAT_CONFIRM_THRESHOLD&&score<VB_MAT_AUTO_THRESHOLD&&(!best||score>best.score)){
+      best={line:l,name:nm,score,pct:Math.round(score*100),typeId:t.id};
+    }
+  }
+  return best;
 }
 // verifica si el producto existe en la lista de materiales de la casa
 function isProductInHouseBudget(p,houseId,productId,desc){
@@ -13328,7 +13424,9 @@ function vbRenderAssignModal(i){
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
       <button class="btn-save" onclick="vbAssignConfirm(${i})">Ok</button>
     </div>`;
-  document.getElementById('modal').classList.remove('hidden');
+  const modalEl=document.getElementById('modal');
+  modalEl.dataset.noOutsideClose='1';
+  modalEl.classList.remove('hidden');
 }
 function vbAssignRecalc(i){
   const l=vbState.lines[i]; const assigned=vbAssignedQty(l); const diff=Math.abs(assigned-(l.qty||0));
@@ -13338,15 +13436,23 @@ function vbAssignRecalc(i){
 function vbAssignConfirm(i){
   const l=vbState.lines[i];
   if(Math.abs(vbAssignedQty(l)-(l.qty||0))>0.001){ alert('La cantidad debe ser igual a la cantidad de este producto en la factura.'); return; }
-  // validación: producto debe estar en lista de materiales de la casa (solo si es el mismo proyecto)
+  // validación: producto debe estar en lista de materiales de la casa (solo si es el mismo proyecto).
+  // Se juntan TODAS las casas sin match (no solo la primera) para pedir una única autorización.
+  const unresolved=[];
   for(const a of l.assign){
     if(a.houseId==='__bodega__')continue;
     a.projId=vbNormProjId(a.projId!=null&&a.projId!==''?a.projId:curProj.id);
     const aProj=projects.find(p=>String(p.id)===String(a.projId))||curProj;
-    if(!isProductInHouseBudget(aProj,a.houseId,l.productId,l.desc) && !isProductAuthorizedForHouse(aProj,a.houseId,l.productId,l.desc)){
-      vbShowMatOutOfList(i,a); return;
+    if(isProductInHouseBudget(aProj,a.houseId,l.productId,l.desc) || isProductAuthorizedForHouse(aProj,a.houseId,l.productId,l.desc)) continue;
+    // Coincidencia dudosa (50-70%): se pregunta una sola vez antes de mandarlo a "fuera de lista".
+    const cand=l.desc?vbFindFuzzyCandidate(aProj,a.houseId,l.desc):null;
+    if(cand && confirm('"'+(l.desc||'producto')+'" ¿es el mismo material que "'+cand.name+'" del presupuesto de '+vbAssignLabel(a.houseId,a.projId)+'? (similitud '+cand.pct+'%)')){
+      vbConfirmMatAlias(cand.typeId,vbMatNameKey(l.desc),cand.line.id);
+      continue;
     }
+    unresolved.push(a);
   }
+  if(unresolved.length){ vbShowMatOutOfList(i,unresolved); return; }
   // validación de presupuesto por casa
   for(const a of l.assign){
     if(a.houseId==='__bodega__')continue;
@@ -13365,54 +13471,122 @@ function vbAssignConfirm(i){
   }
   closeModal(); renderVendorBill();
 }
-function vbShowMatOutOfList(lineIdx, assignment){
+// Une (por nombre normalizado, sin duplicados) los materiales presupuestados de los Tipos de todas
+// las casas involucradas, para ofrecerlos como posible sustituto en el dropdown.
+function vbOutOfListSubOptions(assignments){
+  const seen=new Map();
+  assignments.forEach(a=>{
+    if(a.houseId==='__bodega__')return;
+    const aProj=projects.find(p=>String(p.id)===String(a.projId))||curProj;
+    const h=(aProj.houses||[]).find(x=>String(x.id)===String(a.houseId));
+    const t=h&&(aProj.types||[]).find(x=>String(x.id)===String(h.typeId));
+    if(!t||!t.categories)return;
+    t.categories.forEach(c=>(c.lines||[]).forEach(l=>{
+      const nm=l.manualName||lineName(l); if(!nm)return;
+      const key=vbMatNameKey(nm);
+      if(!seen.has(key))seen.set(key,nm);
+    }));
+  });
+  return [...seen.entries()].map(([key,name])=>({key,name})).sort((x,y)=>x.name.localeCompare(y.name));
+}
+// assignments: [{houseId,projId,qty}] — TODAS las casas de esta línea que no calzaron con el
+// presupuesto. El usuario elige con checkboxes cuáles pide autorizar ahora (todas marcadas por
+// defecto); las que deje sin marcar quedan pendientes para una solicitud aparte.
+function vbShowMatOutOfList(lineIdx, assignments){
   const l=vbState.lines[lineIdx];
-  const houseName=vbAssignLabel(assignment.houseId);
+  window._vbOutOfListCtx={lineIdx,assignments};
+  const subOpts=vbOutOfListSubOptions(assignments);
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--red)">⚠ Producto fuera de lista<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
-    <div style="font-size:13px;color:var(--t1);margin-bottom:14px;line-height:1.6">
-      Este producto no se encuentra dentro de la lista de materiales de <strong>${houseName}</strong>.<br>
-      Si aún así requiere agregarlo debe solicitar autorización de un administrador.
+    <div style="font-size:13px;color:var(--t1);margin-bottom:10px;line-height:1.5">
+      Este producto (<strong>${esc(l.desc||'producto')}</strong>) no se encuentra dentro de la lista de materiales de las casas:
     </div>
+    <div style="max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid var(--border);cursor:pointer">
+        <input type="checkbox" id="vbool-all" checked onchange="vbOutOfListToggleAll(this.checked)"/> Seleccionar todo
+      </label>
+      ${assignments.map((a,idx)=>`<label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 0;cursor:pointer">
+        <input type="checkbox" class="vbool-house" data-idx="${idx}" checked onchange="vbOutOfListRecalc()"/> ${esc(vbAssignLabel(a.houseId,a.projId))} <span style="color:var(--t3)">(${a.qty} unid.)</span>
+      </label>`).join('')}
+    </div>
+    <div class="ff"><label>¿Sustituye a algún material de la lista de materiales de estas casas?</label>
+      <select id="vbool-sub">
+        <option value="">No sustituye a ningún producto</option>
+        ${subOpts.map(o=>`<option value="${esc(o.key)}">${esc(o.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:4px">Las casas sin marcar quedan sin resolver; hay que solicitar autorización aparte para ellas.</div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
-      <button class="btn-save" style="background:var(--amb)" onclick="vbRequestMatAuth(${lineIdx},${JSON.stringify(assignment.houseId)})">Solicitar Autorización</button>
+      <button class="btn-save" style="background:var(--amb)" onclick="vbRequestMatAuthMulti()">Solicitar Autorización</button>
     </div>`;
-  document.getElementById('modal').classList.remove('hidden');
+  const modalEl=document.getElementById('modal');
+  modalEl.dataset.noOutsideClose='1';
+  modalEl.classList.remove('hidden');
 }
-function vbRequestMatAuth(lineIdx, houseId){
-  const l=vbState.lines[lineIdx];
-  const houseName=vbAssignLabel(houseId);
+function vbOutOfListToggleAll(checked){
+  document.querySelectorAll('.vbool-house').forEach(cb=>{cb.checked=checked;});
+}
+function vbOutOfListRecalc(){
+  const boxes=[...document.querySelectorAll('.vbool-house')];
+  const all=document.getElementById('vbool-all');
+  if(all) all.checked=boxes.length>0&&boxes.every(cb=>cb.checked);
+}
+function vbRequestMatAuthMulti(){
+  const ctx=window._vbOutOfListCtx; if(!ctx)return;
+  const boxes=[...document.querySelectorAll('.vbool-house')];
+  const selected=boxes.filter(cb=>cb.checked).map(cb=>ctx.assignments[parseInt(cb.dataset.idx,10)]);
+  if(!selected.length){ alert('Selecciona al menos una casa.'); return; }
+  const subSel=document.getElementById('vbool-sub');
+  const subName=(subSel&&subSel.value)?subSel.options[subSel.selectedIndex].textContent:'';
+  ctx.selected=selected;
+  ctx.substitutesName=subName||null;
+  const l=vbState.lines[ctx.lineIdx];
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--amb)">Solicitud de autorización<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
-    <div style="font-size:12px;color:var(--t2);margin-bottom:10px">Agregando <strong style="color:var(--t1)">${esc(l.desc||'producto')}</strong> a <strong style="color:var(--t1)">${houseName}</strong> fuera de lista presupuestada.</div>
+    <div style="font-size:12px;color:var(--t2);margin-bottom:8px">Agregando <strong style="color:var(--t1)">${esc(l.desc||'producto')}</strong> fuera de lista presupuestada a:</div>
+    <ul style="font-size:12px;color:var(--t1);margin:0 0 8px 18px;padding:0">
+      ${selected.map(a=>`<li>${esc(vbAssignLabel(a.houseId,a.projId))} — ${a.qty} unid.</li>`).join('')}
+    </ul>
+    ${ctx.substitutesName?`<div style="font-size:12px;color:var(--t2);margin-bottom:8px">Sustituye a: <strong style="color:var(--t1)">${esc(ctx.substitutesName)}</strong></div>`:''}
     <div class="ff"><label>Motivo</label><textarea id="mat-auth-reason" style="width:100%;min-height:60px" placeholder="Explique por qué necesita agregar este material..."></textarea></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
-      <button class="btn-save" onclick="vbSubmitMatAuth(${lineIdx},${JSON.stringify(houseId)})">Enviar</button>
+      <button class="btn-save" onclick="vbSubmitMatAuthMulti()">Enviar</button>
     </div>`;
 }
-async function vbSubmitMatAuth(lineIdx, houseId){
+async function vbSubmitMatAuthMulti(){
+  const ctx=window._vbOutOfListCtx; if(!ctx)return;
   const reason=(document.getElementById('mat-auth-reason')||{}).value||'';
   if(!reason.trim()){alert('Indique el motivo.');return;}
-  const l=vbState.lines[lineIdx];
-  const houseName=vbAssignLabel(houseId);
-  // Crear solicitud pendiente (async): la aprueba el administrador desde su sesión, igual que en la OC
+  const l=vbState.lines[ctx.lineIdx];
+  const houses=ctx.selected.map(a=>{
+    const aProj=projects.find(p=>String(p.id)===String(a.projId))||curProj;
+    const subPriceUSD=ctx.substitutesName?houseBudgetPriceForProduct(aProj,a.houseId,null,ctx.substitutesName):null;
+    return {
+      houseId:a.houseId, houseName:vbAssignLabel(a.houseId,a.projId),
+      projId:aProj.id, projName:aProj.name,
+      qty:a.qty||0,
+      substitutesPriceUSD:subPriceUSD==null?null:subPriceUSD
+    };
+  });
   const reqLocal={
     type:'vb-extra-material',
     projId:curProj?curProj.id:null,
     projName:curProj?curProj.name:'',
     vbNum:vbState?vbState.num:'',
     matName:l.desc||'', productId:l.productId||0, unit:'unid',
-    qty:l.qty||0, price:l.price||0,
-    houseId:houseId, houseName:houseName,
+    price:l.price||0,
+    houses,
+    substitutesName:ctx.substitutesName||null,
     comment:reason
   };
   let req;
   try{ req=await pendingAuthCreate(reqLocal); }catch(err){ showToast('No se pudo enviar la solicitud: '+err.message); return; }
+  window._vbOutOfListCtx=null;
   closeModal();
   showToast('✅ Solicitud enviada al administrador');
-  logAction(`Solicitud de material fuera de lista "${l.desc}" enviada`,'log-create','Factura de Proveedor',null,{name:l.desc,qty:l.qty,price:l.price,comment:reason});
+  logAction(`Solicitud de material fuera de lista "${l.desc}" enviada`,'log-create','Factura de Proveedor',null,{name:l.desc,houses:houses.map(h=>h.houseName),substitutesName:reqLocal.substitutesName,comment:reason});
   // Si el admin está en sesión ahora mismo, mostrar el popup directamente
   if(currentUser&&(currentUser.role==='Administrador'||currentUser.role==='Supervisor')){
     setTimeout(()=>showPendingAuthPopup(req.id),300);
@@ -13420,18 +13594,37 @@ async function vbSubmitMatAuth(lineIdx, houseId){
     startExtraAuthReminder();
   }
 }
-// Aplica (idempotente) el material aprobado a las compras no presupuestadas de la casa.
+// Aplica (idempotente) el material aprobado a las compras no presupuestadas de cada casa incluida
+// en la solicitud. Si sustituye a un material presupuestado, la compra queda marcada con
+// substitutesLineId → hpMatBoughtData() la suma contra ese renglón para rebajar su disponible,
+// pero sigue viviendo en "Materiales No Presupuestados" (su propio lineId sintético no es de
+// presupuesto) para no perder el registro de qué se compró realmente y a qué precio.
 function applyApprovedVbExtra(req){
-  const proj=projects.find(p=>String(p.id)===String(req.projId))||curProj;
-  const h=(proj&&proj.houses||[]).find(x=>x.id===req.houseId);
-  if(!h) return false;
-  if(!h.purchases)h.purchases=[];
-  const lineId='vbextra-'+req.id;
-  if(!h.purchases.some(x=>x.lineId===lineId)){
-    h.purchases.push({lineId,matId:req.productId||0,manualName:req.matName||'',qty:req.qty||0,price:req.price||0,note:'Autorizado: '+(req.comment||''),nonBudgeted:true});
-    h.spent=(h.purchases||[]).reduce((s,p)=>s+p.qty*(p.price||0),0);
-  }
-  return true;
+  const houses=Array.isArray(req.houses)&&req.houses.length?req.houses
+    :(req.houseId?[{houseId:req.houseId,houseName:req.houseName,projId:req.projId,qty:req.qty||0,substitutesPriceUSD:null}]:[]); // compat con solicitudes viejas (una sola casa)
+  let ok=false;
+  houses.forEach(hEntry=>{
+    const proj=projects.find(p=>String(p.id)===String(hEntry.projId||req.projId))||curProj;
+    const h=(proj&&proj.houses||[]).find(x=>String(x.id)===String(hEntry.houseId));
+    if(!h) return;
+    if(!h.purchases)h.purchases=[];
+    const lineId='vbextra-'+req.id+'-'+hEntry.houseId;
+    if(!h.purchases.some(x=>x.lineId===lineId)){
+      let substitutesLineId=null;
+      if(req.substitutesName){
+        const budLine=vbFindBudgetLineForProduct(proj,hEntry.houseId,null,req.substitutesName);
+        if(budLine) substitutesLineId=budLine.id;
+      }
+      h.purchases.push({
+        lineId,matId:req.productId||0,manualName:req.matName||'',qty:hEntry.qty||0,price:req.price||0,
+        note:'Autorizado: '+(req.comment||''),nonBudgeted:true,
+        substitutesName:req.substitutesName||null,substitutesLineId
+      });
+      h.spent=(h.purchases||[]).reduce((s,p)=>s+p.qty*(p.price||0),0);
+    }
+    ok=true;
+  });
+  return ok;
 }
 function vbHouseProductQtyOtherLines(idx,houseId,line){
   let q=0; vbState.lines.forEach((l,k)=>{ if(k===idx)return; const same=(line.productId&&l.productId===line.productId)||(line.desc&&l.desc===line.desc); if(same)(l.assign||[]).forEach(a=>{if(a.houseId===houseId)q+=a.qty||0;}); }); return q;
@@ -13445,7 +13638,9 @@ function vbAssignAllOpen(){
       <select id="vb-all-dest" style="width:100%"><option value="__bodega__">Bodega</option>${p.houses.map(h=>`<option value="${h.id}">${esc(h.num)}</option>`).join('')}</select>
     </div>
     <div class="modal-actions"><button class="btn-cancel" onclick="closeModal()">Cancelar</button><button class="btn-save" onclick="vbAssignAllConfirm()">Aplicar</button></div>`;
-  document.getElementById('modal').classList.remove('hidden');
+  const modalEl2=document.getElementById('modal');
+  modalEl2.dataset.noOutsideClose='1';
+  modalEl2.classList.remove('hidden');
 }
 function vbAssignAllConfirm(){
   const v=document.getElementById('vb-all-dest').value;
@@ -13473,10 +13668,17 @@ function vbFindBudgetLineForProduct(p,houseId,productId,desc){
       if(l.matId&&String(l.matId)===String(productId)) return l;
     }
   }
+  // Alias confirmado a mano por el usuario (coincidencia dudosa 50-70% ya aceptada una vez).
+  if(desc){
+    const aliasId=vbResolveAlias(t.id,vbMatNameKey(desc));
+    if(aliasId){
+      for(const c of t.categories) for(const l of (c.lines||[])) if(String(l.id)===String(aliasId)) return l;
+    }
+  }
   if(desc){
     for(const c of t.categories) for(const l of (c.lines||[])){
       const nm=l.manualName||lineName(l);
-      if(nm&&(nm===desc||vbMatNamesMatch(nm,desc))) return l;
+      if(nm&&vbMatNamesMatch(nm,desc)) return l;
     }
   }
   return null;
