@@ -985,6 +985,17 @@ let SYS = {
     lastSync: null,
   },
   subcontractors: [], // {id,name,idNum,idType,insured,phone,email,address,crew:[{id,name,role,idNum,idType,insured,phone,email,address}]}
+  // Automatizaciones de correo, editables en Ajustes → Correos. Cada key es una automatización
+  // independiente ({label, enabled, recipients:[email,...]}) — así se pueden agregar más a futuro
+  // (una por usuario/evento) sin rediseñar el modelo ni la UI.
+  emailAutomations: {
+    pendingBillsDigest: {
+      label: 'Facturas pendientes de clasificar',
+      description: 'Resumen diario (10:00pm) de facturas de proveedor guardadas con líneas sin casa asignada, agrupado por proyecto.',
+      enabled: true,
+      recipients: [],
+    },
+  },
   googleMapsKey: 'AIzaSyCFKPbq02rnkIAe3cnzSeS7ztSoVP8TuTA',
   backendUrl: '',   // URL del backend (proxy) p.ej. https://siscon-backend.onrender.com
   backendToken: '', // token compartido opcional
@@ -2771,6 +2782,13 @@ function applyDefaults(sys){
   if(SYS.googleMapsKey===undefined)SYS.googleMapsKey='AIzaSyCFKPbq02rnkIAe3cnzSeS7ztSoVP8TuTA';
   if(!SYS.stats)SYS.stats={open:true,scope:'todos',time:'todo',from:'',to:'',showGastado:false,showPendiente:false,cashWindow:'1m',cashProjects:null,unbilledProjects:null};
   if(!SYS.cotizaciones)SYS.cotizaciones=[];
+  if(!SYS.emailAutomations)SYS.emailAutomations={};
+  if(!SYS.emailAutomations.pendingBillsDigest)SYS.emailAutomations.pendingBillsDigest={
+    label:'Facturas pendientes de clasificar',
+    description:'Resumen diario (10:00pm) de facturas de proveedor guardadas con líneas sin casa asignada, agrupado por proyecto.',
+    enabled:true, recipients:[],
+  };
+  if(!Array.isArray(SYS.emailAutomations.pendingBillsDigest.recipients))SYS.emailAutomations.pendingBillsDigest.recipients=[];
   // notifications/pendingAuthRequests (VUL-044 parte 1.5): ya no viven en SYS, ver notifCache/pendingAuthCache.
 }
 
@@ -3336,6 +3354,51 @@ async function bootstrapCloudflareAuth(){
 }
 
 // ========== SETTINGS ==========
+// Automatizaciones de correo (Ajustes → Correos). Genérico sobre SYS.emailAutomations para poder
+// agregar más automatizaciones a futuro (una por evento/usuario) sin tocar esta UI de nuevo.
+function renderEmailAutomationsSettings(){
+  const autos=SYS.emailAutomations||{};
+  const keys=Object.keys(autos);
+  if(!keys.length)return '<div style="font-size:11px;color:var(--t3)">No hay automatizaciones configuradas.</div>';
+  return keys.map(key=>{
+    const a=autos[key];
+    return `<div style="border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--t1);cursor:pointer;margin-bottom:4px">
+        <input type="checkbox" ${a.enabled?'checked':''} onchange="toggleEmailAutomation('${key}',this.checked)" style="width:auto;background:transparent;padding:0"/> ${esc(a.label||key)}
+      </label>
+      ${a.description?`<div style="font-size:10px;color:var(--t3);margin-bottom:8px">${esc(a.description)}</div>`:''}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+        ${(a.recipients||[]).length?a.recipients.map(email=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border-radius:12px;padding:3px 4px 3px 10px;font-size:11px;color:var(--t1)">${esc(email)}<button onclick="removeEmailAutomationRecipient('${key}','${email.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:12px;line-height:1;padding:2px 5px" title="Quitar">✕</button></span>`).join(''):'<span style="font-size:11px;color:var(--t3)">Sin destinatarios todavía.</span>'}
+      </div>
+      <div style="display:flex;gap:6px">
+        <input id="ea-new-${key}" type="email" placeholder="correo@sisconcr.com" style="flex:1;font-size:11px" onkeydown="if(event.key==='Enter'){event.preventDefault();addEmailAutomationRecipient('${key}');}"/>
+        <button class="btn-xsm" onclick="addEmailAutomationRecipient('${key}')">+ Agregar</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function toggleEmailAutomation(key,checked){
+  if(!SYS.emailAutomations||!SYS.emailAutomations[key])return;
+  SYS.emailAutomations[key].enabled=checked;
+  saveData();
+}
+function addEmailAutomationRecipient(key){
+  const inp=document.getElementById('ea-new-'+key); if(!inp)return;
+  const email=inp.value.trim();
+  if(!email)return;
+  if(!validateEmail(email)){ alert('Correo inválido.'); return; }
+  const a=SYS.emailAutomations&&SYS.emailAutomations[key]; if(!a)return;
+  if(!a.recipients)a.recipients=[];
+  if(!a.recipients.some(e=>e.toLowerCase()===email.toLowerCase())) a.recipients.push(email);
+  saveData();
+  openSettings();
+}
+function removeEmailAutomationRecipient(key,email){
+  const a=SYS.emailAutomations&&SYS.emailAutomations[key]; if(!a)return;
+  a.recipients=(a.recipients||[]).filter(e=>e!==email);
+  saveData();
+  openSettings();
+}
 async function openSettings(){
   if(currentUser&&currentUser.role!=='Administrador'){alert('Solo el administrador tiene acceso a los ajustes del sistema.');return;}
   // La lista activa de personas se obtiene de Supabase Auth/profiles, igual que Mensajes.
@@ -3406,6 +3469,11 @@ async function openSettings(){
         <div id="ms-token-hint" style="display:none;font-size:10px;color:var(--amb);background:rgba(212,148,26,.1);border-radius:6px;padding:8px 10px;margin-top:6px;line-height:1.5"></div>
         <div id="ms-scan-result" style="font-size:11px;color:var(--t3);margin-top:6px"></div>
       </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Correos (Automatizaciones)</div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Correos automáticos que envía el sistema. Cada automatización tiene su propia lista de destinatarios — agregá o quitá correos según haga falta, sin afectar a las demás.</div>
+      ${renderEmailAutomationsSettings()}
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Backend (servidor)</div>
@@ -4024,6 +4092,29 @@ function saveNewProj(){
 
 function closeModal(){ const m=document.getElementById('modal'); m.classList.add('hidden'); delete m.dataset.noOutsideClose; }
 document.getElementById('modal').addEventListener('click',e=>{ if(e.target===document.getElementById('modal')&&!e.currentTarget.dataset.noOutsideClose)closeModal(); });
+// Modal Sí/No genérico — reemplaza confirm() nativo (que siempre dice OK/Cancelar, sin poder
+// personalizar el texto de los botones) en los flujos donde la pregunta es realmente sí/no.
+let _confirmModalCb=null;
+function showConfirmModal(message,onYes,onNo,opts){
+  opts=opts||{};
+  _confirmModalCb={onYes,onNo};
+  document.getElementById('modal-inner').innerHTML=`
+    <div class="modal-title">${opts.title?esc(opts.title):'Confirmar'}<button onclick="_confirmModalResolve(false)" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
+    <div style="font-size:13px;color:var(--t1);margin-bottom:16px;line-height:1.5">${esc(message)}</div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="_confirmModalResolve(false)">${opts.noLabel||'No'}</button>
+      <button class="btn-save" onclick="_confirmModalResolve(true)">${opts.yesLabel||'Sí'}</button>
+    </div>`;
+  const modalEl=document.getElementById('modal');
+  modalEl.dataset.noOutsideClose='1';
+  modalEl.classList.remove('hidden');
+}
+function _confirmModalResolve(yes){
+  const cb=_confirmModalCb; _confirmModalCb=null;
+  closeModal();
+  if(!cb)return;
+  if(yes){ if(cb.onYes)cb.onYes(); } else { if(cb.onNo)cb.onNo(); }
+}
 
 // ========== PROJECT ==========
 function openProj(id){
@@ -5878,7 +5969,10 @@ function hpMatBoughtData(houseId, lineId){
         // Material aprobado como sustituto de este renglón: rebaja la cantidad disponible para
         // comprar (ya no se puede pedir más del presupuestado), pero el gasto queda registrado
         // en la fila del sustituto (Materiales No Presupuestados), no acá — evita duplicarlo.
-        subQty+=pu.qty||0;
+        // Se suma substitutesQty (la EQUIVALENCIA declarada al pedir la autorización), NO pu.qty:
+        // el producto comprado puede medirse distinto al presupuestado (p.ej. 0.7 unidades de un
+        // rollo de 10m sustituyen 1 unidad de un rollo de 7m — lo que se rebaja es 1, no 0.7).
+        subQty+=pu.substitutesQty!=null?pu.substitutesQty:(pu.qty||0);
       }
     });
   }
@@ -8115,17 +8209,19 @@ function showPendingAuthPopup(reqId){
   }
 
   if(req.type==='vb-extra-material'){
-    // Compat: solicitudes viejas traían una sola casa (req.houseId/req.qty) en lugar de req.houses[].
-    const houses=Array.isArray(req.houses)&&req.houses.length?req.houses
-      :(req.houseId?[{houseId:req.houseId,houseName:req.houseName,qty:req.qty||0,substitutesPriceUSD:null}]:[]);
-    const totalQty=houses.reduce((s,h)=>s+(h.qty||0),0);
-    const repSub=houses.find(h=>h.substitutesPriceUSD!=null);
-    const subPrice=repSub?repSub.substitutesPriceUSD:null;
-    const diffUnit=(req.substitutesName&&subPrice!=null)?(req.price-subPrice):null;
-    const diffTotal=req.substitutesName?houses.reduce((s,h)=>{
-      const sp=h.substitutesPriceUSD!=null?h.substitutesPriceUSD:subPrice;
-      return s+(sp!=null?(h.qty||0)*(req.price-sp):0);
-    },0):null;
+    const lines=Array.isArray(req.lines)?req.lines:[];
+    const totalQty=lines.reduce((s,ln)=>s+(ln.qty||0),0);
+    let totalDiff=0, anyDiff=false;
+    const rows=lines.map(ln=>{
+      const costFactura=(ln.qty||0)*(req.price||0);
+      let costSust=null, diff=null;
+      if(ln.substitutesName&&ln.substitutesPriceUSD!=null){
+        costSust=(ln.substitutesQty||0)*ln.substitutesPriceUSD;
+        diff=costFactura-costSust;
+        totalDiff+=diff; anyDiff=true;
+      }
+      return {ln,costFactura,costSust,diff};
+    });
     document.getElementById('modal-inner').innerHTML=`
       <div class="modal-title" style="color:var(--amb)">⚠ Solicitud de material fuera de lista (Factura de Gasto)
         <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
@@ -8134,19 +8230,29 @@ function showPendingAuthPopup(reqId){
         <strong style="color:var(--t1)">${req.requestedBy}</strong> solicita agregar un material fuera de lista en
         <strong style="color:var(--t1)">${req.projName}</strong>${req.vbNum?` · Factura <strong>${req.vbNum}</strong>`:''}
       </div>
-      <div style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:10px;display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">
-        <div><span style="color:var(--t3)">Producto solicitado:</span> <strong>${req.matName}</strong></div>
-        <div><span style="color:var(--t3)">Precio unitario:</span> ${fmt(req.price)}</div>
-        <div><span style="color:var(--t3)">Sustituye a:</span> <strong>${req.substitutesName||'Ninguno (no sustituye)'}</strong></div>
-        <div><span style="color:var(--t3)">Precio del sustituido:</span> ${subPrice!=null?fmt(subPrice):'—'}</div>
-        <div><span style="color:var(--t3)">Diferencia por unidad:</span> ${diffUnit!=null?((diffUnit>=0?'+':'')+fmt(diffUnit)):'—'}</div>
-        <div><span style="color:var(--t3)">Diferencia total (${totalQty} unid.):</span> <strong style="color:${diffTotal>0?'var(--red)':diffTotal<0?'var(--grn)':'var(--t1)'}">${diffTotal!=null?((diffTotal>=0?'+':'')+fmt(diffTotal)):'—'}</strong></div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:10px 12px;margin-bottom:10px;font-size:12px">
+        <span style="color:var(--t3)">Producto solicitado:</span> <strong>${req.matName}</strong>
+        <span style="color:var(--t3);margin-left:8px">Precio unitario:</span> <strong>${fmt(req.price)}</strong>
       </div>
-      <div style="background:var(--bg3);border-radius:var(--r);padding:10px 12px;margin-bottom:12px;font-size:12px">
-        <div style="color:var(--t3);margin-bottom:4px">Casas (${houses.length}):</div>
-        <ul style="margin:0;padding-left:18px">${houses.map(h=>`<li>${h.houseName||h.houseId} — ${h.qty} unid.</li>`).join('')}</ul>
-        <div style="margin-top:6px"><span style="color:var(--t3)">Motivo:</span> <em>${req.comment}</em></div>
+      <div style="overflow-x:auto;margin-bottom:10px">
+        <table class="rec-table" style="width:100%;font-size:11px">
+          <thead><tr><th>Casa</th><th class="r">Cant.</th><th>Sustituye a</th><th class="r">Equivale a</th><th class="r">Costo factura</th><th class="r">Costo sustituido</th><th class="r">Diferencia</th></tr></thead>
+          <tbody>${rows.map(r=>`<tr>
+            <td>${r.ln.houseName||r.ln.houseId}</td>
+            <td class="r">${r.ln.qty}</td>
+            <td>${r.ln.substitutesName||'<span style="color:var(--t3)">— sin sustituir —</span>'}</td>
+            <td class="r">${r.ln.substitutesName?(r.ln.substitutesQty||0):'—'}</td>
+            <td class="r">${fmt(r.costFactura)}</td>
+            <td class="r">${r.costSust!=null?fmt(r.costSust):'—'}</td>
+            <td class="r" style="color:${r.diff>0?'var(--red)':r.diff<0?'var(--grn)':'var(--t1)'}">${r.diff!=null?((r.diff>=0?'+':'')+fmt(r.diff)):'—'}</td>
+          </tr>`).join('')}</tbody>
+        </table>
       </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-size:12px">
+        <span style="color:var(--t3)">Total: ${totalQty} unid.</span>
+        ${anyDiff?`<strong style="color:${totalDiff>0?'var(--red)':totalDiff<0?'var(--grn)':'var(--t1)'}">Diferencia total: ${(totalDiff>=0?'+':'')+fmt(totalDiff)}</strong>`:''}
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:10px 12px;margin-bottom:12px;font-size:12px"><span style="color:var(--t3)">Motivo:</span> <em>${req.comment}</em></div>
       <div class="modal-actions" style="gap:8px">
         <button class="btn-cancel" onclick="resolveExtraAuth('${reqId}','rechazado')" style="border-color:var(--red);color:var(--red)">✗ Rechazar</button>
         <button style="background:transparent;border:1px solid var(--amb);color:var(--amb);border-radius:7px;padding:7px 14px;font-size:12px;cursor:pointer" onclick="resolveExtraAuth('${reqId}','ver_luego')">⏱ Ver luego</button>
@@ -10204,7 +10310,7 @@ function txnRowHtml(type,tx,def,vendorLike,openCall,dupCall,delCall){
   return `<div class="oc-list-item" onclick="${openCall}" style="${tx._pending?'border-left:3px solid var(--red)':''}">
     <span class="oc-num-badge" style="color:${def.color}${vendorLike?';min-width:190px;text-align:right;flex-shrink:0':''}">${esc(vendorLike&&tx.invoiceNumber?tx.invoiceNumber:tx.num)}</span>
     <div style="flex:1;min-width:0">
-      <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}${type==='pagos'&&tx.paymentDirection?`<span style="font-size:9px;font-weight:700;color:${tx.paymentDirection==='received'?'var(--grn)':'var(--org)'}">${tx.paymentDirection==='received'?'RECIBIDO QB':'PAGADO QB'}</span>`:''}</div>
+      <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'&&tx.pendingClassification?`<span title="Hay líneas sin casa asignada" style="background:var(--amb);color:#1a1200;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">PENDIENTE DE CLASIFICAR</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}${type==='pagos'&&tx.paymentDirection?`<span style="font-size:9px;font-weight:700;color:${tx.paymentDirection==='received'?'var(--grn)':'var(--org)'}">${tx.paymentDirection==='received'?'RECIBIDO QB':'PAGADO QB'}</span>`:''}</div>
       <div style="font-size:10px;color:${vendorLike&&tx.qboProjectPresence==='missing'?'var(--red)':'var(--t2)'};margin-top:2px">${vendorLike&&tx.qboProjectPresence==='missing'?`⚠ ${esc(tx.qboPresenceMessage||'No se encuentra en este proyecto de QuickBooks')}`:`${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.qboEntity==='SalesReceipt'?' · Recibo de venta QBO':''}${tx.qboMultiProject?' · Parte de factura multiproyecto':''}${tx.consecutivo?' · Consec: '+esc(tx.consecutivo):''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}`}</div>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
@@ -13437,22 +13543,38 @@ function vbAssignConfirm(i){
   const l=vbState.lines[i];
   if(Math.abs(vbAssignedQty(l)-(l.qty||0))>0.001){ alert('La cantidad debe ser igual a la cantidad de este producto en la factura.'); return; }
   // validación: producto debe estar en lista de materiales de la casa (solo si es el mismo proyecto).
-  // Se juntan TODAS las casas sin match (no solo la primera) para pedir una única autorización.
-  const unresolved=[];
+  // Se juntan TODAS las casas sin match (no solo la primera) para pedir una única autorización, y
+  // las coincidencias dudosas (50-70%) se preguntan una por una (modal Sí/No) antes de eso.
+  const toConfirm=[]; const unresolved=[];
   for(const a of l.assign){
     if(a.houseId==='__bodega__')continue;
     a.projId=vbNormProjId(a.projId!=null&&a.projId!==''?a.projId:curProj.id);
     const aProj=projects.find(p=>String(p.id)===String(a.projId))||curProj;
     if(isProductInHouseBudget(aProj,a.houseId,l.productId,l.desc) || isProductAuthorizedForHouse(aProj,a.houseId,l.productId,l.desc)) continue;
-    // Coincidencia dudosa (50-70%): se pregunta una sola vez antes de mandarlo a "fuera de lista".
     const cand=l.desc?vbFindFuzzyCandidate(aProj,a.houseId,l.desc):null;
-    if(cand && confirm('"'+(l.desc||'producto')+'" ¿es el mismo material que "'+cand.name+'" del presupuesto de '+vbAssignLabel(a.houseId,a.projId)+'? (similitud '+cand.pct+'%)')){
-      vbConfirmMatAlias(cand.typeId,vbMatNameKey(l.desc),cand.line.id);
-      continue;
-    }
-    unresolved.push(a);
+    if(cand) toConfirm.push({a,cand}); else unresolved.push(a);
   }
-  if(unresolved.length){ vbShowMatOutOfList(i,unresolved); return; }
+  vbProcessFuzzyQueue(i,toConfirm,0,unresolved);
+}
+// Pregunta, una por una, cada coincidencia dudosa (50-70%) con un modal Sí/No. Al terminar la cola,
+// sigue con el flujo normal: fuera de lista (si quedó algo sin resolver) o validación de presupuesto.
+function vbProcessFuzzyQueue(lineIdx,queue,idx,unresolved){
+  const l=vbState.lines[lineIdx];
+  if(idx>=queue.length){
+    if(unresolved.length){ vbShowMatOutOfList(lineIdx,unresolved); return; }
+    vbAssignConfirmBudgetCheck(lineIdx);
+    return;
+  }
+  const {a,cand}=queue[idx];
+  showConfirmModal(
+    '"'+(l.desc||'producto')+'" ¿es el mismo material que "'+cand.name+'" del presupuesto de '+vbAssignLabel(a.houseId,a.projId)+'? (similitud '+cand.pct+'%)',
+    ()=>{ vbConfirmMatAlias(cand.typeId,vbMatNameKey(l.desc),cand.line.id); vbProcessFuzzyQueue(lineIdx,queue,idx+1,unresolved); },
+    ()=>{ unresolved.push(a); vbProcessFuzzyQueue(lineIdx,queue,idx+1,unresolved); },
+    {title:'¿Es el mismo material?'}
+  );
+}
+function vbAssignConfirmBudgetCheck(i){
+  const l=vbState.lines[i];
   // validación de presupuesto por casa
   for(const a of l.assign){
     if(a.houseId==='__bodega__')continue;
@@ -13473,47 +13595,77 @@ function vbAssignConfirm(i){
 }
 // Une (por nombre normalizado, sin duplicados) los materiales presupuestados de los Tipos de todas
 // las casas involucradas, para ofrecerlos como posible sustituto en el dropdown.
-function vbOutOfListSubOptions(assignments){
+// Materiales presupuestados de la casa de ESTA tarjeta (para su propio dropdown "sustituye a" —
+// ya no es una unión global: cada casa puede sustituir a un producto distinto).
+function vbOutOfListCardOptions(a){
+  if(a.houseId==='__bodega__')return [];
+  const aProj=projects.find(p=>String(p.id)===String(a.projId))||curProj;
+  const h=(aProj.houses||[]).find(x=>String(x.id)===String(a.houseId));
+  const t=h&&(aProj.types||[]).find(x=>String(x.id)===String(h.typeId));
+  if(!t||!t.categories)return [];
   const seen=new Map();
-  assignments.forEach(a=>{
-    if(a.houseId==='__bodega__')return;
-    const aProj=projects.find(p=>String(p.id)===String(a.projId))||curProj;
-    const h=(aProj.houses||[]).find(x=>String(x.id)===String(a.houseId));
-    const t=h&&(aProj.types||[]).find(x=>String(x.id)===String(h.typeId));
-    if(!t||!t.categories)return;
-    t.categories.forEach(c=>(c.lines||[]).forEach(l=>{
-      const nm=l.manualName||lineName(l); if(!nm)return;
-      const key=vbMatNameKey(nm);
-      if(!seen.has(key))seen.set(key,nm);
-    }));
-  });
+  t.categories.forEach(c=>(c.lines||[]).forEach(l=>{
+    const nm=l.manualName||lineName(l); if(!nm)return;
+    const key=vbMatNameKey(nm);
+    if(!seen.has(key))seen.set(key,nm);
+  }));
   return [...seen.entries()].map(([key,name])=>({key,name})).sort((x,y)=>x.name.localeCompare(y.name));
 }
 // assignments: [{houseId,projId,qty}] — TODAS las casas de esta línea que no calzaron con el
-// presupuesto. El usuario elige con checkboxes cuáles pide autorizar ahora (todas marcadas por
-// defecto); las que deje sin marcar quedan pendientes para una solicitud aparte.
+// presupuesto. Cada una es una "tarjeta" independiente: se elige con checkbox si se resuelve ahora
+// (las que queden sin marcar piden solicitud aparte más adelante), y su cantidad se puede partir en
+// varias líneas — cada una con su propio producto sustituido y equivalencia — porque un mismo
+// producto de factura puede sustituir a MÁS DE UN producto presupuestado distinto en la misma casa
+// (p.ej. parte sustituye a "PC 3m" y otra parte a "PC 7m").
 function vbShowMatOutOfList(lineIdx, assignments){
-  const l=vbState.lines[lineIdx];
-  window._vbOutOfListCtx={lineIdx,assignments};
-  const subOpts=vbOutOfListSubOptions(assignments);
+  window._vbOutOfListCtx={
+    lineIdx,
+    cards: assignments.map(a=>({ a, checked:true, subLines:[{qty:a.qty||0, substitutesName:'', substitutesQty:null}] })),
+  };
+  vbRenderMatOutOfList();
+}
+function vbOutOfListCardHtml(card,ci){
+  const {a,checked,subLines}=card;
+  const opts=vbOutOfListCardOptions(a);
+  const sum=subLines.reduce((s,sl)=>s+(parseFloat(sl.qty)||0),0);
+  const ok=Math.abs(sum-(a.qty||0))<0.001;
+  return `<div style="border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:8px;opacity:${checked?'1':'.55'}">
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--t1);cursor:pointer;margin-bottom:${checked?'8px':'0'}">
+      <input type="checkbox" ${checked?'checked':''} onchange="vbOutOfListToggleCard(${ci},this.checked)" style="width:auto;background:transparent;padding:0"/>
+      ${esc(vbAssignLabel(a.houseId,a.projId))} <span style="color:var(--t3);font-weight:400">— ${a.qty} unid. sin asignar</span>
+    </label>
+    ${checked?`
+    <div style="display:grid;grid-template-columns:64px 1fr 84px 24px;gap:6px;margin-bottom:4px">
+      <div style="font-size:9px;color:var(--t3);font-weight:600">Cantidad</div>
+      <div style="font-size:9px;color:var(--t3);font-weight:600">Sustituye a</div>
+      <div style="font-size:9px;color:var(--t3);font-weight:600">Equivale a</div>
+      <div></div>
+    </div>
+    ${subLines.map((sl,si)=>`<div style="display:grid;grid-template-columns:64px 1fr 84px 24px;gap:6px;margin-bottom:5px;align-items:center">
+      <input type="number" value="${sl.qty}" min="0" step="0.01" style="font-size:12px" onchange="vbOutOfListSetSubLine(${ci},${si},'qty',parseFloat(this.value)||0)"/>
+      <select style="font-size:12px" onchange="vbOutOfListSetSubLine(${ci},${si},'substitutesName',this.value?this.options[this.selectedIndex].textContent:'')">
+        <option value="">No sustituye a ningún producto</option>
+        ${opts.map(o=>`<option value="${esc(o.key)}" ${sl.substitutesName&&vbMatNameKey(sl.substitutesName)===o.key?'selected':''}>${esc(o.name)}</option>`).join('')}
+      </select>
+      ${sl.substitutesName?`<input type="number" value="${sl.substitutesQty==null?'':sl.substitutesQty}" min="0" step="0.01" placeholder="uds." title="A cuántas unidades de &quot;${esc(sl.substitutesName)}&quot; equivale esta línea" style="font-size:12px" onchange="vbOutOfListSetSubLine(${ci},${si},'substitutesQty',parseFloat(this.value)||0)"/>`:'<div></div>'}
+      <button onclick="vbOutOfListRemoveSubLine(${ci},${si})" ${subLines.length<=1?'disabled style="opacity:.3;background:transparent;border:none;color:var(--t3);cursor:default;font-size:14px"':'style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:14px"'} title="Quitar línea">✕</button>
+    </div>`).join('')}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">
+      <button class="btn-xsm" onclick="vbOutOfListAddSubLine(${ci})">+ Agregar línea</button>
+      <span style="font-size:11px;color:${ok?'var(--grn)':'var(--red)'}">${ok?'✓ ':''}${sum.toFixed(2)} / ${(a.qty||0).toFixed(2)}</span>
+    </div>`:''}
+  </div>`;
+}
+function vbRenderMatOutOfList(){
+  const ctx=window._vbOutOfListCtx; if(!ctx)return;
+  const l=vbState.lines[ctx.lineIdx];
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--red)">⚠ Producto fuera de lista<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="font-size:13px;color:var(--t1);margin-bottom:10px;line-height:1.5">
-      Este producto (<strong>${esc(l.desc||'producto')}</strong>) no se encuentra dentro de la lista de materiales de las casas:
+      Este producto (<strong>${esc(l.desc||'producto')}</strong>) no se encuentra dentro de la lista de materiales de las casas. Si sustituye a uno o más materiales presupuestados, indicalo por línea — podés dividir la cantidad en varias líneas con distinto sustituto y equivalencia.
     </div>
-    <div style="max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;margin-bottom:12px">
-      <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid var(--border);cursor:pointer">
-        <input type="checkbox" id="vbool-all" checked onchange="vbOutOfListToggleAll(this.checked)"/> Seleccionar todo
-      </label>
-      ${assignments.map((a,idx)=>`<label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 0;cursor:pointer">
-        <input type="checkbox" class="vbool-house" data-idx="${idx}" checked onchange="vbOutOfListRecalc()"/> ${esc(vbAssignLabel(a.houseId,a.projId))} <span style="color:var(--t3)">(${a.qty} unid.)</span>
-      </label>`).join('')}
-    </div>
-    <div class="ff"><label>¿Sustituye a algún material de la lista de materiales de estas casas?</label>
-      <select id="vbool-sub">
-        <option value="">No sustituye a ningún producto</option>
-        ${subOpts.map(o=>`<option value="${esc(o.key)}">${esc(o.name)}</option>`).join('')}
-      </select>
+    <div style="max-height:380px;overflow:auto;margin-bottom:10px">
+      ${ctx.cards.map((card,ci)=>vbOutOfListCardHtml(card,ci)).join('')}
     </div>
     <div style="font-size:11px;color:var(--t3);margin-bottom:4px">Las casas sin marcar quedan sin resolver; hay que solicitar autorización aparte para ellas.</div>
     <div class="modal-actions">
@@ -13524,31 +13676,60 @@ function vbShowMatOutOfList(lineIdx, assignments){
   modalEl.dataset.noOutsideClose='1';
   modalEl.classList.remove('hidden');
 }
-function vbOutOfListToggleAll(checked){
-  document.querySelectorAll('.vbool-house').forEach(cb=>{cb.checked=checked;});
+function vbOutOfListToggleCard(ci,checked){
+  const ctx=window._vbOutOfListCtx; if(!ctx)return;
+  ctx.cards[ci].checked=checked;
+  vbRenderMatOutOfList();
 }
-function vbOutOfListRecalc(){
-  const boxes=[...document.querySelectorAll('.vbool-house')];
-  const all=document.getElementById('vbool-all');
-  if(all) all.checked=boxes.length>0&&boxes.every(cb=>cb.checked);
+function vbOutOfListAddSubLine(ci){
+  const ctx=window._vbOutOfListCtx; if(!ctx)return;
+  const card=ctx.cards[ci];
+  const sum=card.subLines.reduce((s,sl)=>s+(parseFloat(sl.qty)||0),0);
+  card.subLines.push({qty:Math.max(0,(card.a.qty||0)-sum),substitutesName:'',substitutesQty:null});
+  vbRenderMatOutOfList();
+}
+function vbOutOfListRemoveSubLine(ci,si){
+  const ctx=window._vbOutOfListCtx; if(!ctx)return;
+  const card=ctx.cards[ci];
+  if(card.subLines.length<=1)return;
+  card.subLines.splice(si,1);
+  vbRenderMatOutOfList();
+}
+function vbOutOfListSetSubLine(ci,si,field,value){
+  const ctx=window._vbOutOfListCtx; if(!ctx)return;
+  const sl=ctx.cards[ci].subLines[si];
+  sl[field]=value;
+  if(field==='substitutesName'){
+    if(!value) sl.substitutesQty=null;
+    else if(sl.substitutesQty==null) sl.substitutesQty=parseFloat(sl.qty)||0; // default 1:1 — el usuario lo corrige si las unidades no calzan igual
+  }
+  vbRenderMatOutOfList();
 }
 function vbRequestMatAuthMulti(){
   const ctx=window._vbOutOfListCtx; if(!ctx)return;
-  const boxes=[...document.querySelectorAll('.vbool-house')];
-  const selected=boxes.filter(cb=>cb.checked).map(cb=>ctx.assignments[parseInt(cb.dataset.idx,10)]);
-  if(!selected.length){ alert('Selecciona al menos una casa.'); return; }
-  const subSel=document.getElementById('vbool-sub');
-  const subName=(subSel&&subSel.value)?subSel.options[subSel.selectedIndex].textContent:'';
-  ctx.selected=selected;
-  ctx.substitutesName=subName||null;
+  const checked=ctx.cards.filter(c=>c.checked);
+  if(!checked.length){ alert('Selecciona al menos una casa.'); return; }
+  for(const card of checked){
+    const sum=card.subLines.reduce((s,sl)=>s+(parseFloat(sl.qty)||0),0);
+    if(Math.abs(sum-(card.a.qty||0))>0.001){
+      alert('La suma de las líneas de "'+vbAssignLabel(card.a.houseId,card.a.projId)+'" debe ser igual a '+(card.a.qty||0)+' (actual: '+sum.toFixed(2)+').');
+      return;
+    }
+    for(const sl of card.subLines){
+      if(sl.substitutesName && !(parseFloat(sl.substitutesQty)>0)){
+        alert('Indica la equivalencia (unidades de "'+sl.substitutesName+'") en '+vbAssignLabel(card.a.houseId,card.a.projId)+'.');
+        return;
+      }
+    }
+  }
+  ctx.checkedCards=checked;
   const l=vbState.lines[ctx.lineIdx];
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--amb)">Solicitud de autorización<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="font-size:12px;color:var(--t2);margin-bottom:8px">Agregando <strong style="color:var(--t1)">${esc(l.desc||'producto')}</strong> fuera de lista presupuestada a:</div>
-    <ul style="font-size:12px;color:var(--t1);margin:0 0 8px 18px;padding:0">
-      ${selected.map(a=>`<li>${esc(vbAssignLabel(a.houseId,a.projId))} — ${a.qty} unid.</li>`).join('')}
+    <ul style="font-size:12px;color:var(--t1);margin:0 0 10px 18px;padding:0">
+      ${checked.map(card=>card.subLines.map(sl=>`<li>${esc(vbAssignLabel(card.a.houseId,card.a.projId))} — ${sl.qty} unid.${sl.substitutesName?` (sustituye ${sl.substitutesQty} ud. de "${esc(sl.substitutesName)}")`:' (sin sustituir)'}</li>`).join('')).join('')}
     </ul>
-    ${ctx.substitutesName?`<div style="font-size:12px;color:var(--t2);margin-bottom:8px">Sustituye a: <strong style="color:var(--t1)">${esc(ctx.substitutesName)}</strong></div>`:''}
     <div class="ff"><label>Motivo</label><textarea id="mat-auth-reason" style="width:100%;min-height:60px" placeholder="Explique por qué necesita agregar este material..."></textarea></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
@@ -13560,15 +13741,20 @@ async function vbSubmitMatAuthMulti(){
   const reason=(document.getElementById('mat-auth-reason')||{}).value||'';
   if(!reason.trim()){alert('Indique el motivo.');return;}
   const l=vbState.lines[ctx.lineIdx];
-  const houses=ctx.selected.map(a=>{
-    const aProj=projects.find(p=>String(p.id)===String(a.projId))||curProj;
-    const subPriceUSD=ctx.substitutesName?houseBudgetPriceForProduct(aProj,a.houseId,null,ctx.substitutesName):null;
-    return {
-      houseId:a.houseId, houseName:vbAssignLabel(a.houseId,a.projId),
-      projId:aProj.id, projName:aProj.name,
-      qty:a.qty||0,
-      substitutesPriceUSD:subPriceUSD==null?null:subPriceUSD
-    };
+  const lines=[];
+  ctx.checkedCards.forEach(card=>{
+    const aProj=projects.find(p=>String(p.id)===String(card.a.projId))||curProj;
+    card.subLines.forEach(sl=>{
+      const subPriceUSD=sl.substitutesName?houseBudgetPriceForProduct(aProj,card.a.houseId,null,sl.substitutesName):null;
+      lines.push({
+        houseId:card.a.houseId, houseName:vbAssignLabel(card.a.houseId,card.a.projId),
+        projId:aProj.id, projName:aProj.name,
+        qty:parseFloat(sl.qty)||0,
+        substitutesName:sl.substitutesName||null,
+        substitutesQty:sl.substitutesName?(parseFloat(sl.substitutesQty)||0):null,
+        substitutesPriceUSD:subPriceUSD==null?null:subPriceUSD,
+      });
+    });
   });
   const reqLocal={
     type:'vb-extra-material',
@@ -13577,16 +13763,15 @@ async function vbSubmitMatAuthMulti(){
     vbNum:vbState?vbState.num:'',
     matName:l.desc||'', productId:l.productId||0, unit:'unid',
     price:l.price||0,
-    houses,
-    substitutesName:ctx.substitutesName||null,
-    comment:reason
+    lines,
+    comment:reason,
   };
   let req;
   try{ req=await pendingAuthCreate(reqLocal); }catch(err){ showToast('No se pudo enviar la solicitud: '+err.message); return; }
   window._vbOutOfListCtx=null;
   closeModal();
   showToast('✅ Solicitud enviada al administrador');
-  logAction(`Solicitud de material fuera de lista "${l.desc}" enviada`,'log-create','Factura de Proveedor',null,{name:l.desc,houses:houses.map(h=>h.houseName),substitutesName:reqLocal.substitutesName,comment:reason});
+  logAction(`Solicitud de material fuera de lista "${l.desc}" enviada`,'log-create','Factura de Proveedor',null,{name:l.desc,lines:lines.map(x=>({house:x.houseName,qty:x.qty,substitutesName:x.substitutesName,substitutesQty:x.substitutesQty})),comment:reason});
   // Si el admin está en sesión ahora mismo, mostrar el popup directamente
   if(currentUser&&(currentUser.role==='Administrador'||currentUser.role==='Supervisor')){
     setTimeout(()=>showPendingAuthPopup(req.id),300);
@@ -13594,31 +13779,33 @@ async function vbSubmitMatAuthMulti(){
     startExtraAuthReminder();
   }
 }
-// Aplica (idempotente) el material aprobado a las compras no presupuestadas de cada casa incluida
-// en la solicitud. Si sustituye a un material presupuestado, la compra queda marcada con
-// substitutesLineId → hpMatBoughtData() la suma contra ese renglón para rebajar su disponible,
-// pero sigue viviendo en "Materiales No Presupuestados" (su propio lineId sintético no es de
-// presupuesto) para no perder el registro de qué se compró realmente y a qué precio.
+// Aplica (idempotente) el material aprobado a las compras no presupuestadas de cada línea de la
+// solicitud (una casa puede tener varias líneas, cada una sustituyendo a un producto distinto).
+// Si sustituye a un material presupuestado, la compra queda marcada con substitutesLineId +
+// substitutesQty (la EQUIVALENCIA, no la cantidad comprada) → hpMatBoughtData() suma
+// substitutesQty contra ese renglón para rebajar su disponible, pero la compra sigue viviendo en
+// "Materiales No Presupuestados" (su propio lineId sintético no es de presupuesto) para no perder
+// el registro de qué se compró realmente y a qué precio.
 function applyApprovedVbExtra(req){
-  const houses=Array.isArray(req.houses)&&req.houses.length?req.houses
-    :(req.houseId?[{houseId:req.houseId,houseName:req.houseName,projId:req.projId,qty:req.qty||0,substitutesPriceUSD:null}]:[]); // compat con solicitudes viejas (una sola casa)
+  const lines=Array.isArray(req.lines)?req.lines:[];
   let ok=false;
-  houses.forEach(hEntry=>{
-    const proj=projects.find(p=>String(p.id)===String(hEntry.projId||req.projId))||curProj;
-    const h=(proj&&proj.houses||[]).find(x=>String(x.id)===String(hEntry.houseId));
+  lines.forEach((ln,idx)=>{
+    const proj=projects.find(p=>String(p.id)===String(ln.projId||req.projId))||curProj;
+    const h=(proj&&proj.houses||[]).find(x=>String(x.id)===String(ln.houseId));
     if(!h) return;
     if(!h.purchases)h.purchases=[];
-    const lineId='vbextra-'+req.id+'-'+hEntry.houseId;
+    const lineId='vbextra-'+req.id+'-'+ln.houseId+'-'+idx;
     if(!h.purchases.some(x=>x.lineId===lineId)){
       let substitutesLineId=null;
-      if(req.substitutesName){
-        const budLine=vbFindBudgetLineForProduct(proj,hEntry.houseId,null,req.substitutesName);
+      if(ln.substitutesName){
+        const budLine=vbFindBudgetLineForProduct(proj,ln.houseId,null,ln.substitutesName);
         if(budLine) substitutesLineId=budLine.id;
       }
       h.purchases.push({
-        lineId,matId:req.productId||0,manualName:req.matName||'',qty:hEntry.qty||0,price:req.price||0,
+        lineId,matId:req.productId||0,manualName:req.matName||'',qty:ln.qty||0,price:req.price||0,
         note:'Autorizado: '+(req.comment||''),nonBudgeted:true,
-        substitutesName:req.substitutesName||null,substitutesLineId
+        substitutesName:ln.substitutesName||null,substitutesLineId,
+        substitutesQty:ln.substitutesName?(ln.substitutesQty||0):null,
       });
       h.spent=(h.purchases||[]).reduce((s,p)=>s+p.qty*(p.price||0),0);
     }
@@ -13653,10 +13840,23 @@ function vbValidateAssignments(){
   for(const l of vbState.lines){
     if(!vbProjectLineActive(l))continue;
     if(!l.desc&&!l.qty)continue;
-    if(!l.assign||!l.assign.length) return 'Todos los productos deben estar asociados a un proyecto, casa o bodega, por favor completar la información y guardar.';
+    // Sin ningún destino asignado: ya NO bloquea el guardado — la factura se guarda igual y queda
+    // marcada pendingClassification (ver vbHasUnassignedLines/saveVendorBill) para clasificar
+    // las casas después. Solo se sigue bloqueando cuando SÍ hay asignación pero la suma no cuadra
+    // con la cantidad de la factura (eso sería un dato inconsistente, no "sin clasificar").
+    if(!l.assign||!l.assign.length) continue;
     if(Math.abs(vbAssignedQty(l)-(l.qty||0))>0.001) return 'La cantidad asignada de "'+(l.desc||'producto')+'" debe ser igual a la cantidad en la factura.';
   }
   return null;
+}
+// true si queda al menos una línea activa sin ningún destino (proyecto/casa/bodega) asignado.
+function vbHasUnassignedLines(){
+  if(vbState&&vbState.qboInitialImportProcessed&&vbState.houseAssignmentRequired===false)return false;
+  return vbState.lines.some(l=>{
+    if(!vbProjectLineActive(l))return false;
+    if(!l.desc&&!l.qty)return false;
+    return !l.assign||!l.assign.length;
+  });
 }
 // Busca la línea de presupuesto de una casa que coincide con productId o descripción
 function vbFindBudgetLineForProduct(p,houseId,productId,desc){
@@ -13816,6 +14016,11 @@ function saveVendorBill(sync){
   data.status=st.status==='Borrador'?'Registrada':st.status;
   data.lastModified=new Date().toLocaleString('es-CR'); data._pending=false;
   if(data.houseAssignmentRequired){data.houseAssignmentRequired=false;data.houseAssignmentCompletedAt=new Date().toISOString();}
+  // Facturas guardadas con líneas sin casa asignada quedan "pendientes de clasificar": el digest
+  // diario (backend, cron) las lista agrupadas por proyecto hasta que alguien complete la asignación.
+  const pendingClass=vbHasUnassignedLines();
+  data.pendingClassification=pendingClass;
+  data.pendingClassificationSince=pendingClass?(data.pendingClassificationSince||new Date().toISOString()):null;
   if(curTxnId==='new'){ arr.push(data); curTxnId=data.id;
     logAction(`Factura de Proveedor "${data.num}" creada`,'log-create','Factura de Proveedor',null,{num:data.num,party:data.party,total:data.totalUSD});
   } else { const idx=arr.findIndex(x=>String(x.id)===String(curTxnId)); if(idx>=0)arr[idx]=data; }
@@ -13831,7 +14036,8 @@ function saveVendorBill(sync){
   // marca la OC ligada como facturada
   if(data.linkedOcId){ const oc=(curProj.ocs||[]).find(o=>o.id===data.linkedOcId); if(oc){oc.status='Facturada';oc.billId=data.id;} }
   curProj.lastActivity=Date.now(); autoStartProj(); saveData(); renderMetric();
-  showToast('Factura de proveedor guardada · gasto actualizado'); curTxnId=null; renderTxnSub();
+  showToast(pendingClass?'Factura de proveedor guardada · pendiente de clasificar (faltan casas por asignar)':'Factura de proveedor guardada · gasto actualizado');
+  curTxnId=null; renderTxnSub();
 }
 function deleteVendorBill(id){
   if(!confirm('¿Eliminar esta factura?'))return;
