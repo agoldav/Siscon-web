@@ -13630,30 +13630,33 @@ function vbOutOfListCardHtml(card,ci){
   const sum=subLines.reduce((s,sl)=>s+(parseFloat(sl.qty)||0),0);
   const ok=Math.abs(sum-(a.qty||0))<0.001;
   return `<div style="border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:8px;opacity:${checked?'1':'.55'}">
-    <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--t1);cursor:pointer;margin-bottom:${checked?'8px':'0'}">
-      <input type="checkbox" ${checked?'checked':''} onchange="vbOutOfListToggleCard(${ci},this.checked)" style="width:auto;background:transparent;padding:0"/>
-      ${esc(vbAssignLabel(a.houseId,a.projId))} <span style="color:var(--t3);font-weight:400">— ${a.qty} unid. sin asignar</span>
-    </label>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:${checked?'8px':'0'}">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--t1);cursor:pointer">
+        <input type="checkbox" ${checked?'checked':''} onchange="vbOutOfListToggleCard(${ci},this.checked)" style="width:auto;background:transparent;padding:0"/>
+        ${esc(vbAssignLabel(a.houseId,a.projId))}
+      </label>
+      ${checked?`<button class="btn-xsm" onclick="vbOutOfListAddSubLine(${ci})">+ Agregar línea</button>`:''}
+      <span style="margin-left:auto;font-size:11px;white-space:nowrap;color:${ok?'var(--grn)':'var(--red)'}">${ok?'✓ ':''}Asignado: ${sum.toFixed(2)}/${(a.qty||0).toFixed(2)}</span>
+    </div>
     ${checked?`
-    <div style="display:grid;grid-template-columns:64px 1fr 84px 24px;gap:6px;margin-bottom:4px">
+    <div style="display:grid;grid-template-columns:64px 1fr 110px 24px;gap:6px;margin-bottom:4px">
       <div style="font-size:9px;color:var(--t3);font-weight:600">Cantidad</div>
       <div style="font-size:9px;color:var(--t3);font-weight:600">Sustituye a</div>
       <div style="font-size:9px;color:var(--t3);font-weight:600">Equivale a</div>
       <div></div>
     </div>
-    ${subLines.map((sl,si)=>`<div style="display:grid;grid-template-columns:64px 1fr 84px 24px;gap:6px;margin-bottom:5px;align-items:center">
+    ${subLines.map((sl,si)=>`<div style="display:grid;grid-template-columns:64px 1fr 110px 24px;gap:6px;margin-bottom:5px;align-items:center">
       <input type="number" value="${sl.qty}" min="0" step="0.01" style="font-size:12px" onchange="vbOutOfListSetSubLine(${ci},${si},'qty',parseFloat(this.value)||0)"/>
       <select style="font-size:12px" onchange="vbOutOfListSetSubLine(${ci},${si},'substitutesName',this.value?this.options[this.selectedIndex].textContent:'')">
         <option value="">No sustituye a ningún producto</option>
         ${opts.map(o=>`<option value="${esc(o.key)}" ${sl.substitutesName&&vbMatNameKey(sl.substitutesName)===o.key?'selected':''}>${esc(o.name)}</option>`).join('')}
       </select>
-      ${sl.substitutesName?`<input type="number" value="${sl.substitutesQty==null?'':sl.substitutesQty}" min="0" step="0.01" placeholder="uds." title="A cuántas unidades de &quot;${esc(sl.substitutesName)}&quot; equivale esta línea" style="font-size:12px" onchange="vbOutOfListSetSubLine(${ci},${si},'substitutesQty',parseFloat(this.value)||0)"/>`:'<div></div>'}
+      ${sl.substitutesName?`<div style="display:flex;align-items:center;gap:3px;font-size:12px;white-space:nowrap">
+        <span style="color:var(--t3)">${sl.qty}/</span>
+        <input type="number" value="${sl.substitutesQty==null?'':sl.substitutesQty}" min="0" step="0.01" placeholder="?" title="A cuántas unidades de &quot;${esc(sl.substitutesName)}&quot; equivale esta línea" style="font-size:12px;width:56px" onchange="vbOutOfListSetSubLine(${ci},${si},'substitutesQty',parseFloat(this.value)||0)"/>
+      </div>`:'<div style="color:var(--t3);font-size:12px">—</div>'}
       <button onclick="vbOutOfListRemoveSubLine(${ci},${si})" ${subLines.length<=1?'disabled style="opacity:.3;background:transparent;border:none;color:var(--t3);cursor:default;font-size:14px"':'style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:14px"'} title="Quitar línea">✕</button>
-    </div>`).join('')}
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">
-      <button class="btn-xsm" onclick="vbOutOfListAddSubLine(${ci})">+ Agregar línea</button>
-      <span style="font-size:11px;color:${ok?'var(--grn)':'var(--red)'}">${ok?'✓ ':''}${sum.toFixed(2)} / ${(a.qty||0).toFixed(2)}</span>
-    </div>`:''}
+    </div>`).join('')}`:''}
   </div>`;
 }
 function vbRenderMatOutOfList(){
@@ -13685,7 +13688,10 @@ function vbOutOfListAddSubLine(ci){
   const ctx=window._vbOutOfListCtx; if(!ctx)return;
   const card=ctx.cards[ci];
   const sum=card.subLines.reduce((s,sl)=>s+(parseFloat(sl.qty)||0),0);
-  card.subLines.push({qty:Math.max(0,(card.a.qty||0)-sum),substitutesName:'',substitutesQty:null});
+  // Redondeo a 2 decimales: 1-0.7 en JS da 0.30000000000000004 (float), y eso terminaría
+  // guardado tal cual en la compra si el usuario no lo toca.
+  const remaining=Math.round(Math.max(0,(card.a.qty||0)-sum)*100)/100;
+  card.subLines.push({qty:remaining,substitutesName:'',substitutesQty:null});
   vbRenderMatOutOfList();
 }
 function vbOutOfListRemoveSubLine(ci,si){
@@ -13699,10 +13705,10 @@ function vbOutOfListSetSubLine(ci,si,field,value){
   const ctx=window._vbOutOfListCtx; if(!ctx)return;
   const sl=ctx.cards[ci].subLines[si];
   sl[field]=value;
-  if(field==='substitutesName'){
-    if(!value) sl.substitutesQty=null;
-    else if(sl.substitutesQty==null) sl.substitutesQty=parseFloat(sl.qty)||0; // default 1:1 — el usuario lo corrige si las unidades no calzan igual
-  }
+  // Sin default automático: la equivalencia la escribe el usuario a propósito (0.7 de factura
+  // puede equivaler a 1, 0.5, o cualquier otra cantidad del producto presupuestado — asumir 1:1
+  // como punto de partida confundía más de lo que ayudaba).
+  if(field==='substitutesName'&&!value) sl.substitutesQty=null;
   vbRenderMatOutOfList();
 }
 function vbRequestMatAuthMulti(){
