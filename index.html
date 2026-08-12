@@ -1635,12 +1635,26 @@ async function _handleRowConflict(label,id,payload,path){
   // VUL-044 Fase A movió projects/houses a filas propias. Las aprobaciones ahora chocan aquí, no
   // necesariamente en settings/1; conservar el flujo específico ya verificado por el OWNER.
   if(await _handleRecentOwnApproval())return null;
+  // BUG real encontrado en vivo (2026-08-11): con el confirm() original, "Cancelar" (o cerrar el
+  // diálogo con Escape/click fuera) sobrescribía SIN otra confirmación el trabajo de la otra
+  // persona — el camino destructivo era el que quedaba activado "por accidente". Con varias
+  // pestañas abiertas (una con datos viejos en memoria) esto pisó silenciosamente una edición
+  // buena. Ahora Escape/Cancelar en cualquier paso SIEMPRE termina en la opción segura (no
+  // sobrescribe nada); forzar requiere una segunda confirmación explícita y separada.
   const reload=confirm(
     `Otro usuario guardó cambios en ${label} mientras trabajabas.\n\n`+
-    'Aceptar = cargar la versión del servidor.\n'+
-    'Cancelar = sobrescribirla con tus cambios.'
+    'Se recomienda cargar la versión del servidor para no perder su trabajo.\n\n'+
+    'Aceptar = cargar la versión del servidor (recomendado).\n'+
+    'Cancelar = no cargar todavía (tu cambio se queda solo en este navegador, sin guardar).'
   );
   if(reload){await loadDataFromAPI();return null;}
+  const forceOverwrite=confirm(
+    `¿Seguro que quieres SOBRESCRIBIR los cambios que la otra persona guardó en ${label} con los tuyos?\n\n`+
+    'Esta acción no se puede deshacer y el trabajo de la otra persona se perderá.\n\n'+
+    'Aceptar = sí, sobrescribir de todos modos.\n'+
+    'Cancelar = no hacer nada (puedes volver a intentar guardar más tarde).'
+  );
+  if(!forceOverwrite) return null;
   const {resp,data}=await _dbRowRequest('PUT',path,{...payload,replace_data:true,force:true});
   if(!resp.ok){console.error(`No se pudo forzar ${label} ${id}:`,data);return null;}
   return data;
@@ -2245,12 +2259,26 @@ async function _handleSaveConflict(){
   _conflictDialogOpen=true;
   try{
     if(await _handleRecentOwnApproval())return false;
+    // BUG real encontrado en vivo (2026-08-11): con el confirm() original, "Cancelar" (o cerrar el
+    // diálogo con Escape/click fuera) sobrescribía SIN otra confirmación el trabajo de la otra
+    // persona — el camino destructivo era el que quedaba activado "por accidente". Con varias
+    // pestañas abiertas (una con datos viejos en memoria) esto pisó silenciosamente una edición
+    // buena. Ahora Escape/Cancelar en cualquier paso SIEMPRE termina en la opción segura (no
+    // sobrescribe nada); forzar requiere una segunda confirmación explícita y separada.
     const recargar=confirm(
       'Otro usuario guardó cambios mientras trabajabas.\n\n'+
-      'Aceptar = recargar con los datos del servidor (lo tuyo sin guardar queda en este navegador).\n'+
-      'Cancelar = guardar de todos modos y sobrescribir los cambios del otro usuario.'
+      'Se recomienda cargar la versión del servidor para no perder su trabajo.\n\n'+
+      'Aceptar = recargar con los datos del servidor (recomendado; lo tuyo sin guardar queda en este navegador).\n'+
+      'Cancelar = no recargar todavía (nada se guarda ni se sobrescribe aún).'
     );
     if(recargar){ location.reload(); return false; }
+    const forceOverwrite=confirm(
+      '¿Seguro que quieres SOBRESCRIBIR los cambios que la otra persona guardó con los tuyos?\n\n'+
+      'Esta acción no se puede deshacer y el trabajo de la otra persona se perderá.\n\n'+
+      'Aceptar = sí, sobrescribir de todos modos.\n'+
+      'Cancelar = no hacer nada (puedes volver a intentar guardar más tarde).'
+    );
+    if(!forceOverwrite) return false;
     // BUG encontrado en vivo (2026-07-24+): antes esto ponía _settingsVersion=null para forzar el
     // sobrescribir, pero el modo estricto del servidor trata CUALQUIER versión faltante como "nunca
     // cargó" y responde 428 — indistinguible de esta elección explícita del usuario. force:true
