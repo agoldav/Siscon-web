@@ -839,6 +839,7 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
         <button class="tab-btn" data-tab="tipos" onclick="tabClick(event,'tipos')">Tipos</button>
         <button class="tab-btn" data-tab="casas" onclick="tabClick(event,'casas')">Lista de Casas</button>
         <button class="tab-btn" data-tab="materiales" onclick="tabClick(event,'materiales')">Lista de Materiales</button>
+        <button class="tab-btn" data-tab="bodega" onclick="tabClick(event,'bodega')">Bodega</button>
         <button class="tab-btn" data-tab="gantt" onclick="tabClick(event,'gantt')">Cronograma Gantt</button>
         <button class="tab-btn" data-tab="docs" onclick="tabClick(event,'docs')">Documentos</button>
         <button class="tab-btn" data-tab="garantias" onclick="tabClick(event,'garantias')">Garantías</button>
@@ -4083,7 +4084,7 @@ function saveNewProj(){
     utilityPct:parseFloat(document.getElementById('np-util').value)||0,
     area:parseFloat(document.getElementById('np-area').value)||0,
     areaInstalled:0,locked:false,exchangeRate:SYS.exchangeRate,
-    types:[],houses:[],docs:[],uploads:[],garantias:[]
+    types:[],houses:[],docs:[],uploads:[],garantias:[],bodega:[]
   };
   projects.push(p);
   logAction(`Proyecto "${name}" creado`,'log-create','Dashboard',null,{name,num:p.num});
@@ -4419,6 +4420,7 @@ function renderTab(){
   else if(curTab==='tipos') renderTypes();
   else if(curTab==='casas') renderCasas();
   else if(curTab==='materiales') renderMaterialesTab();
+  else if(curTab==='bodega') renderProjBodegaTab();
   else if(curTab==='gantt') renderGantt();
   else if(curTab==='docs') renderDocs();
   else if(curTab==='garantias') renderGarantias();
@@ -8642,6 +8644,9 @@ function duplicateGenericTxn(type,id){
   const clone=JSON.parse(JSON.stringify(tx));
   clone.id='tx-'+Date.now(); clone.num=txnNextNum(type); clone.status='Borrador';
   clone.qboId=''; clone.createdAt=new Date().toLocaleDateString('es-CR'); clone.createdBy=currentUser?currentUser.name:'Sistema';
+  // El duplicado todavía no consumió nada de bodega — si conservara el bodegaConsumption del
+  // original, borrarlo más tarde devolvería stock que el original sigue reservando de verdad.
+  if(type==='requis') clone.bodegaConsumption=[];
   arr.push(clone);
   logAction(`${TXN_DEFS[type].label} "${tx.num}" duplicado`,'log-create',TXN_DEFS[type].label,null,{num:clone.num});
   saveData(); showToast('Duplicado: '+clone.num); renderGenericList(type);
@@ -10552,6 +10557,7 @@ function deleteGenericTxn(type,id){
   if(!confirm('¿Eliminar este registro?'))return;
   const def=TXN_DEFS[type], arr=txnArr(type);
   const tx=arr.find(x=>x.id===id);
+  if(type==='requis'&&tx) reqRestoreBodegaConsumption(tx.bodegaConsumption);
   logAction(`${def.label} "${tx?.num}" eliminada`,'log-delete',def.label,tx,null);
   curProj[def.key]=arr.filter(x=>x.id!==id);
   saveData(); curTxnId=null; renderTxnSub();
@@ -12698,9 +12704,13 @@ function openRequisicion(id){
   if(!reqState.lines)reqState.lines={};
   reqActiveTab='resumen'; renderRequisForm();
 }
+// NOTA DE ALCANCE: la requisición solo puede tirar de la bodega de SU PROPIO proyecto
+// (curProj.bodega), no de la bodega global (allBodega() sigue existiendo aparte, para la vista
+// general de Bodega). El material que llega a bodega vía Factura de Proveedor queda reservado al
+// proyecto de esa factura — una requisición del proyecto A no puede consumir stock del proyecto B.
 function reqBodegaItems(){
   const map={};
-  allBodega().forEach(b=>{
+  (curProj.bodega||[]).forEach(b=>{
     const k=b.name+'|'+(b.productId||'');
     if(!map[k]) map[k]={name:b.name,qty:0,price:0,unit:b.unit||'unid',productId:b.productId||''};
     map[k].qty+=(b.qty||0);
@@ -12709,13 +12719,16 @@ function reqBodegaItems(){
   Object.values(map).forEach(m=>{ m.fifoPrice=reqFIFOPrice(m.name,1); });
   return Object.values(map);
 }
+// Entradas de bodega de ESTE proyecto para un producto, con stock > 0, orden FIFO (más viejo primero).
+function reqProjBodegaEntries(productName){
+  return (curProj.bodega||[]).filter(b=>b.name===productName&&(b.qty||0)>0.0001)
+    .sort((a,b)=>(a.date||'').localeCompare(b.date||'')||String(a.id).localeCompare(String(b.id)));
+}
 // FIFO costing: returns unit price for consuming `qty` units of product `name`
 // Sorts bodega entries by date ascending (oldest first), consumes layers
 function reqFIFOPrice(productName, qty){
   if(!qty||qty<=0) return 0;
-  const entries=allBodega()
-    .filter(b=>b.name===productName&&(b.qty||0)>0)
-    .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const entries=reqProjBodegaEntries(productName);
   let remaining=qty, totalCost=0;
   for(const e of entries){
     if(remaining<=0) break;
@@ -12726,6 +12739,37 @@ function reqFIFOPrice(productName, qty){
   const consumed=qty-Math.max(0,remaining);
   return consumed>0?totalCost/consumed:0;
 }
+// Rebaja (mutando) curProj.bodega FIFO por `qty` unidades de `productName`. Devuelve el detalle de
+// lo consumido [{entryId,qty}] para poder revertirlo si la requisición se edita o elimina después.
+function reqConsumeBodegaFIFO(productName, qty){
+  const consumed=[]; let remaining=qty;
+  for(const e of reqProjBodegaEntries(productName)){
+    if(remaining<=0.0001) break;
+    const take=Math.min(remaining, e.qty||0);
+    e.qty=(e.qty||0)-take;
+    consumed.push({entryId:e.id, name:productName, qty:take});
+    remaining-=take;
+  }
+  return consumed;
+}
+// Revierte un consumo previo (al editar o eliminar una requisición): devuelve la cantidad a la
+// entrada de bodega original. Si la entrada ya no existe, no hace nada (caso raro/legacy).
+function reqRestoreBodegaConsumption(consumption){
+  (consumption||[]).forEach(c=>{
+    const e=(curProj.bodega||[]).find(x=>String(x.id)===String(c.entryId));
+    if(e) e.qty=(e.qty||0)+(c.qty||0);
+  });
+}
+// Stock disponible para ESTA requisición: el bodega real del proyecto, más lo que esta misma
+// requisición ya tenía reservado ANTES de esta edición (si no se suma, al reabrir una requisición
+// existente parecería que hay menos stock del que en realidad hay disponible para ajustar).
+function reqAvailableStock(productName){
+  const real=reqProjBodegaEntries(productName).reduce((s,e)=>s+(e.qty||0),0);
+  if(curTxnId==='new')return real;
+  const orig=(curProj.requis||[]).find(x=>x.id===curTxnId);
+  const already=((orig&&orig.bodegaConsumption)||[]).filter(c=>c.name===productName).reduce((s,c)=>s+(c.qty||0),0);
+  return real+already;
+}
 function reqPickHouse(houseId){
   if(reqState.houseIds.includes(houseId))return;
   reqState.houseIds.push(houseId);
@@ -12733,7 +12777,7 @@ function reqPickHouse(houseId){
   const h=curProj.houses.find(x=>String(x.id)===String(houseId));
   const t=h&&h.typeId?curProj.types.find(x=>x.id===h.typeId):null;
   const bodegaMap={}; // name → {qty, price, unit}
-  allBodega().forEach(b=>{ if(!bodegaMap[b.name])bodegaMap[b.name]={qty:0,price:b.price||0,unit:b.unit||'unid'}; bodegaMap[b.name].qty+=(b.qty||0); });
+  (curProj.bodega||[]).forEach(b=>{ if(!bodegaMap[b.name])bodegaMap[b.name]={qty:0,price:b.price||0,unit:b.unit||'unid'}; bodegaMap[b.name].qty+=(b.qty||0); });
   const autoLines=[];
   if(t&&t.categories){
     const xr=t.exchangeRate||curProj.exchangeRate||SYS.exchangeRate;
@@ -12792,11 +12836,27 @@ function saveRequisicion(){
   reqState.totalUSD=reqCalcTotal();
   reqState.lastModified=new Date().toLocaleString('es-CR');
   if(!curProj.requis)curProj.requis=[];
-  if(curTxnId==='new'){ curProj.requis.push(reqState); curTxnId=reqState.id;
+  if(!curProj.bodega)curProj.bodega=[];
+  const idx=curTxnId==='new'?-1:curProj.requis.findIndex(x=>x.id===curTxnId);
+  // Si es edición: primero se devuelve lo que esta MISMA requisición había consumido antes, para
+  // no descontar dos veces (ni perder cantidades si el usuario bajó una línea) al recalcular abajo.
+  if(idx>=0) reqRestoreBodegaConsumption(curProj.requis[idx].bodegaConsumption);
+  // Cantidad total por producto, sumada entre TODAS las casas de la requisición: el FIFO se aplica
+  // una sola vez por producto (no por línea/casa) para no romper el orden real de consumo.
+  const totalsByName={};
+  reqState.houseIds.forEach(hid=>(reqState.lines[hid]||[]).forEach(l=>{
+    if(!l.name||!(l.qty>0))return;
+    totalsByName[l.name]=(totalsByName[l.name]||0)+l.qty;
+  }));
+  const consumption=[];
+  Object.entries(totalsByName).forEach(([name,qty])=>{ consumption.push(...reqConsumeBodegaFIFO(name,qty)); });
+  reqState.bodegaConsumption=consumption;
+  if(idx>=0){ curProj.requis[idx]=reqState; }
+  else { curProj.requis.push(reqState); curTxnId=reqState.id;
     logAction(`Requisición "${reqState.num}" creada`,'log-create','Requisición',null,{});
-  } else { const idx=curProj.requis.findIndex(x=>x.id===curTxnId); if(idx>=0)curProj.requis[idx]=reqState; }
+  }
   autoStartProj(); curProj.lastActivity=Date.now(); saveData();
-  showToast('Requisición guardada'); renderRequisForm();
+  showToast('Requisición guardada · inventario de bodega actualizado'); renderRequisForm();
 }
 function renderRequisForm(){
   const p=curProj, st=reqState;
@@ -12822,8 +12882,6 @@ function renderRequisForm(){
       </div>`).join(''):'<div class="oc-empty-tbl">Agrega casas y materiales para ver el resumen.</div>'}`;
   } else {
     const hid=reqActiveTab; const lines=st.lines[hid]||[];
-    // Build bodega stock map
-    const stockMap={}; allBodega().forEach(b=>{if(!stockMap[b.name])stockMap[b.name]=0; stockMap[b.name]+=(b.qty||0);});
     if(!lines.length){
       bodyHtml=`<div style="padding:24px;text-align:center;color:var(--red);font-size:13px">
         ⚠ No hay materiales de bodega que coincidan con la lista de materiales de esta casa.<br>
@@ -12839,7 +12897,7 @@ function renderRequisForm(){
         <div class="oc-th r">Total</div>
       </div>
       ${lines.map((l,i)=>{
-        const stock=stockMap[l.name]||0;
+        const stock=l.name?reqAvailableStock(l.name):0;
         const maxQty=Math.min(stock, l.budQty||stock);
         const fifoP=l.name?reqFIFOPrice(l.name,Math.max(l.qty||1,1)):0;
         const dispPrice=fifoP>0?fifoP:(l.price||0);
@@ -13635,7 +13693,7 @@ function vbOutOfListCardHtml(card,ci){
         <input type="checkbox" ${checked?'checked':''} onchange="vbOutOfListToggleCard(${ci},this.checked)" style="width:auto;background:transparent;padding:0"/>
         ${esc(vbAssignLabel(a.houseId,a.projId))}
       </label>
-      ${checked?`<button class="btn-xsm" onclick="vbOutOfListAddSubLine(${ci})">+ Agregar línea</button>`:''}
+      ${checked?`<button class="btn-xsm" style="margin-left:0" onclick="vbOutOfListAddSubLine(${ci})">+ Agregar línea</button>`:''}
       <span style="margin-left:auto;font-size:11px;white-space:nowrap;color:${ok?'var(--grn)':'var(--red)'}">${ok?'✓ ':''}Asignado: ${sum.toFixed(2)}/${(a.qty||0).toFixed(2)}</span>
     </div>
     ${checked?`
@@ -14930,11 +14988,64 @@ async function qboFullSync(btn){
 //  BODEGA (inventario consolidado de todos los proyectos)
 // ════════════════════════════════════════════════════════════
 function allBodega(){ const arr=[]; projects.forEach(p=>{ (p.bodega||[]).forEach(b=>arr.push({...b,project:p.name})); }); return arr; }
+// Consolida entradas de bodega (de uno o varios proyectos) por producto — usado por la vista
+// general, la pestaña por proyecto, y los reportes imprimibles, para no repetir la lógica.
+function bodegaGroupRows(items){
+  const map={};
+  items.forEach(b=>{
+    const k=(b.name||'')+'|'+(b.productId||'');
+    if(!map[k])map[k]={name:b.name,productId:b.productId||'',qty:0,value:0,entries:[],vendors:[],projects:[]};
+    map[k].qty+=b.qty||0; map[k].value+=(b.qty||0)*(b.price||0); map[k].entries.push(b);
+    if(b.vendor&&!map[k].vendors.includes(b.vendor))map[k].vendors.push(b.vendor);
+    if(b.project&&!map[k].projects.includes(b.project))map[k].projects.push(b.project);
+  });
+  return Object.values(map);
+}
+// Reporte imprimible (mismo patrón que generateReport() — informe financiero del proyecto):
+// arma un HTML standalone en una ventana nueva y dispara window.print().
+function bodegaReportHtml(items,title,subtitle){
+  const rows=bodegaGroupRows(items).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const totalVal=rows.reduce((s,r)=>s+r.value,0);
+  const today=new Date().toLocaleDateString('es-CR');
+  const css=`
+    *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif;}
+    body{color:#1a2332;padding:28px;background:#fff;}
+    h1{font-size:20px;margin-bottom:2px;}
+    .meta{color:#5a6678;font-size:12px;margin-bottom:18px;}
+    table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px;}
+    th,td{border:1px solid #e6e6e6;padding:6px 9px;text-align:left;}th{background:#f4f6fa;font-size:11px;}
+    td.r,th.r{text-align:right;}
+    .tot{margin-top:14px;font-size:14px;font-weight:700;text-align:right;color:#d4941a;}
+    @media print{body{padding:0;}}
+  `;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${css}</style></head><body>
+    <h1>${esc(title)}</h1>
+    <div class="meta">${subtitle?esc(subtitle)+' · ':''}Generado: ${today}</div>
+    <table><thead><tr><th>Producto</th><th class="r">Existencia</th><th class="r">Costo prom.</th><th class="r">Valor</th><th>Proyecto(s)</th><th>Proveedor(es)</th></tr></thead>
+    <tbody>${rows.length?rows.map(r=>`<tr>
+      <td>${esc(r.name||'—')}</td>
+      <td class="r">${r.qty}</td>
+      <td class="r">${fmt(r.qty?r.value/r.qty:0)}</td>
+      <td class="r">${fmt(r.value)}</td>
+      <td style="font-size:10px">${esc(r.projects.join(', ')||'—')}</td>
+      <td style="font-size:10px">${esc(r.vendors.join(', ')||'—')}</td>
+    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;color:#9aa5b5;padding:20px">Sin productos.</td></tr>'}</tbody></table>
+    <div class="tot">Valor total: ${fmt(totalVal)}</div>
+  </body></html>`;
+}
+function printBodegaReport(items,title,subtitle){
+  const win=window.open('','_blank');
+  if(!win){ alert('Permite las ventanas emergentes para generar el reporte.'); return; }
+  win.document.open(); win.document.write(bodegaReportHtml(items,title,subtitle)); win.document.close();
+  setTimeout(()=>{ try{win.focus();win.print();}catch(e){} }, 350);
+  logAction('Reporte de inventario de bodega generado','log-create','Bodega',null,{title});
+}
 let bodegaAdjMode=false;
+let bodegaFilterProj='', bodegaFilterName='';
 function openBodegaWin(){
   if(fwinExists('bodega')){ fwinRestore('bodega'); return; }
-  bodegaAdjMode=false;
-  fwinOpen('bodega',{title:'Bodega — Inventario',width:860,height:600,dirtyFn:()=>false,
+  bodegaAdjMode=false; bodegaFilterProj=''; bodegaFilterName='';
+  fwinOpen('bodega',{title:'Bodega General — Inventario',width:920,height:600,dirtyFn:()=>false,
     bodyHTML:'<div id="bodega-body"></div>',
     footerHTML:`<button class="btn-cancel" onclick="fwinClose('bodega',true)">Cerrar</button>${currentUser&&currentUser.role==='Administrador'?`<button onclick="bodegaToggleAdj()" style="background:transparent;border:1px solid var(--amb);color:var(--amb);border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer" id="bodega-adj-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.2"/><line x1="20" y1="12" x2="22.3" y2="12"/><line x1="16" y1="18.93" x2="17.15" y2="21"/><line x1="8" y1="18.93" x2="6.85" y2="21"/><line x1="4" y1="12" x2="1.7" y2="12"/><line x1="8" y1="5.07" x2="6.85" y2="3"/><line x1="16" y1="5.07" x2="17.15" y2="3"/></svg> Ajuste de Inventario</button>`:''}`});
   renderBodegaBody();
@@ -14952,26 +15063,83 @@ function bodegaAdjSave(entryId,val){
     if(item){ item.qty=Math.max(0,parseFloat(val)||0); saveData(); renderBodegaBody(); return; }
   }
 }
+function bodegaGeneralFilteredItems(){
+  return allBodega().filter(b=>(b.qty||0)>0.0001
+    && (!bodegaFilterProj||b.project===bodegaFilterProj)
+    && (!bodegaFilterName||(b.name||'').toLowerCase().includes(bodegaFilterName.toLowerCase())));
+}
 function renderBodegaBody(){
   const el=document.getElementById('bodega-body'); if(!el)return;
-  const items=allBodega();
-  const map={};
-  items.forEach(b=>{ const k=(b.name||'')+'|'+(b.productId||''); if(!map[k])map[k]={name:b.name,qty:0,value:0,entries:[],vendors:[]}; map[k].qty+=b.qty||0; map[k].value+=(b.qty||0)*(b.price||0); map[k].entries.push(b); if(b.vendor&&!map[k].vendors.includes(b.vendor))map[k].vendors.push(b.vendor); });
-  const rows=Object.values(map);
+  const allItems=allBodega().filter(b=>(b.qty||0)>0.0001);
+  const projNames=[...new Set(allItems.map(b=>b.project))].sort();
+  const filtered=bodegaGeneralFilteredItems();
+  const rows=bodegaGroupRows(filtered).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   const totalVal=rows.reduce((s,r)=>s+r.value,0);
+  const reportTitle='Inventario'+(bodegaFilterProj?(' — '+bodegaFilterProj):' General')+' de Bodega';
   el.innerHTML=`
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <select style="font-size:12px" onchange="bodegaFilterProj=this.value;renderBodegaBody()">
+        <option value="">Todos los proyectos</option>
+        ${projNames.map(pn=>`<option value="${esc(pn)}" ${bodegaFilterProj===pn?'selected':''}>${esc(pn)}</option>`).join('')}
+      </select>
+      <input type="text" placeholder="Buscar material..." value="${esc(bodegaFilterName)}" style="font-size:12px;flex:1;min-width:140px" oninput="bodegaFilterName=this.value;renderBodegaBody()"/>
+      <button class="btn-history" onclick="printBodegaReport(bodegaGeneralFilteredItems(),'${esc(reportTitle)}',${bodegaFilterName?`'Filtrado por: ${esc(bodegaFilterName)}'`:'null'})">Imprimir</button>
+    </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:12px;color:var(--t2)">${rows.length} producto(s) en inventario${bodegaAdjMode?` <span style="color:var(--amb);font-weight:600">· Modo Ajuste Activo</span>`:''}</div>
+      <div style="font-size:12px;color:var(--t2)">${rows.length} producto(s)${bodegaFilterProj?' en '+esc(bodegaFilterProj):' en todos los proyectos'}${bodegaAdjMode?` <span style="color:var(--amb);font-weight:600">· Modo Ajuste Activo</span>`:''}</div>
       <div style="font-size:14px;font-weight:700;color:var(--amb)">Valor total: ${fmt(totalVal)}</div>
     </div>
-    <table class="sheet"><thead><tr><th>Producto</th><th class="num">Existencia</th><th class="num">Costo prom.</th><th class="num">Valor</th><th>Proveedor</th></tr></thead>
+    <table class="sheet"><thead><tr><th>Producto</th><th class="num">Existencia</th><th class="num">Costo prom.</th><th class="num">Valor</th><th>Proyecto(s)</th><th>Proveedor</th></tr></thead>
     <tbody>${rows.length?rows.map(r=>`<tr>
-      <td>${r.name||'—'}</td>
-      <td class="num">${bodegaAdjMode?r.entries.map(e=>`<input type="number" value="${e.qty}" min="0" step="0.01" style="width:60px;font-size:11px;text-align:right" onchange="bodegaAdjSave('${e.id}',this.value)" title="${e.project||''}" />`).join(' '):`${r.qty}`}</td>
+      <td>${esc(r.name||'—')}</td>
+      <td class="num">${bodegaAdjMode?r.entries.map(e=>`<input type="number" value="${e.qty}" min="0" step="0.01" style="width:60px;font-size:11px;text-align:right" onchange="bodegaAdjSave('${e.id}',this.value)" title="${esc(e.project||'')}" />`).join(' '):`${r.qty}`}</td>
       <td class="num">${fmt(r.qty?r.value/r.qty:0)}</td>
       <td class="num" style="color:var(--amb)">${fmt(r.value)}</td>
-      <td style="font-size:10px;color:var(--t3)">${r.vendors.length?r.vendors.join(', '):r.entries.map(e=>e.project).filter((v,i,a)=>a.indexOf(v)===i).join(', ')||'—'}</td>
-    </tr>`).join(''):'<tr><td colspan="5" style="text-align:center;color:var(--t3);padding:20px">Sin productos en bodega.</td></tr>'}</tbody></table>`;
+      <td style="font-size:10px;color:var(--t3)">${esc(r.projects.join(', ')||'—')}</td>
+      <td style="font-size:10px;color:var(--t3)">${r.vendors.length?esc(r.vendors.join(', ')):'—'}</td>
+    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;color:var(--t3);padding:20px">Sin productos en bodega.</td></tr>'}</tbody></table>`;
+}
+// ── Bodega POR PROYECTO (pestaña, entre Lista de Materiales y Cronograma Gantt) ──
+let bodegaProjFilter='';
+function bodegaProjFilteredItems(){
+  const items=(curProj.bodega||[]).filter(b=>(b.qty||0)>0.0001);
+  return bodegaProjFilter?items.filter(b=>(b.name||'').toLowerCase().includes(bodegaProjFilter.toLowerCase())):items;
+}
+function renderProjBodegaTab(){
+  const p=curProj;
+  const rows=bodegaGroupRows(bodegaProjFilteredItems()).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const totalVal=rows.reduce((s,r)=>s+r.value,0);
+  document.getElementById('content').innerHTML=`
+    <div class="th-row">
+      <div class="th-title">Bodega — ${esc(p.name)}</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" placeholder="Buscar material..." value="${esc(bodegaProjFilter)}" style="font-size:12px;width:180px" oninput="bodegaProjFilter=this.value;renderProjBodegaTab()"/>
+        <button class="btn-history" onclick="printBodegaReport(bodegaProjFilteredItems(),'Inventario de Bodega — ${esc(p.name)}',${bodegaProjFilter?`'Filtrado por: ${esc(bodegaProjFilter)}'`:'null'})">Imprimir</button>
+        <button class="btn-add" onclick="bodegaProjNewRequisicion()">+ Nueva Requisición</button>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Material asignado a "Bodega" desde Facturas de Proveedor de este proyecto. Queda reservado para este proyecto — se retira con una Requisición.</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:12px;color:var(--t2)">${rows.length} producto(s) en bodega de este proyecto</div>
+      <div style="font-size:14px;font-weight:700;color:var(--amb)">Valor total: ${fmt(totalVal)}</div>
+    </div>
+    <table class="sheet"><thead><tr><th>Producto</th><th class="num">Existencia</th><th class="num">Costo prom.</th><th class="num">Valor</th><th>Proveedor</th><th>Facturas de origen</th></tr></thead>
+    <tbody>${rows.length?rows.map(r=>{
+      const bills=[...new Set(r.entries.map(e=>e.billId).filter(Boolean))];
+      return `<tr>
+      <td>${esc(r.name||'—')}</td>
+      <td class="num">${r.qty}</td>
+      <td class="num">${fmt(r.qty?r.value/r.qty:0)}</td>
+      <td class="num" style="color:var(--amb)">${fmt(r.value)}</td>
+      <td style="font-size:10px;color:var(--t3)">${r.vendors.length?esc(r.vendors.join(', ')):'—'}</td>
+      <td style="font-size:10px;color:var(--t3)">${bills.length} factura(s)</td>
+    </tr>`;}).join(''):'<tr><td colspan="6" style="text-align:center;color:var(--t3);padding:20px">Sin materiales en bodega. Se llena al asignar líneas de Factura de Proveedor a "Bodega".</td></tr>'}</tbody></table>`;
+}
+function bodegaProjNewRequisicion(){
+  curTab='txn'; curTxnTab='requis';
+  renderBreadcrumb();
+  renderTab();
+  newRequisicion();
 }
 
 // ════════════════════════════════════════════════════════════
