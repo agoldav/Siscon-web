@@ -8670,9 +8670,9 @@ function duplicateVendorBill(id){
   logAction(`Factura de Proveedor "${vb.num}" duplicada`,'log-create','Factura de Proveedor',null,{num:clone.num});
   saveData(); showToast('Duplicada: '+clone.num); renderGenericList('proveedor');
 }
-function showToast(msg){
+function showToast(msg,durationMs){
   const t=document.getElementById('save-toast');
-  if(t){t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2000);}
+  if(t){t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),durationMs||2000);}
 }
 
 // ========== NOTIFICATION CENTER ==========
@@ -13847,7 +13847,7 @@ function vbRequestMatAuthMulti(){
     });
     window._vbOutOfListCtx=null;
     closeModal();
-    showToast('✅ Aplicado — el destino elegido ya no necesitaba autorización');
+    showToast('✅ Aplicado — el destino elegido ya no necesitaba autorización',4000);
     renderVendorBill();
     return;
   }
@@ -13892,7 +13892,11 @@ async function vbSubmitMatAuthMulti(){
     comment:reason,
   };
   let req;
-  try{ req=await pendingAuthCreate(reqLocal); }catch(err){ showToast('No se pudo enviar la solicitud: '+err.message); return; }
+  // alert() (no solo toast) a propósito: la ventana sigue abierta con el motivo escrito si esto
+  // falla, y un toast de 2s es fácil de no notar en medio del flujo — se perdía la solicitud en
+  // silencio si pendingAuthCreate fallaba (backend caído, token vencido, etc.) sin que el usuario
+  // se enterara de que nada se había guardado todavía.
+  try{ req=await pendingAuthCreate(reqLocal); }catch(err){ console.error('vbSubmitMatAuthMulti',err); alert('No se pudo enviar la solicitud de autorización: '+err.message+'\n\nNada se guardó todavía — revisa tu conexión e intenta enviarla de nuevo.'); return; }
   // Reparte l.assign entre lo que ya se puede aplicar directo (bodega / casas ya presupuestadas)
   // y lo que queda authPending — vbApplyToHouses() se salta las filas authPending: esa compra
   // solo la crea applyApprovedVbExtra() cuando el admin aprueba, para no contarla dos veces.
@@ -13904,7 +13908,7 @@ async function vbSubmitMatAuthMulti(){
   });
   window._vbOutOfListCtx=null;
   closeModal();
-  showToast('✅ Solicitud enviada al administrador');
+  showToast('✅ Solicitud enviada al administrador — revisa Notificaciones (🔔) para verla como pendiente',4000);
   logAction(`Solicitud de material fuera de lista "${l.desc}" enviada`,'log-create','Factura de Proveedor',null,{name:l.desc,lines:lines.map(x=>({house:x.houseName,qty:x.qty,substitutesName:x.substitutesName,substitutesQty:x.substitutesQty})),comment:reason});
   // Si el admin está en sesión ahora mismo, mostrar el popup directamente
   if(currentUser&&(currentUser.role==='Administrador'||currentUser.role==='Supervisor')){
