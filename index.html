@@ -3063,6 +3063,7 @@ let curTxnTab='oc',curTxnType=null,curTxnId=null,txnState={};
 let houseFilter='Todos',houseSortCol=null,houseSortAsc=true;
 let chatOpen=false,chatMsgs=[{r:'a',t:'¡Hola! Soy el asistente de Siscon. ¿En qué puedo ayudarte?'}],chatLoading=false;
 let ctMats=[], ctForm={}, ctCategories=[], showCreate=false, typeEditId=null, ctIVA=false;
+let showIVAPrices=false;   // toggle de visualización: Precio de Venta con/sin IVA (tarjetas de tipo + barra superior). No persiste.
 let garBudgetGid=null;   // id de garantía cuando el editor de "Tipo" se usa como presupuesto de garantía
 let dashSort='alpha-asc';
 let hpSnapshot=null;
@@ -4236,6 +4237,14 @@ function renderMetric(){
     ?`<div class="pm-v" title="${esc(shown)}">${esc(shown)}</div>`
     :inp(raw,key,type)}</div>`;
   const ro=(label,val,cls='',sub='')=>`<div class="pm-f"><div class="pm-l">${label}</div><div class="pm-v ${cls}" title="${esc(val)}">${esc(val)}</div>${sub?`<div class="pm-sub">${esc(sub)}</div>`:''}</div>`;
+  // Precio de Venta: editable sin IVA por defecto; con el toggle activo se muestra el monto
+  // con 13% de IVA, solo lectura (el valor guardado siempre es la base sin IVA).
+  const saleCell=showIVAPrices
+    ?ro('Precio de Venta',fmt(p.salePrice*1.13),'','Incluye IVA 13%')
+    :efld('Precio de Venta',fmt(p.salePrice),p.salePrice,'salePrice','number','130px');
+  const ivaToggle=`<label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t2);cursor:pointer;align-self:flex-end;padding-bottom:4px">
+      <input type="checkbox" ${showIVAPrices?'checked':''} onchange="showIVAPrices=this.checked;renderMetric();if(curTab==='tipos')renderTypes();" style="width:auto"/>Ver con IVA (13%)
+    </label>`;
 
   // ---- Banda 1: identidad del proyecto ----
   const BLD_ICON=`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4v18"/><path d="M12 21V9l7 3v9"/><path d="M8 9h.01M8 13h.01M8 17h.01M15.5 14h.01M15.5 17.5h.01"/></svg>`;
@@ -4309,7 +4318,8 @@ function renderMetric(){
         ${fechaCell}
       </div>
       <div class="pm-band" style="gap:26px;align-items:flex-start">
-        ${efld('Precio de Venta',fmt(p.salePrice),p.salePrice,'salePrice','number','130px')}
+        ${saleCell}
+        ${ivaToggle}
         ${efld('Presupuesto',fmt(p.budget),p.budget,'budget','number','130px')}
         ${ro('Costo Real',fmt(realSpent),'',`Facturas sin IVA ${fmt(spentBreakdown.vendorBills)} + ${spentBreakdown.inventoryReceipts} recibo(s) QBO FIFO ${fmt(spentBreakdown.inventoryCogs)}${Math.abs(spentBreakdown.otherQboCosts)>0.005?' + otros costos/ajustes QBO '+fmt(spentBreakdown.otherQboCosts):''}${spentBreakdown.pendingInventoryReceipts?' · '+spentBreakdown.pendingInventoryReceipts+' pendiente(s) de costo':''}`)}
         ${ro('Disponible',fmt(avail),avail>=0?'grn':'red')}
@@ -4454,7 +4464,7 @@ function renderTypes(){
             <button title="Duplicar tipo" onclick="duplicateType(${t.id})" style="background:transparent;border:none;color:var(--t3);font-size:14px;padding:2px 4px;cursor:pointer;border-radius:5px" onmouseenter="this.style.color='var(--acc)'" onmouseleave="this.style.color='var(--t3)'">⧉</button>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;cursor:pointer" onclick="openCreateType(${t.id})">
-            ${[['Área',t.area+' m²'],['Presupuesto',fmt(t.budget)],['Precio Venta',fmt(t.salePrice)],['% Utilidad',pct(t.utilityPct)]].map(([l,v])=>`
+            ${[['Área',t.area+' m²'],['Presupuesto',fmt(t.budget)],['Precio Venta',fmt(showIVAPrices?t.salePrice*1.13:t.salePrice)],['% Utilidad',pct(t.utilityPct)]].map(([l,v])=>`
               <div style="background:var(--bg3);border-radius:7px;padding:7px">
                 <div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">${l}</div>
                 <div style="font-size:12px;font-weight:500;color:var(--t1)">${v}</div>
