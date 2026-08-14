@@ -10322,10 +10322,13 @@ function txnRowHtml(type,tx,def,vendorLike,openCall,dupCall,delCall){
     ? `<span style="font-size:12px;font-weight:600;color:var(--org)">₡${totalCRCdisp.toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
        <span style="font-size:10px;color:var(--t3)">${fmt(totalUSDdisp)} USD</span>`
     : `<span style="font-size:12px;font-weight:600;color:var(--grn)">${fmt(tx.totalUSD||0)}</span>`;
-  return `<div class="oc-list-item" onclick="${openCall}" style="${tx._pending?'border-left:3px solid var(--red)':''}">
-    <span class="oc-num-badge" style="color:${def.color}${vendorLike?';min-width:190px;text-align:right;flex-shrink:0':''}">${esc(vendorLike&&tx.invoiceNumber?tx.invoiceNumber:tx.num)}</span>
+  const borderStyle=tx._pending?'border-left:3px solid var(--red)':(tx._resolvedByReview?'border-left:3px solid var(--grn)':'');
+  const badgesHtml=`${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'&&tx.pendingClassification?`<span title="Hay líneas sin casa asignada" style="background:var(--amb);color:#1a1200;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">PENDIENTE DE CLASIFICAR</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}${type==='pagos'&&tx.paymentDirection?`<span style="font-size:9px;font-weight:700;color:${tx.paymentDirection==='received'?'var(--grn)':'var(--org)'}">${tx.paymentDirection==='received'?'RECIBIDO QB':'PAGADO QB'}</span>`:''}`;
+  return `<div class="oc-list-item" onclick="${openCall}" style="${borderStyle}">
+    ${vendorLike?'':`<span class="oc-num-badge" style="color:${def.color}">${esc(tx.num)}</span>`}
     <div style="flex:1;min-width:0">
-      <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'&&tx.pendingClassification?`<span title="Hay líneas sin casa asignada" style="background:var(--amb);color:#1a1200;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">PENDIENTE DE CLASIFICAR</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}${type==='pagos'&&tx.paymentDirection?`<span style="font-size:9px;font-weight:700;color:${tx.paymentDirection==='received'?'var(--grn)':'var(--org)'}">${tx.paymentDirection==='received'?'RECIBIDO QB':'PAGADO QB'}</span>`:''}</div>
+      ${vendorLike?`<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px"><span style="font-size:11px;font-weight:600;color:var(--t1)">Factura: ${esc(tx.invoiceNumber||tx.num)}</span>${badgesHtml}</div>`:''}
+      <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${vendorLike?'':badgesHtml}</div>
       <div style="font-size:10px;color:${vendorLike&&tx.qboProjectPresence==='missing'?'var(--red)':'var(--t2)'};margin-top:2px">${vendorLike&&tx.qboProjectPresence==='missing'?`⚠ ${esc(tx.qboPresenceMessage||'No se encuentra en este proyecto de QuickBooks')}`:`${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.qboEntity==='SalesReceipt'?' · Recibo de venta QBO':''}${tx.qboMultiProject?' · Parte de factura multiproyecto':''}${tx.consecutivo?' · Consec: '+esc(tx.consecutivo):''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}`}</div>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
@@ -13695,7 +13698,10 @@ function vbOutOfListSubLineDestBudgeted(l,sl){
 function vbShowMatOutOfList(lineIdx, assignments){
   window._vbOutOfListCtx={
     lineIdx,
-    cards: assignments.map(a=>({ a, checked:true, subLines:[{qty:a.qty||0, houseId:a.houseId, projId:a.projId, substitutesName:'', substitutesQty:null}] })),
+    // Si esta fila ya se había dividido/sustituido antes (guardada en `a.substitutesName` /
+    // `a.substitutesQty`), se retoma desde ahí en vez de arrancar en blanco — antes se perdía la
+    // sustitución elegida cada vez que se reabría "Asignar" para esta línea.
+    cards: assignments.map(a=>({ a, checked:true, subLines:[{qty:a.qty||0, houseId:a.houseId, projId:a.projId, substitutesName:a.substitutesName||'', substitutesQty:a.substitutesQty!=null?a.substitutesQty:null}] })),
   };
   vbRenderMatOutOfList();
 }
@@ -13745,12 +13751,17 @@ function vbOutOfListCardHtml(l,card,ci){
 function vbRenderMatOutOfList(){
   const ctx=window._vbOutOfListCtx; if(!ctx)return;
   const l=vbState.lines[ctx.lineIdx];
+  // Cada onchange de un campo re-dibuja todo el modal (innerHTML completo); sin esto, el div
+  // scrolleable se recrea desde cero y vuelve a scrollTop=0 — se sentía como "brinca arriba" al
+  // salir de un campo con click en otro lado.
+  const prevScrollBox=document.getElementById('vb-ool-scroll');
+  const prevScrollTop=prevScrollBox?prevScrollBox.scrollTop:0;
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--red)">⚠ Producto fuera de lista<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="font-size:13px;color:var(--t1);margin-bottom:10px;line-height:1.5">
       Este producto (<strong>${esc(l.desc||'producto')}</strong>) no se encuentra dentro de la lista de materiales de las casas. Podés dividir la cantidad en varias líneas — cada una con su propio destino (casa, proyecto o bodega) y, si aplica, el material que sustituye.
     </div>
-    <div style="max-height:400px;overflow:auto;margin-bottom:10px">
+    <div id="vb-ool-scroll" style="max-height:400px;overflow:auto;margin-bottom:10px">
       ${ctx.cards.map((card,ci)=>vbOutOfListCardHtml(l,card,ci)).join('')}
     </div>
     <div style="font-size:11px;color:var(--t3);margin-bottom:4px">Las casas sin marcar quedan sin resolver; hay que solicitar autorización aparte para ellas.</div>
@@ -13761,6 +13772,8 @@ function vbRenderMatOutOfList(){
   const modalEl=document.getElementById('modal');
   modalEl.dataset.noOutsideClose='1';
   modalEl.classList.remove('hidden');
+  const newScrollBox=document.getElementById('vb-ool-scroll');
+  if(newScrollBox) newScrollBox.scrollTop=prevScrollTop;
 }
 function vbOutOfListToggleCard(ci,checked){
   const ctx=window._vbOutOfListCtx; if(!ctx)return;
@@ -13852,7 +13865,7 @@ function vbRequestMatAuthMulti(){
     // Ningún destino necesita aprobación (todo va a bodega o a casas ya presupuestadas): se
     // aplica directo, sin pedir motivo ni pasar por el administrador.
     checked.forEach(card=>{
-      const rows=card.subLines.map(sl=>({houseId:sl.houseId,projId:sl.projId,qty:sl.qty}));
+      const rows=card.subLines.map(sl=>({houseId:sl.houseId,projId:sl.projId,qty:sl.qty,substitutesName:sl.substitutesName||null,substitutesQty:sl.substitutesName?(sl.substitutesQty||0):null}));
       vbOutOfListReplaceCardAssign(l,card,rows);
     });
     window._vbOutOfListCtx=null;
@@ -13896,6 +13909,7 @@ async function vbSubmitMatAuthMulti(){
     projId:curProj?curProj.id:null,
     projName:curProj?curProj.name:'',
     vbNum:vbState?vbState.num:'',
+    billId:vbState?vbState.id:null, lineIdx:ctx.lineIdx,
     matName:l.desc||'', productId:l.productId||0, unit:'unid',
     price:l.price||0,
     lines,
@@ -13912,8 +13926,8 @@ async function vbSubmitMatAuthMulti(){
   // solo la crea applyApprovedVbExtra() cuando el admin aprueba, para no contarla dos veces.
   ctx.checkedCards.forEach(card=>{
     const rows=card.subLines.map(sl=>vbOutOfListSubLineDestBudgeted(l,sl)
-      ?{houseId:sl.houseId,projId:sl.projId,qty:sl.qty}
-      :{houseId:sl.houseId,projId:sl.projId,qty:sl.qty,authPending:true,authReqId:req.id});
+      ?{houseId:sl.houseId,projId:sl.projId,qty:sl.qty,substitutesName:sl.substitutesName||null,substitutesQty:sl.substitutesName?(sl.substitutesQty||0):null}
+      :{houseId:sl.houseId,projId:sl.projId,qty:sl.qty,authPending:true,authReqId:req.id,substitutesName:sl.substitutesName||null,substitutesQty:sl.substitutesName?(sl.substitutesQty||0):null});
     vbOutOfListReplaceCardAssign(l,card,rows);
   });
   window._vbOutOfListCtx=null;
@@ -13960,6 +13974,20 @@ function applyApprovedVbExtra(req){
     }
     ok=true;
   });
+  // Sincroniza la factura de origen: quita el authPending de las filas recién aprobadas y, si no
+  // queda ninguna otra solicitud abierta en esa factura, apaga "NUEVO" (raya roja → verde).
+  if(ok&&req.billId){
+    const bp=projects.find(p=>String(p.id)===String(req.projId))||curProj;
+    const bill=bp&&(bp.billVendor||[]).find(b=>String(b.id)===String(req.billId));
+    const line=bill&&Number.isInteger(req.lineIdx)?bill.lines[req.lineIdx]:null;
+    if(line&&line.assign){
+      line.assign.forEach(a=>{ if(a.authPending&&a.authReqId===req.id){ delete a.authPending; delete a.authReqId; } });
+    }
+    if(bill){
+      const stillOpen=(bill.lines||[]).some(x=>(x.assign||[]).some(a=>a.authPending));
+      if(!stillOpen){ if(bill._pending)bill._resolvedByReview=true; bill._pending=false; }
+    }
+  }
   return ok;
 }
 function vbHouseProductQtyOtherLines(idx,houseId,line){
@@ -14167,7 +14195,13 @@ function saveVendorBill(sync){
   const arr=txnArr('proveedor');
   const data=JSON.parse(JSON.stringify(st));
   data.status=st.status==='Borrador'?'Registrada':st.status;
-  data.lastModified=new Date().toLocaleString('es-CR'); data._pending=false;
+  data.lastModified=new Date().toLocaleString('es-CR');
+  // No apagar "NUEVO" todavía si queda una línea esperando aprobación de material fuera de lista
+  // (vbSubmitMatAuthMulti) — el badge/raya roja se apaga recién cuando se aprueba (o se resuelve
+  // directo) esa solicitud, en applyApprovedVbExtra.
+  const hasOpenMatAuth=data.lines.some(l=>(l.assign||[]).some(a=>a.authPending));
+  if(data._pending&&!hasOpenMatAuth) data._resolvedByReview=true;
+  data._pending=hasOpenMatAuth?true:false;
   if(data.houseAssignmentRequired){data.houseAssignmentRequired=false;data.houseAssignmentCompletedAt=new Date().toISOString();}
   // Facturas guardadas con líneas sin casa asignada quedan "pendientes de clasificar": el digest
   // diario (backend, cron) las lista agrupadas por proyecto hasta que alguien complete la asignación.
