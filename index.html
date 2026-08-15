@@ -10440,6 +10440,12 @@ function setTxnTab(k){
   renderTxnSub();
 }
 function renderTxnSub(){ if(curTxnTab==='oc') renderOCList(); else renderGenericList(curTxnTab); updateBadges(); }
+// true si hay una OC u otra transacción individual abierta para editar dentro de la pestaña
+// Transacciones. Los pollers en segundo plano (qboFullSync cada 5 min, msPollPending cada 2 min
+// tras un scan de Outlook) antes volvían a pintar la lista sin fijarse en esto — si llegaba data
+// nueva mientras el usuario editaba una OC/Factura/Pago, la pantalla saltaba a la lista sin avisar
+// y se perdía lo que llevaba escrito sin guardar.
+function txnEditOpen(){ return curTab==='txn'&&!!(curOCId||curTxnId); }
 
 // ---- Fila genérica de transacción (reutilizada por listas + secciones inyectadas) ----
 function txnRowHtml(type,tx,def,vendorLike,openCall,dupCall,delCall){
@@ -14754,8 +14760,10 @@ async function msPollPending(){
       if(imported)addNotif(`✓ ${imported} factura(s) importada(s) desde Outlook`);
       if(merged)addNotif(`✓ ${merged} factura(s) de Outlook unificada(s) sin duplicar`);
       updateBadges();
+      // Igual que en qboFullSync: no pisar una OC/transacción abierta editándose. Este poll corre
+      // automático cada 2 min tras un scan de Outlook.
       if(!curProj){ renderDash(); }
-      else if(curTab==='txn'){ renderTxnSub(); }
+      else if(curTab==='txn'){ if(!txnEditOpen()) renderTxnSub(); }
       else if(curTab==='docs'){ renderDocs(); }
     }
   }catch(e){console.warn('msPollPending error',e);}
@@ -15224,7 +15232,9 @@ async function qboFullSync(btn){
     saveData();
     // Refrescar siempre la vista visible: curTab conserva su valor al volver al
     // dashboard y antes podía dejar los totales anteriores en pantalla hasta recargar.
-    if(curProj){renderMetric();renderTab();}
+    // Excepción: si hay una OC/transacción abierta editándose, no pisarla (solo badges) — este
+    // sync corre automático cada 5 min y antes botaba al usuario a la lista sin avisar.
+    if(curProj){renderMetric(); if(!txnEditOpen())renderTab();}
     else renderDash();
     updateBadges();
     const msg=[];
