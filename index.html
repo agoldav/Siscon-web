@@ -8615,7 +8615,9 @@ async function ocSendToQBO(){
   const btn=document.getElementById('oc-send-qbo-btn');
   if(btn){ btn.disabled=true; btn.textContent='Enviando…'; }
   try{
-    const oc=ocSaveSilent(); // asegura que Supabase tenga la versión más reciente antes de que el backend la lea
+    const oc=ocSaveSilent();
+    const savedOk=await saveData(); // esperar a que la fila llegue a Supabase antes de pedirle al backend que la lea (ocSaveSilent dispara el guardado pero no lo espera)
+    if(savedOk===false) throw new Error('No se pudo guardar la OC en Supabase antes de enviarla.');
     const r=await fetch(backendUrl()+'/api/qbo/purchase-orders',{
       method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(_sbToken||'')},
