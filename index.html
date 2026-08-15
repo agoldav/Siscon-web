@@ -8590,6 +8590,11 @@ async function ocSyncOCRowOnly(oc){
     const ok=await saveData();
     return ok!==false;
   }
+  // Si un saveData() completo ya está en curso (p.ej. disparado por un "Guardar" momentos antes,
+  // todavía resolviendo en segundo plano), esperarlo primero — si no, los dos intentan escribir
+  // esta misma fila con la misma expected_updated_at y el que llega segundo choca contra el
+  // primero como si fuera "otro usuario", cuando en realidad es este mismo navegador dos veces.
+  if(_saveInFlight) await _saveInFlight.catch(()=>{});
   const id=String(oc.id);
   const payload=_transactionCloudPayload(oc,curProj.id,'oc');
   const snap=_snapshot(payload);
@@ -8600,8 +8605,20 @@ async function ocSyncOCRowOnly(oc){
     return true;
   }
   if(_transactionSnapshots.get(id)===snap) return true; // sin cambios, ya está al día
-  const body={...payload,replace_data:true,expected_updated_at:_transactionVersions.get(id)};
-  let {resp,data}=await _dbRowRequest('PUT',`/api/db/transactions/${encodeURIComponent(id)}`,body);
+  const putOnce=()=>_dbRowRequest('PUT',`/api/db/transactions/${encodeURIComponent(id)}`,
+    {...payload,replace_data:true,expected_updated_at:_transactionVersions.get(id)});
+  let {resp,data}=await putOnce();
+  if(resp.status===409||resp.status===428){
+    // Con un solo usuario en esta OC, un 409 acá casi siempre es la misma pestaña escribiendo dos
+    // veces (ver el wait de arriba) — se refresca la versión real del servidor y se reintenta UNA
+    // vez en silencio antes de mostrarle al usuario el diálogo de "otro usuario", que confunde más
+    // de lo que ayuda cuando en realidad nadie más tocó nada.
+    const {resp:getResp,data:current}=await _dbRowRequest('GET',`/api/db/transactions/${encodeURIComponent(id)}`);
+    if(getResp.ok&&current&&current.updated_at){
+      _transactionVersions.set(id,current.updated_at);
+      ({resp,data}=await putOnce());
+    }
+  }
   if(resp.status===409||resp.status===428){
     data=await _handleRowConflict('esta OC',id,payload,`/api/db/transactions/${encodeURIComponent(id)}`);
     if(!data)return false;
