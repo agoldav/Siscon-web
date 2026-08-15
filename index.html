@@ -7357,10 +7357,7 @@ function renderOCForm(){
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
       <button class="btn-cancel" onclick="curOCId=null;renderOCList()">← Volver</button>
       <div class="th-title">${curOCId==='new'?'Nueva Orden de Compra':'Editar Orden de Compra'}</div>
-      ${curOCId!=='new'?(ocState.qboPOId
-        ?`<span class="qbo-badge">✓ #QB ${esc(String(ocState.qboPOId))}</span>`
-        :`<button id="oc-send-qbo-btn" onclick="ocSendToQBO()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:8px;padding:6px 12px;font-size:11px;cursor:pointer">Enviar a QuickBooks</button>`)
-        :''}
+      <span id="oc-qbo-title-badge">${ocQboTitleBadgeHTML()}</span>
     </div>
     <div class="oc-form-wrap">
 
@@ -7521,11 +7518,11 @@ function renderOCForm(){
       <!-- Acciones -->
       <div class="oc-form-actions">
         <button class="btn-cancel" onclick="curOCId=null;renderOCList()">Cancelar</button>
-        <div class="oc-qbo-note">${curOCId==='new'?'Guarda la OC para poder enviarla a QuickBooks.':(ocState.qboPOId?'Esta OC ya fue enviada a QuickBooks.':'La OC está guardada en Siscon. Usa "Enviar a QuickBooks" arriba para crear la orden de compra en QB.')}${curOCId!=='new'?` <span style="color:var(--t3)">|</span> <a onclick="deleteOC('${curOCId}')" style="color:var(--red);cursor:pointer;text-decoration:underline">Eliminar</a>`:''}</div>
+        <div class="oc-qbo-note" id="oc-qbo-footer-note">${ocQboFooterNoteHTML()}</div>
         <div style="display:flex;gap:8px;align-items:center">
           <span id="oc-convert-btn-wrap">${curOCId!=='new'&&!ocState.qboBillId?`<button onclick="ocOpenBillModal()" style="background:transparent;border:1px solid var(--org);color:var(--org);border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer">Convertir en Factura de Gasto</button>`:''}</span>
           <div class="split-btn-oc">
-            <button class="split-main-oc" onclick="ocSaveSilent();showToast('OC guardada');ocRefreshConvertBtn()">Guardar</button>
+            <button class="split-main-oc" onclick="ocSaveSilent();showToast('OC guardada');ocRefreshConvertBtn();ocRefreshQboUI()">Guardar</button>
             <button class="split-arrow-oc" onclick="event.stopPropagation();ocSplitOpen=!ocSplitOpen;document.getElementById('oc-split-drop').classList.toggle('open',ocSplitOpen)">▾</button>
             <div class="split-drop-oc" id="oc-split-drop">
               <button class="split-opt-oc" onclick="ocSaveClose()">Guardar y Cerrar</button>
@@ -8584,6 +8581,23 @@ function ocRefreshConvertBtn(){
     ?`<button onclick="ocOpenBillModal()" style="background:transparent;border:1px solid var(--org);color:var(--org);border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer">Convertir en Factura de Gasto</button>`
     :'';
 }
+// Badge/botón de QuickBooks junto al título de la OC — factorizado para poder refrescarlo
+// sin volver a pintar el formulario completo (evita perder foco/scroll al guardar sin cerrar).
+function ocQboTitleBadgeHTML(){
+  if(curOCId==='new') return '';
+  if(ocState.qboPOId) return `<span class="qbo-badge">✓ #QB ${esc(String(ocState.qboPOId))}</span>`;
+  return `<button id="oc-send-qbo-btn" onclick="ocSendToQBO()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:8px;padding:6px 12px;font-size:11px;cursor:pointer">Enviar a QuickBooks</button>`;
+}
+function ocQboFooterNoteHTML(){
+  const base=curOCId==='new'?'Guarda la OC para poder enviarla a QuickBooks.'
+    :(ocState.qboPOId?'Esta OC ya fue enviada a QuickBooks.':'La OC está guardada en Siscon. Usa "Enviar a QuickBooks" arriba para crear la orden de compra en QB.');
+  return base+(curOCId!=='new'?` <span style="color:var(--t3)">|</span> <a onclick="deleteOC('${curOCId}')" style="color:var(--red);cursor:pointer;text-decoration:underline">Eliminar</a>`:'');
+}
+function ocRefreshQboUI(){
+  const badge=document.getElementById('oc-qbo-title-badge'); if(badge) badge.innerHTML=ocQboTitleBadgeHTML();
+  const note=document.getElementById('oc-qbo-footer-note'); if(note) note.innerHTML=ocQboFooterNoteHTML();
+  const title=document.querySelector('.th-title'); if(title) title.textContent=curOCId==='new'?'Nueva Orden de Compra':'Editar Orden de Compra';
+}
 function ocSaveClose(){ ocSaveSilent(); showToast('OC guardada'); curOCId=null; renderOCList(); }
 function ocSavePDF(){ const oc=ocSaveSilent(); ocGeneratePDF(oc); }
 function ocSaveAndSend(){
@@ -8615,7 +8629,7 @@ async function ocSendToQBO(){
     saveData();
     logAction(`OC "${oc.num}" enviada a QuickBooks (PO #${data.poId})`,'log-edit','OC',null,{poId:data.poId});
     showToast('✓ OC enviada a QuickBooks · PO #'+data.poId);
-    renderOCForm();
+    ocRefreshQboUI();
   }catch(e){
     console.warn('ocSendToQBO error:',e);
     alert('No se pudo enviar la OC a QuickBooks: '+e.message);
