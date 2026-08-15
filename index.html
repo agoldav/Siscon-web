@@ -8594,7 +8594,11 @@ async function ocSyncOCRowOnly(oc){
   // todavía resolviendo en segundo plano), esperarlo primero — si no, los dos intentan escribir
   // esta misma fila con la misma expected_updated_at y el que llega segundo choca contra el
   // primero como si fuera "otro usuario", cuando en realidad es este mismo navegador dos veces.
-  if(_saveInFlight) await _saveInFlight.catch(()=>{});
+  // Acotado a 12s: ese saveData() sincroniza TODO el proyecto y puede tardar más que eso en
+  // cuentas grandes — no vale la pena bloquear el envío a QB por eso; si sigue en curso pasado
+  // ese margen, se sigue igual con el sync acotado de esta fila (el retry-on-409 de abajo cubre
+  // el caso raro de que efectivamente choquen).
+  if(_saveInFlight) await Promise.race([_saveInFlight.catch(()=>{}), new Promise(r=>setTimeout(r,12000))]);
   const id=String(oc.id);
   const payload=_transactionCloudPayload(oc,curProj.id,'oc');
   const snap=_snapshot(payload);
@@ -8689,7 +8693,11 @@ async function ocSendToQBO(){
   try{
     const oc=ocSaveSilent(true); // skipCloudSync: sincronizamos nosotros abajo, acotado a esta sola fila
     console.log('[ocSendToQBO] guardando OC',oc.id,'antes de enviar a QB…');
-    const savedOk=await withTimeout(ocSyncOCRowOnly(oc),20000,'Guardar la OC');
+    // 60s, no 20s: si "Enviar a QuickBooks" se clickea justo después de "Guardar", ocSyncOCRowOnly
+    // primero espera a que ese saveData() completo (TODO el proyecto) termine antes de sincronizar
+    // esta fila sola — en cuentas con varios registros pendientes eso puede tardar más de 20s por
+    // sí solo, sin que la OC tenga ningún problema real.
+    const savedOk=await withTimeout(ocSyncOCRowOnly(oc),60000,'Guardar la OC');
     if(savedOk===false) throw new Error('No se pudo guardar la OC en Supabase antes de enviarla.');
     console.log('[ocSendToQBO] OC guardada, llamando al backend…');
     const r=await withTimeout(fetch(backendUrl()+'/api/qbo/purchase-orders',{
