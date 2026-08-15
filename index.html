@@ -8702,7 +8702,18 @@ async function ocSendToQBO(){
     ocState.qboPOId=data.poId; ocState.status='Enviada';
     const idx=curProj.ocs.findIndex(x=>x.id===oc.id);
     if(idx>=0){ curProj.ocs[idx].qboPOId=data.poId; curProj.ocs[idx].status='Enviada'; }
-    saveData();
+    // El backend YA guardó qboPOId/status directo en Supabase (por fuera del mecanismo normal de
+    // guardado del frontend, con su propia versión optimista) — llamar acá a un saveData() completo
+    // usaría la expected_updated_at vieja de antes del envío y chocaría contra lo que el backend
+    // acaba de escribir (aparece como "otro usuario guardó cambios", pero es el propio backend por
+    // esta misma acción). Alcanza con alinear el tracking local con la versión nueva que devolvió.
+    if(_normalizedTransactionsLoaded&&idx>=0){
+      const id=String(oc.id);
+      if(data.updatedAt)_transactionVersions.set(id,data.updatedAt);
+      _transactionSnapshots.set(id,_snapshot(_transactionCloudPayload(curProj.ocs[idx],curProj.id,'oc')));
+    } else {
+      saveData();
+    }
     logAction(`OC "${oc.num}" enviada a QuickBooks (PO #${data.poId})`,'log-edit','OC',null,{poId:data.poId});
     showToast('✓ OC enviada a QuickBooks · PO #'+data.poId);
     ocRefreshQboUI();
