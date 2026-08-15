@@ -2060,6 +2060,56 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   proyecto recoge primero las llaves de sus documentos, ejecuta el cascade transaccional y luego
   limpia sus objetos sin impedir el borrado lógico si R2 no responde.
 
+### Sesión 2026-08-06 (INCIDENTE: nadie podía entrar — Cloudflare Access fuera de la ruta)
+
+> ⚠️ **Lección central, para no repetirla:** la advertencia **"Invalid Configuration"** que Vercel
+> muestra sobre `app.sisconcr.com` es **cosmética y esperada** mientras el dominio esté detrás del
+> proxy de Cloudflare. Vercel no puede verificar el dominio porque ve las IPs de Cloudflare en lugar
+> de las suyas. **NO se arregla poniendo el registro DNS en "DNS only"** — eso saca a Cloudflare de
+> la ruta y con él a Cloudflare Access, que es *toda* la autenticación de la app. El registro `app`
+> debe permanecer en **Proxied (nube naranja)** siempre, aunque Vercel se queje.
+
+- **Síntoma reportado:** al abrir la app aparecía el login interno de Siscon **sin pedir antes la
+  autenticación de Microsoft**, y tras escribir el correo salía "❌ No Autorizado — tu cuenta no está
+  en la allowlist de Cloudflare Access". Cerrar la ventana y limpiar caché no lo resolvía. Le pasaba
+  al OWNER, que es la cuenta Admin original — señal de que el mensaje mentía sobre la causa.
+- **Causa raíz (confirmada con evidencia, no supuesta):** el registro DNS `app` de `sisconcr.com`
+  estaba en **"DNS only"** en vez de **"Proxied"**, cambiado el 2026-08-05 para silenciar el
+  "Invalid Configuration" de Vercel. Con la nube gris el tráfico iba **directo a Vercel**,
+  salteándose Cloudflare por completo → Access nunca veía la petición → nunca pedía login de
+  Microsoft → nunca inyectaba `Cf-Access-Jwt-Assertion` → el backend respondía `missing_jwt` a todo.
+  **Nadie podía entrar**, no era un problema de cuentas.
+  - Evidencia: `app.sisconcr.com` devolvía **HTTP 200 con el HTML completo sin cookie**, headers
+    `server: Vercel` **sin `cf-ray`**, y DNS resolviendo a IPs de Vercel (64.29.17.1 / 216.198.79.1),
+    mientras la raíz `sisconcr.com` sí resolvía a Cloudflare (172.64.80.1) y los nameservers seguían
+    siendo `jeremy`/`cheryl.ns.cloudflare.com`.
+  - **Exposición mientras duró:** el HTML de la app se sirvió público a internet. Los **datos nunca
+    se expusieron**: el backend rechazó todo sin JWT (`403`), o sea el blindaje de VUL-032 funcionó
+    en modo fail-closed exactamente como fue diseñado.
+- **Solución aplicada por el OWNER:** registro `app` de vuelta a **Proxied**. Verificado en vivo:
+  DNS → `172.64.80.1`; headers → `server: cloudflare` + `cf-ray`; `app.sisconcr.com/` y
+  `/api/me` sin sesión → **302 al login de Access**; `siscon-backend.onrender.com/api/me` directo →
+  **403** (sigue fail-closed); `/health` → 200.
+- [x] **Backend `8d63a0d` (desplegado y verificado en producción):** el 403 ahora dice *por qué*.
+  `validateCloudflareAccess()` y `getCurrentUser()` devuelven `reason` (`missing_jwt` /
+  `invalid_jwt` / `no_account`), el `email` detectado y una `logoutUrl` de Access. Sin este campo el
+  diagnóstico seguía apuntando a la cuenta del usuario; **fue lo que permitió hallar la causa raíz**.
+- [x] **Frontend `70ef895` + `2d9a000` (commiteados, PENDIENTES DE PUSH — ver Pendiente):** la
+  pantalla de error deja de culpar al allowlist de Access. Distingue los tres casos; para
+  `missing_jwt` dice explícitamente que la app no está pasando por Cloudflare Access, que afecta a
+  todos los usuarios y que hay que revisar el modo Proxied del DNS. No ofrece "Cambiar de cuenta"
+  en ese caso porque reautenticarse no arregla nada. Agrega **Reintentar** y **Cambiar de cuenta**
+  (logout de Access) para no quedar atascado en la cookie `CF_Authorization`.
+- **Falsas alarmas descartadas en la misma sesión:**
+  - *Keep-alive de GitHub Actions fallando:* ocurrió durante el redeploy de Render disparado por el
+    push del backend (falló en 33s, coincide con la ventana de arranque). `/health` volvió a 200 solo.
+  - *Alerta de Supabase "Table publicly accessible / rls_disabled_in_public":* el correo es un
+    snapshot del **20-jul**, anterior al arreglo de RLS del **24-jul** (VUL-016). Queda por
+    confirmar en Supabase → Advisors → Security que ya no aparezca.
+- [x] **Push de los commits `70ef895`/`2d9a000` resuelto:** quedaron bloqueados por permisos de
+  GitHub el mismo día (`403` al pushear a `agoldav/Siscon-web`); verificado el 2026-08-14 que
+  ambos ya están en `origin/main` (el token recuperó acceso al repo sin intervención adicional).
+
 ### Sesión 2026-08-07 (fix: Asignar destino multi-proyecto + compras presupuestadas desde Outlook)
 > Corrección pedida por el usuario sobre el modal Asignar de Factura de Proveedor (feature en Completado).
 - [x] **Dropdown de proyecto se quedaba en el primero de la lista (p.ej. "116 Este"):** el `<select>`
@@ -2080,6 +2130,60 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   ($ vía assigns/purchases) pero comprado=0. Ahora prioriza `h.purchases` por `lineId`, con
   fallback a assigns (`a.lineId`/`l.lineId` o match por nombre). Al guardar se sella `a.lineId`
   con la línea de presupuesto resuelta; match de nombres normalizado (acentos/guiones).
+
+### Sesión 2026-08-13 (Toggle Precio de Venta con/sin IVA)
+- [x] **Checkbox "Ver con IVA (13%)"** agregado a la barra de información general del proyecto:
+  al activarlo, el **Precio de Venta** se muestra con 13% de IVA incluido tanto ahí (solo
+  lectura mientras el toggle está activo) como en cada tarjeta de tipo (pestaña Tipos de
+  Vivienda). Es un único checkbox global que controla ambas vistas a la vez.
+- [x] Estado de UI puro (`showIVAPrices`), **no persiste** — vuelve a "sin IVA" en cada recarga
+  de la app, mismo patrón ya usado por `calcState.ivaShow` en la calculadora de avances de
+  subcontratistas. El valor guardado (`salePrice`, en `type` y en `project`) sigue siendo
+  siempre la base sin IVA; sin el toggle activo el comportamiento es idéntico al de antes.
+- [x] Spec: `docs/superpowers/specs/2026-08-13-precio-venta-sin-con-iva-design.md`.
+- [x] Verificado en el Browser pane con datos de proyecto simulados (sin depender del backend/
+  login real): por defecto ambos lugares muestran el mismo precio que antes; al marcar el
+  checkbox ambos muestran el precio × 1.13; al desmarcar vuelve al valor original y el campo
+  vuelve a ser editable. `node --check` sobre el `<script>` extraído sin errores de sintaxis.
+- [x] Commits `ea3b589` (spec) y `13c4f00` (implementación) en la rama
+  `feature/precio-venta-con-iva` de `agoldav/Siscon-web`. PR #1 abierto y **mergeado a `main`**
+  por el usuario (commit de merge `fbce66c`) → desplegado en producción vía auto-deploy de
+  Vercel.
+
+### Sesión 2026-08-14 (Factura de Proveedor — modal "fuera de lista" y tarjeta de la lista)
+> 4 bugs reportados por el usuario sobre el flujo de "Asignar" en Factura de Proveedor cuando un
+> producto de la factura no está en la lista de materiales de la casa.
+- [x] **Salto de scroll al editar un campo:** cada `onchange` (cantidad, proyecto, casa, sustituto)
+  redibujaba `modal-inner.innerHTML` completo, recreando el `<div>` scrolleable de las tarjetas y
+  reseteándolo a `scrollTop=0` — se sentía como "brinca al inicio" al salir de un campo con click
+  en otro lado. Fix: `vbRenderMatOutOfList()` guarda el `scrollTop` antes de redibujar y lo
+  restaura después.
+- [x] **La sustitución elegida no se recordaba:** `vbShowMatOutOfList()` reconstruía las tarjetas
+  desde `l.assign` con `substitutesName`/`substitutesQty` siempre en blanco — la equivalencia
+  escrita para cada casa se perdía cada vez que se reabría "Asignar" para esa línea, incluso ya
+  guardada la factura. Fix: `substitutesName`/`substitutesQty` ahora se guardan en la fila de
+  `l.assign` (tanto en el camino directo como en el que pide autorización) y se recuperan al
+  reabrir el modal.
+- [x] **Badge "NUEVO"/raya roja no pasaba a verde tras la aprobación:** `saveVendorBill()` apagaba
+  `_pending` en cualquier guardado, sin importar si aún quedaba una solicitud de material fuera de
+  lista sin aprobar. Fix: `saveVendorBill()` mantiene `_pending=true` mientras exista una fila con
+  `authPending`; `applyApprovedVbExtra()` (al aprobar) limpia el `authPending` de la línea de
+  origen y, si no queda ninguna otra solicitud abierta en esa factura, pone `_pending=false` +
+  `_resolvedByReview=true` — la lista pinta la raya izquierda en verde en vez de roja.
+- [x] **Formato de tarjeta en la lista de Facturas de Proveedor:** el número de factura pasa a su
+  propia línea ("Factura: ...") arriba del nombre del proveedor, con el badge NUEVO al lado —
+  replica el mockup adjuntado por el usuario. Cambio acotado a `vendorLike` (solo Factura de
+  Proveedor); las demás listas (Cliente, Pagos, Notas, Requisición) no cambian.
+- [x] Verificado en el Browser pane (servidor estático local + estado simulado, sin depender del
+  backend/login real): el modal reproduce exactamente la captura del reporte (3 tarjetas para la
+  misma casa con cantidades y sustituto), el scroll no salta al editar tras hacer overflow real,
+  reabrir "Asignar" recupera la sustitución guardada, `applyApprovedVbExtra` limpia `authPending`
+  y marca `_resolvedByReview`, y la tarjeta de lista muestra rojo+NUEVO vs. verde sin afectar la
+  tarjeta de Factura a Cliente (probada sin cambios). `node --check` sobre el `<script>` principal
+  sin errores.
+- [x] Commit `f0fc3a7` en la rama `fix/vb-fuera-de-lista-asignacion` de `agoldav/Siscon-web`.
+  Mergeado directo a `main` (sin PR) el 2026-08-14 junto con el trabajo de OC/QuickBooks de esa
+  misma sesión → desplegado a producción vía auto-deploy de Vercel.
 
 ## 10. ⏳ Pendiente
 
@@ -2113,6 +2217,13 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [ ] Informe de Órdenes de Compra por proveedor
 
 ### Mejoras futuras (anotadas, sin fecha)
+- [ ] **Flag de IVA incluido por tipo (gap del modelo de datos, detectado 2026-08-13):** el
+  objeto `type` no guarda si su `salePrice` ya incluye el 13% de IVA — el checkbox `ctIVA` del
+  formulario Crear/Editar Tipo es transitorio y se reinicia a `false` cada vez que se abre, sin
+  persistirse. El toggle "Ver con IVA" (Sesión 2026-08-13) asume que el valor guardado siempre
+  es la base sin IVA, lo cual es la convención implícita de la app pero no está garantizado
+  para tipos antiguos donde sí se marcó IVA al crearlos. Si hace falta certeza, agregar un
+  campo `ivaOn` al modelo de `type`. **NO construir hasta que el usuario lo pida.**
 - [ ] **Aprobaciones por WhatsApp** — que las solicitudes de aprobación lleguen a WhatsApp y el admin apruebe/rechace desde ahí. Arquitectura: frontend crea el request → backend envía WhatsApp → webhook recibe la respuesta → backend cambia `req.status` en Supabase → el polling actual aplica el material. Requiere: WhatsApp Business API (Twilio para prototipo / Meta Cloud API para producción), número dedicado, plantillas pre-aprobadas por Meta, lista blanca de números de admin. Decisiones pendientes: proveedor y mecanismo (botones vs texto+código). **NO construir hasta que el usuario lo pida.**
 
 ---
