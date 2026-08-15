@@ -7521,7 +7521,7 @@ function renderOCForm(){
       <!-- Acciones -->
       <div class="oc-form-actions">
         <button class="btn-cancel" onclick="curOCId=null;renderOCList()">Cancelar</button>
-        <div class="oc-qbo-note">La OC se guarda únicamente en Siscon. QuickBooks es una fuente de solo lectura.${curOCId!=='new'?` <span style="color:var(--t3)">|</span> <a onclick="deleteOC('${curOCId}')" style="color:var(--red);cursor:pointer;text-decoration:underline">Eliminar</a>`:''}</div>
+        <div class="oc-qbo-note">${curOCId==='new'?'Guarda la OC para poder enviarla a QuickBooks.':(ocState.qboPOId?'Esta OC ya fue enviada a QuickBooks.':'La OC está guardada en Siscon. Usa "Enviar a QuickBooks" arriba para crear la orden de compra en QB.')}${curOCId!=='new'?` <span style="color:var(--t3)">|</span> <a onclick="deleteOC('${curOCId}')" style="color:var(--red);cursor:pointer;text-decoration:underline">Eliminar</a>`:''}</div>
         <div style="display:flex;gap:8px;align-items:center">
           <span id="oc-convert-btn-wrap">${curOCId!=='new'&&!ocState.qboBillId?`<button onclick="ocOpenBillModal()" style="background:transparent;border:1px solid var(--org);color:var(--org);border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer">Convertir en Factura de Gasto</button>`:''}</span>
           <div class="split-btn-oc">
