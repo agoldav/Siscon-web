@@ -8564,7 +8564,7 @@ function ocSave(asBorrador){
   showToast('OC guardada en Siscon');
   curOCId=null; renderOCList();
 }
-function ocSaveSilent(){
+function ocSaveSilent(skipCloudSync){
   const st=ocState, p=curProj; if(!p.ocs)p.ocs=[]; ocRefreshTotals();
   const ocData={...st,lastModified:new Date().toLocaleString('es-CR')};
   if(curOCId==='new'){ ocData.id='oc-'+Date.now(); ocData.status=ocData.status||'Borrador'; p.ocs.push(ocData);
@@ -8573,7 +8573,43 @@ function ocSaveSilent(){
     logAction(`OC "${ocData.num}" actualizada`,'log-edit','OC',null,{num:ocData.num}); }
   // Fix 19: casas con movimientos pasan a "Iniciado"
   (ocData.houseIds||[]).forEach(hid=>markHouseMovement(p,hid));
-  p.lastActivity=Date.now(); autoStartProj(); saveData(); return ocData;
+  p.lastActivity=Date.now(); autoStartProj();
+  // skipCloudSync: para cuando el que llama va a sincronizar la nube por su cuenta, de forma más
+  // acotada (ver ocSyncOCRowOnly) — evita disparar el ciclo completo de saveData() (TODOS los
+  // proyectos/casas/documentos, uno por uno) cuando solo hace falta esta fila.
+  if(!skipCloudSync) saveData();
+  return ocData;
+}
+// Sincroniza SOLO la fila de esta OC en `transactions`, sin esperar el resto del sync completo de
+// la app. saveData() recorre secuencialmente TODOS los proyectos/casas/documentos/etc. — para una
+// cuenta con varios registros pendientes de sincronizar eso puede tardar bastante, y ocSendToQBO
+// no necesita nada de eso: solo que ESTA fila exista/esté al día antes de que el backend la lea.
+async function ocSyncOCRowOnly(oc){
+  if(!_normalizedTransactionsLoaded){
+    // Cutover viejo: la OC todavía vive dentro del blob de settings. Ahí sí hace falta saveData() completo.
+    const ok=await saveData();
+    return ok!==false;
+  }
+  const id=String(oc.id);
+  const payload=_transactionCloudPayload(oc,curProj.id,'oc');
+  const snap=_snapshot(payload);
+  if(!_transactionSnapshots.has(id)){
+    const {resp,data}=await _dbRowRequest('POST','/api/db/transactions',payload);
+    if(!resp.ok){ console.error('No se pudo crear la OC en Supabase',id,data); return false; }
+    _rememberTransactionRow(data,oc,curProj.id,'oc');
+    return true;
+  }
+  if(_transactionSnapshots.get(id)===snap) return true; // sin cambios, ya está al día
+  const body={...payload,replace_data:true,expected_updated_at:_transactionVersions.get(id)};
+  let {resp,data}=await _dbRowRequest('PUT',`/api/db/transactions/${encodeURIComponent(id)}`,body);
+  if(resp.status===409||resp.status===428){
+    data=await _handleRowConflict('esta OC',id,payload,`/api/db/transactions/${encodeURIComponent(id)}`);
+    if(!data)return false;
+    resp={ok:true};
+  }
+  if(!resp.ok){ console.error('No se pudo actualizar la OC en Supabase',id,data); return false; }
+  _rememberTransactionRow(data,oc,curProj.id,'oc');
+  return true;
 }
 function ocRefreshConvertBtn(){
   const wrap=document.getElementById('oc-convert-btn-wrap'); if(!wrap)return;
@@ -8634,9 +8670,9 @@ async function ocSendToQBO(){
   if(btn){ btn.disabled=true; btn.textContent='Enviando…'; }
   const slowHint=setTimeout(()=>showToast('Esto puede tardar un poco si el servidor estaba inactivo…',5000),7000);
   try{
-    const oc=ocSaveSilent();
+    const oc=ocSaveSilent(true); // skipCloudSync: sincronizamos nosotros abajo, acotado a esta sola fila
     console.log('[ocSendToQBO] guardando OC',oc.id,'antes de enviar a QB…');
-    const savedOk=await withTimeout(saveData(),30000,'Guardar la OC'); // ocSaveSilent dispara el guardado pero no lo espera; hay que esperarlo antes de que el backend lea la fila
+    const savedOk=await withTimeout(ocSyncOCRowOnly(oc),20000,'Guardar la OC');
     if(savedOk===false) throw new Error('No se pudo guardar la OC en Supabase antes de enviarla.');
     console.log('[ocSendToQBO] OC guardada, llamando al backend…');
     const r=await withTimeout(fetch(backendUrl()+'/api/qbo/purchase-orders',{
