@@ -7357,7 +7357,10 @@ function renderOCForm(){
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
       <button class="btn-cancel" onclick="curOCId=null;renderOCList()">← Volver</button>
       <div class="th-title">${curOCId==='new'?'Nueva Orden de Compra':'Editar Orden de Compra'}</div>
-      ${curOCId!=='new'&&ocState.qboPOId?`<span class="qbo-badge">✓ Sincronizado con QuickBooks · PO ${ocState.qboPOId}</span>`:''}
+      ${curOCId!=='new'?(ocState.qboPOId
+        ?`<span class="qbo-badge">✓ #QB ${esc(String(ocState.qboPOId))}</span>`
+        :`<button id="oc-send-qbo-btn" onclick="ocSendToQBO()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:8px;padding:6px 12px;font-size:11px;cursor:pointer">Enviar a QuickBooks</button>`)
+        :''}
     </div>
     <div class="oc-form-wrap">
 
@@ -8590,22 +8593,137 @@ function ocSaveAndSend(){
   if(idx>=0){ curProj.ocs[idx].status='Enviada'; saveData(); }
   ocGeneratePDF({...oc,status:'Enviada'});
 }
+// Envía la OC a QuickBooks como Purchase Order. El backend reconstruye el payload leyendo
+// la fila ya guardada en Supabase (nunca confía en lo que arme el navegador). Cualquier
+// usuario autenticado puede enviarla — ver POST /api/qbo/purchase-orders en siscon-backend.
+async function ocSendToQBO(){
+  if(curOCId==='new'){ showToast('Guarda la OC primero.'); return; }
+  const btn=document.getElementById('oc-send-qbo-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Enviando…'; }
+  try{
+    const oc=ocSaveSilent(); // asegura que Supabase tenga la versión más reciente antes de que el backend la lea
+    const r=await fetch(backendUrl()+'/api/qbo/purchase-orders',{
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(_sbToken||'')},
+      body:JSON.stringify({transactionId:oc.id}),
+    });
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(data.error||('HTTP '+r.status));
+    ocState.qboPOId=data.poId; ocState.status='Enviada';
+    const idx=curProj.ocs.findIndex(x=>x.id===oc.id);
+    if(idx>=0){ curProj.ocs[idx].qboPOId=data.poId; curProj.ocs[idx].status='Enviada'; }
+    saveData();
+    logAction(`OC "${oc.num}" enviada a QuickBooks (PO #${data.poId})`,'log-edit','OC',null,{poId:data.poId});
+    showToast('✓ OC enviada a QuickBooks · PO #'+data.poId);
+    renderOCForm();
+  }catch(e){
+    console.warn('ocSendToQBO error:',e);
+    alert('No se pudo enviar la OC a QuickBooks: '+e.message);
+    if(btn){ btn.disabled=false; btn.textContent='Enviar a QuickBooks'; }
+  }
+}
+// Datos fijos de la empresa para el membrete de la OC (igual al formato de referencia de QuickBooks)
+const SISCON_LOGO_B64='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';
+const SISCON_LETTERHEAD={
+  name:'Siscon SRL 3-102-846248',
+  addr1:'Condal Rohrmoser', addr2:'San Jose, SJ 10109',
+  phone:'+50640100155', email:'info@sisconcr.com', web:'www.sisconcr.com',
+  idLabel:'Cédula: 3102846248',
+  shipTo:['Siscon SRL 3-102-846248','Condal Rohrmoser','San José, San José 10108','CRI'],
+};
+function ocConsolidatedLines(oc){
+  const map={};
+  if(oc.bodegaMode){
+    (oc.bodegaLines||[]).forEach(l=>{
+      if(!(l.qty>0))return;
+      const key=(l.name||'').toLowerCase().trim();
+      if(!map[key])map[key]={name:l.name||'',total:0,totalValue:0};
+      map[key].total+=l.qty;
+      map[key].totalValue+=l.qty*(l.price||0)*(1-(l.discPct||0)/100);
+    });
+  } else {
+    (oc.houseIds||[]).forEach(hid=>{
+      (oc.lines[hid]||[]).forEach(l=>{
+        if(!(l.qty>0))return;
+        const key=(l.manualName||'').toLowerCase().trim()+'||'+(l.matId||0);
+        if(!map[key])map[key]={name:l.manualName||'',total:0,totalValue:0};
+        map[key].total+=l.qty;
+        map[key].totalValue+=l.qty*(l.price||0)*(1-(l.discPct||0)/100);
+      });
+    });
+  }
+  return Object.values(map).map(m=>({name:m.name,qty:m.total,price:m.total>0?m.totalValue/m.total:0,amount:m.totalValue}))
+    .sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase(),'es'));
+}
 function ocGeneratePDF(oc){
   const p=curProj;
   const win=window.open('','_blank'); if(!win){alert('Permite ventanas emergentes.');return;}
   const isCRC=oc.vendorCurrency==='CRC'&&!oc.showUSD;
-  const sym=v=>isCRC?('₡'+(v*(oc.exchangeRate||tcGet())).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})):fmt(v);
-  let rows='';
-  (oc.houseIds||[]).forEach(hid=>{ const h=p.houses.find(x=>String(x.id)===String(hid));
-    (oc.lines[hid]||[]).forEach(l=>{ rows+=`<tr><td>${h?esc(h.num):''}</td><td>${l.manualName||''}</td><td class="r">${l.qty}</td><td class="r">${sym(l.price||0)}</td><td class="r">${sym((l.qty||0)*(l.price||0))}</td></tr>`; }); });
-  (oc.bodegaLines||[]).forEach(l=>{ rows+=`<tr><td>Bodega</td><td>${l.name||''}</td><td class="r">${l.qty}</td><td class="r">${sym(l.price||0)}</td><td class="r">${sym((l.qty||0)*(l.price||0))}</td></tr>`; });
-  const css='*{font-family:Segoe UI,system-ui,sans-serif;box-sizing:border-box}body{padding:28px;color:#1a2332}h1{font-size:20px;color:#0d99ff}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}th,td{border:1px solid #e2e2e2;padding:6px 9px;text-align:left}th{background:#f4f6fa}td.r,th.r{text-align:right}';
-  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${oc.num}</title><style>${css}</style></head><body>
-    <h1>Orden de Compra ${oc.num}</h1>
-    <div style="font-size:12px;color:#555;margin:4px 0 12px">Proyecto: ${esc(p.name)} · Proveedor: ${esc(oc.vendorName||'—')} · Fecha: ${fmtDate(new Date())}${oc.proforma?' · Proforma: '+oc.proforma:''}</div>
-    <table><tr><th>Casa</th><th>Material</th><th class="r">Cantidad</th><th class="r">Precio Unitario</th><th class="r">Total</th></tr>${rows||'<tr><td colspan=5>Sin líneas</td></tr>'}</table>
-    ${(()=>{const iva=(oc.ivaUSD!=null?oc.ivaUSD:0);const subv=(oc.totalUSD||0)-iva;return `<table style="margin-top:14px"><tr><td class="r" style="border:none">Subtotal</td><td class="r" style="width:140px">${sym(subv)}</td></tr><tr><td class="r" style="border:none">IVA</td><td class="r">${sym(iva)}</td></tr><tr><td class="r" style="border:none;font-weight:700">TOTAL</td><td class="r" style="font-weight:700">${sym(oc.totalUSD||0)}</td></tr></table>`;})()}
-    ${oc.notes?`<div style="margin-top:12px;font-size:12px"><strong>Notas:</strong> ${esc(oc.notes)}</div>`:''}
+  const xr=oc.exchangeRate||tcGet();
+  const sym=v=>isCRC?('₡'+(v*xr).toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})):('$'+(+v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}));
+  const num=v=>(isCRC?(v*xr):v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:3});
+  const items=ocConsolidatedLines(oc);
+  const rows=items.map(it=>`<tr><td class="act">${esc(it.name)}</td><td>${esc(it.name)}</td><td class="r">${it.qty}</td><td class="r">${num(it.price)}</td><td class="r">${num(it.amount)}</td></tr>`).join('');
+  const iva=(oc.ivaUSD!=null?oc.ivaUSD:0), subv=(oc.totalUSD||0)-iva, total=oc.totalUSD||0;
+  const fecha=oc.createdAt||fmtDate(new Date());
+  const css=`*{font-family:'Segoe UI',system-ui,sans-serif;box-sizing:border-box}
+    body{padding:36px;color:#1a2332;font-size:13px}
+    .lh-name{font-weight:700}
+    .lh{font-size:12px;line-height:1.45;margin-bottom:14px}
+    h1{font-size:24px;font-weight:400;color:#e24b4a;margin:0 0 18px}
+    .qbo-sent-note{background:#eafbf2;border:1px solid #2ca01c;color:#1a7a12;font-size:12px;font-weight:600;border-radius:6px;padding:8px 12px;margin:-8px 0 16px}
+    .logo{height:52px;margin-bottom:8px}
+    .hdr{display:flex;justify-content:space-between;gap:20px;border-bottom:1px solid #d8dde3;padding-bottom:10px;margin-bottom:14px}
+    .hdr .col{font-size:12px;line-height:1.5}
+    .hdr .lbl{font-weight:700;letter-spacing:.3px;margin-bottom:2px}
+    .hdr .right{text-align:left;min-width:140px}
+    .meta{display:flex;gap:60px;margin-bottom:16px}
+    .meta .lbl{font-weight:700;font-size:12px;letter-spacing:.3px;margin-bottom:2px}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    thead th{background:#eef2f7;text-align:left;font-weight:700;padding:8px 10px;letter-spacing:.3px}
+    tbody td{padding:8px 10px;border-bottom:1px dotted #e2e6ea;vertical-align:top}
+    .act{font-weight:700;width:22%}
+    td.r,th.r{text-align:right}
+    .totals{margin-top:14px;display:flex;justify-content:flex-end}
+    .totals table{width:auto;min-width:260px}
+    .totals td{border:none;padding:4px 10px}
+    .totals .tot td{font-weight:700;border-top:1px solid #1a2332;padding-top:8px}
+    .footer{display:flex;justify-content:space-between;margin-top:6px}
+    .note{font-size:12px;max-width:55%}
+    .sign{margin-top:60px;font-size:12px}
+    .sign .line{display:inline-block;width:280px;border-bottom:1px solid #1a2332;margin-left:12px}
+    .sign .row{margin-bottom:34px}`;
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>OC ${esc(oc.num)}</title><style>${css}</style></head><body>
+    <img class="logo" src="data:image/png;base64,${SISCON_LOGO_B64}"/>
+    <div class="lh"><div class="lh-name">${SISCON_LETTERHEAD.name}</div>
+      <div>${SISCON_LETTERHEAD.addr1}</div><div>${SISCON_LETTERHEAD.addr2}</div>
+      <div>${SISCON_LETTERHEAD.phone}</div><div>${SISCON_LETTERHEAD.email}</div><div>${SISCON_LETTERHEAD.web}</div>
+      <div>${SISCON_LETTERHEAD.idLabel}</div></div>
+    <h1>Orden de compra</h1>
+    ${oc.qboPOId?`<div class="qbo-sent-note">✓ Esta Orden de Compra ya fue enviada a QuickBooks · PO #${esc(String(oc.qboPOId))}</div>`:''}
+    <div class="hdr">
+      <div class="col"><div class="lbl">PROVEEDOR</div>${esc(oc.vendorName||oc.vendorId||'—')}</div>
+      <div class="col"><div class="lbl">ENVIAR A</div>${SISCON_LETTERHEAD.shipTo.map(l=>`<div>${esc(l)}</div>`).join('')}</div>
+      <div class="col right"><div><span class="lbl">OC N.º</span> ${esc(String(oc.num||''))}</div><div><span class="lbl">FECHA</span> ${esc(fecha)}</div></div>
+    </div>
+    <div class="meta">
+      <div class="col"><div class="lbl">PROYECTO</div>${esc(p.name)}</div>
+      <div class="col"><div class="lbl">PROFORMA</div>${esc(oc.proforma||'—')}</div>
+    </div>
+    <table><thead><tr><th>ACTIVIDAD</th><th>DESCRIPTION</th><th class="r">CANT.</th><th class="r">RATE</th><th class="r">AMOUNT</th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="5">Sin líneas</td></tr>'}</tbody></table>
+    <div class="footer">
+      <div class="note">${esc(oc.notes||'Por favor cotizar los materiales en esta Orden de Compra.')}</div>
+      <div class="totals"><table>
+        <tr><td class="r">SUBTOTAL</td><td class="r">${num(subv)}</td></tr>
+        <tr><td class="r">IMPUESTO</td><td class="r">${num(iva)}</td></tr>
+        <tr class="tot"><td class="r">TOTAL</td><td class="r">${isCRC?'₡':'USD'} ${num(total)}</td></tr>
+      </table></div>
+    </div>
+    <div class="sign">
+      <div class="row">Aprobado por<span class="line"></span></div>
+      <div class="row">Fecha<span class="line"></span></div>
+    </div>
   </body></html>`);
   win.document.close(); setTimeout(()=>{try{win.focus();win.print();}catch(e){}},300);
   showToast('OC guardada · PDF generado'); curOCId=null; renderOCList();
@@ -10322,10 +10440,13 @@ function txnRowHtml(type,tx,def,vendorLike,openCall,dupCall,delCall){
     ? `<span style="font-size:12px;font-weight:600;color:var(--org)">₡${totalCRCdisp.toLocaleString('es-CR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
        <span style="font-size:10px;color:var(--t3)">${fmt(totalUSDdisp)} USD</span>`
     : `<span style="font-size:12px;font-weight:600;color:var(--grn)">${fmt(tx.totalUSD||0)}</span>`;
-  return `<div class="oc-list-item" onclick="${openCall}" style="${tx._pending?'border-left:3px solid var(--red)':''}">
-    <span class="oc-num-badge" style="color:${def.color}${vendorLike?';min-width:190px;text-align:right;flex-shrink:0':''}">${esc(vendorLike&&tx.invoiceNumber?tx.invoiceNumber:tx.num)}</span>
+  const borderStyle=tx._pending?'border-left:3px solid var(--red)':(tx._resolvedByReview?'border-left:3px solid var(--grn)':'');
+  const badgesHtml=`${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'&&tx.pendingClassification?`<span title="Hay líneas sin casa asignada" style="background:var(--amb);color:#1a1200;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">PENDIENTE DE CLASIFICAR</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}${type==='pagos'&&tx.paymentDirection?`<span style="font-size:9px;font-weight:700;color:${tx.paymentDirection==='received'?'var(--grn)':'var(--org)'}">${tx.paymentDirection==='received'?'RECIBIDO QB':'PAGADO QB'}</span>`:''}`;
+  return `<div class="oc-list-item" onclick="${openCall}" style="${borderStyle}">
+    ${vendorLike?'':`<span class="oc-num-badge" style="color:${def.color}">${esc(tx.num)}</span>`}
     <div style="flex:1;min-width:0">
-      <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${tx._pending?`<span style="background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">NUEVO</span>`:''}${type==='proveedor'&&tx.pendingClassification?`<span title="Hay líneas sin casa asignada" style="background:var(--amb);color:#1a1200;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap;flex-shrink:0">PENDIENTE DE CLASIFICAR</span>`:''}${type==='proveedor'?vbBudgetSealBadge(tx):''}${type==='pagos'&&tx.paymentDirection?`<span style="font-size:9px;font-weight:700;color:${tx.paymentDirection==='received'?'var(--grn)':'var(--org)'}">${tx.paymentDirection==='received'?'RECIBIDO QB':'PAGADO QB'}</span>`:''}</div>
+      ${vendorLike?`<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px"><span style="font-size:11px;font-weight:600;color:var(--t1)">Factura: ${esc(tx.invoiceNumber||tx.num)}</span>${badgesHtml}</div>`:''}
+      <div style="display:flex;align-items:center;gap:6px"><span style="font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(tx.party||tx.client||'— Sin '+def.party.toLowerCase()+' —')}</span>${vendorLike?'':badgesHtml}</div>
       <div style="font-size:10px;color:${vendorLike&&tx.qboProjectPresence==='missing'?'var(--red)':'var(--t2)'};margin-top:2px">${vendorLike&&tx.qboProjectPresence==='missing'?`⚠ ${esc(tx.qboPresenceMessage||'No se encuentra en este proyecto de QuickBooks')}`:`${tx.date||''} · ${((tx.lines||tx.houseLines||[]).length)} línea(s)${tx.qboEntity==='SalesReceipt'?' · Recibo de venta QBO':''}${tx.qboMultiProject?' · Parte de factura multiproyecto':''}${tx.consecutivo?' · Consec: '+esc(tx.consecutivo):''}${isCRCTx?' · <span style="color:var(--org)">₡ Colones</span>':''}`}</div>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
@@ -13695,7 +13816,10 @@ function vbOutOfListSubLineDestBudgeted(l,sl){
 function vbShowMatOutOfList(lineIdx, assignments){
   window._vbOutOfListCtx={
     lineIdx,
-    cards: assignments.map(a=>({ a, checked:true, subLines:[{qty:a.qty||0, houseId:a.houseId, projId:a.projId, substitutesName:'', substitutesQty:null}] })),
+    // Si esta fila ya se había dividido/sustituido antes (guardada en `a.substitutesName` /
+    // `a.substitutesQty`), se retoma desde ahí en vez de arrancar en blanco — antes se perdía la
+    // sustitución elegida cada vez que se reabría "Asignar" para esta línea.
+    cards: assignments.map(a=>({ a, checked:true, subLines:[{qty:a.qty||0, houseId:a.houseId, projId:a.projId, substitutesName:a.substitutesName||'', substitutesQty:a.substitutesQty!=null?a.substitutesQty:null}] })),
   };
   vbRenderMatOutOfList();
 }
@@ -13745,12 +13869,17 @@ function vbOutOfListCardHtml(l,card,ci){
 function vbRenderMatOutOfList(){
   const ctx=window._vbOutOfListCtx; if(!ctx)return;
   const l=vbState.lines[ctx.lineIdx];
+  // Cada onchange de un campo re-dibuja todo el modal (innerHTML completo); sin esto, el div
+  // scrolleable se recrea desde cero y vuelve a scrollTop=0 — se sentía como "brinca arriba" al
+  // salir de un campo con click en otro lado.
+  const prevScrollBox=document.getElementById('vb-ool-scroll');
+  const prevScrollTop=prevScrollBox?prevScrollBox.scrollTop:0;
   document.getElementById('modal-inner').innerHTML=`
     <div class="modal-title" style="color:var(--red)">⚠ Producto fuera de lista<button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button></div>
     <div style="font-size:13px;color:var(--t1);margin-bottom:10px;line-height:1.5">
       Este producto (<strong>${esc(l.desc||'producto')}</strong>) no se encuentra dentro de la lista de materiales de las casas. Podés dividir la cantidad en varias líneas — cada una con su propio destino (casa, proyecto o bodega) y, si aplica, el material que sustituye.
     </div>
-    <div style="max-height:400px;overflow:auto;margin-bottom:10px">
+    <div id="vb-ool-scroll" style="max-height:400px;overflow:auto;margin-bottom:10px">
       ${ctx.cards.map((card,ci)=>vbOutOfListCardHtml(l,card,ci)).join('')}
     </div>
     <div style="font-size:11px;color:var(--t3);margin-bottom:4px">Las casas sin marcar quedan sin resolver; hay que solicitar autorización aparte para ellas.</div>
@@ -13761,6 +13890,8 @@ function vbRenderMatOutOfList(){
   const modalEl=document.getElementById('modal');
   modalEl.dataset.noOutsideClose='1';
   modalEl.classList.remove('hidden');
+  const newScrollBox=document.getElementById('vb-ool-scroll');
+  if(newScrollBox) newScrollBox.scrollTop=prevScrollTop;
 }
 function vbOutOfListToggleCard(ci,checked){
   const ctx=window._vbOutOfListCtx; if(!ctx)return;
@@ -13852,7 +13983,7 @@ function vbRequestMatAuthMulti(){
     // Ningún destino necesita aprobación (todo va a bodega o a casas ya presupuestadas): se
     // aplica directo, sin pedir motivo ni pasar por el administrador.
     checked.forEach(card=>{
-      const rows=card.subLines.map(sl=>({houseId:sl.houseId,projId:sl.projId,qty:sl.qty}));
+      const rows=card.subLines.map(sl=>({houseId:sl.houseId,projId:sl.projId,qty:sl.qty,substitutesName:sl.substitutesName||null,substitutesQty:sl.substitutesName?(sl.substitutesQty||0):null}));
       vbOutOfListReplaceCardAssign(l,card,rows);
     });
     window._vbOutOfListCtx=null;
@@ -13896,6 +14027,7 @@ async function vbSubmitMatAuthMulti(){
     projId:curProj?curProj.id:null,
     projName:curProj?curProj.name:'',
     vbNum:vbState?vbState.num:'',
+    billId:vbState?vbState.id:null, lineIdx:ctx.lineIdx,
     matName:l.desc||'', productId:l.productId||0, unit:'unid',
     price:l.price||0,
     lines,
@@ -13912,8 +14044,8 @@ async function vbSubmitMatAuthMulti(){
   // solo la crea applyApprovedVbExtra() cuando el admin aprueba, para no contarla dos veces.
   ctx.checkedCards.forEach(card=>{
     const rows=card.subLines.map(sl=>vbOutOfListSubLineDestBudgeted(l,sl)
-      ?{houseId:sl.houseId,projId:sl.projId,qty:sl.qty}
-      :{houseId:sl.houseId,projId:sl.projId,qty:sl.qty,authPending:true,authReqId:req.id});
+      ?{houseId:sl.houseId,projId:sl.projId,qty:sl.qty,substitutesName:sl.substitutesName||null,substitutesQty:sl.substitutesName?(sl.substitutesQty||0):null}
+      :{houseId:sl.houseId,projId:sl.projId,qty:sl.qty,authPending:true,authReqId:req.id,substitutesName:sl.substitutesName||null,substitutesQty:sl.substitutesName?(sl.substitutesQty||0):null});
     vbOutOfListReplaceCardAssign(l,card,rows);
   });
   window._vbOutOfListCtx=null;
@@ -13960,6 +14092,20 @@ function applyApprovedVbExtra(req){
     }
     ok=true;
   });
+  // Sincroniza la factura de origen: quita el authPending de las filas recién aprobadas y, si no
+  // queda ninguna otra solicitud abierta en esa factura, apaga "NUEVO" (raya roja → verde).
+  if(ok&&req.billId){
+    const bp=projects.find(p=>String(p.id)===String(req.projId))||curProj;
+    const bill=bp&&(bp.billVendor||[]).find(b=>String(b.id)===String(req.billId));
+    const line=bill&&Number.isInteger(req.lineIdx)?bill.lines[req.lineIdx]:null;
+    if(line&&line.assign){
+      line.assign.forEach(a=>{ if(a.authPending&&a.authReqId===req.id){ delete a.authPending; delete a.authReqId; } });
+    }
+    if(bill){
+      const stillOpen=(bill.lines||[]).some(x=>(x.assign||[]).some(a=>a.authPending));
+      if(!stillOpen){ if(bill._pending)bill._resolvedByReview=true; bill._pending=false; }
+    }
+  }
   return ok;
 }
 function vbHouseProductQtyOtherLines(idx,houseId,line){
@@ -14167,7 +14313,13 @@ function saveVendorBill(sync){
   const arr=txnArr('proveedor');
   const data=JSON.parse(JSON.stringify(st));
   data.status=st.status==='Borrador'?'Registrada':st.status;
-  data.lastModified=new Date().toLocaleString('es-CR'); data._pending=false;
+  data.lastModified=new Date().toLocaleString('es-CR');
+  // No apagar "NUEVO" todavía si queda una línea esperando aprobación de material fuera de lista
+  // (vbSubmitMatAuthMulti) — el badge/raya roja se apaga recién cuando se aprueba (o se resuelve
+  // directo) esa solicitud, en applyApprovedVbExtra.
+  const hasOpenMatAuth=data.lines.some(l=>(l.assign||[]).some(a=>a.authPending));
+  if(data._pending&&!hasOpenMatAuth) data._resolvedByReview=true;
+  data._pending=hasOpenMatAuth?true:false;
   if(data.houseAssignmentRequired){data.houseAssignmentRequired=false;data.houseAssignmentCompletedAt=new Date().toISOString();}
   // Facturas guardadas con líneas sin casa asignada quedan "pendientes de clasificar": el digest
   // diario (backend, cron) las lista agrupadas por proyecto hasta que alguien complete la asignación.
