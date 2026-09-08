@@ -169,30 +169,49 @@ conversación con el PM.
 
 ## Escaleras de corte
 
-Existen dos familias de medidas según la marca:
+Las medidas comerciales no son una lista arbitraria: son **divisiones exactas de la lámina** en
+cuartos o en tercios. Los nombres del catálogo están redondeados, pero la medida real es
+`base × n/4` o `base × n/3`.
 
-| Marca | Base | Escalera principal | Escalera secundaria |
+| Marca | Base | En cuartos (÷4) | En tercios (÷3) |
 |---|---|---|---|
-| Polyglas | 11.60 | 2.90 · 5.80 · 8.70 · 11.60 | 3.86 · 7.70 |
-| Glanze, Polyforte | 11.80 | 2.95 · 5.90 · 8.85 · 11.80 | 3.93 · 7.86 |
+| Polyglas | 11.60 | 2.90 · 5.80 · 8.70 | 3.87 · 7.73 *(rotulados 3.86 y 7.70)* |
+| Glanze, Polyforte, ByT | 11.80 | 2.95 · 5.90 · 8.85 | 3.93 · 7.87 *(rotulado 7.86)* |
 
-Dentro de cada marca hay **dos escaleras que no se mezclan**. `8.85 + 2.95 = 11.80` no deja
-desperdicio; `7.86 + 2.95 = 10.81` tira casi un metro. El motor debe conocer esta estructura o
-propondrá cortes que parecen válidos y desperdician material.
-
-**Las escaleras son configuración, no código.** Tabla editable en Ajustes:
+**Las escaleras son configuración, no código.** Tabla editable en Ajustes, expresada como base
+más divisores:
 
 ```js
 SYS.cutLadders = [
-  { id:'polyglas', marcas:['Polyglas'], base:11.60,
-    escaleras:[[2.90,5.80,8.70,11.60],[3.86,7.70]], mermaM:0.02 },
-  { id:'glanze', marcas:['Glanze','Polyforte'], base:11.80,
-    escaleras:[[2.95,5.90,8.85,11.80],[3.93,7.86]], mermaM:0.02 }
+  { id:'polyglas', marcas:['Polyglas'],                  base:11.60, divisores:[4,3] },
+  { id:'glanze',   marcas:['Glanze','Polyforte','ByT'],  base:11.80, divisores:[4,3] }
 ]
 ```
 
-La merma configurable absorbe las diferencias de centímetros (p. ej. `3.86 × 2 = 7.72` vs. la
-medida comercial `7.70`) sin necesidad de casos especiales en el código.
+Si aparece una marca nueva o un proveedor cambia una medida, se edita ahí; nadie toca código ni
+espera un deploy.
+
+### Aritmética en fracciones, no en metros
+
+El motor **no trabaja en metros**: trabaja en fracciones de lámina, que es como el usuario ya
+piensa el problema ("el 75% va a la casa Y y el 25% restante a bodega" es literalmente `3/4` y
+`1/4`).
+
+Con cuartos y tercios, el denominador común es 12. Una lámina son `12/12`, un cuarto `3/12`, un
+tercio `4/12`. **Toda la aritmética es entera y exacta**: sin decimales, sin error de punto
+flotante y sin tolerancias que calibrar.
+
+De ahí cae sola la regla de que las dos escaleras no se mezclan:
+
+```
+9/12 + 3/12 = 12/12   exacto      (8.85 + 2.95)
+8/12 + 4/12 = 12/12   exacto      (7.86 + 3.93)
+9/12 + 4/12 = 13/12   no cabe
+8/12 + 3/12 = 11/12   sobra 1/12 inservible
+```
+
+El motor no necesita una regla especial que le prohíba mezclar escaleras: los cortes mixtos
+simplemente puntúan peor por el sobrante que dejan.
 
 ## Identificación de marca y largo
 
@@ -200,8 +219,12 @@ El catálogo autoritativo de productos es **QuickBooks** (`SYS.qbo.itemCache` v�
 el array `MATS` es solo un fallback y la propia UI lo marca como "lista temporal".
 
 El parser extrae `{marca, largoM, color}` del nombre del producto con un regex tolerante
-(`Glanze 8.85m - Color - Humo`). Cuando un nombre no se puede parsear, el producto simplemente
-**no participa del plan de corte** y se comporta exactamente como hoy.
+(`Glanze 8.85m - Color - Humo`) y luego **traduce el largo a doceavos** buscando la fracción
+`n/4` o `n/3` de la base de esa marca que quede a menos de 5 cm del valor leído. Es esa
+traducción la que absorbe los redondeos comerciales (`3.86` → `4/12`, `7.70` → `8/12`).
+
+Cuando un nombre no se puede parsear, o su largo no cae cerca de ninguna fracción válida, el
+producto simplemente **no participa del plan de corte** y se comporta exactamente como hoy.
 
 Los materiales sin dimensión (tornillos, silicón, perfiles, tape) nunca entran al plan de corte.
 
@@ -213,12 +236,16 @@ Función pura, sin dependencias:
 planCorte(demandas, escalera, existenciasBodega, opciones) → plan
 ```
 
-- **Entrada:** demandas por casa (`[{projId, houseId, lineId, largoM, qty}]`), la escalera de la
-  marca, y las piezas disponibles en bodega del proyecto.
+- **Entrada:** demandas por casa (`[{projId, houseId, lineId, doceavos, qty}]`), la escalera de
+  la marca, y las piezas disponibles en bodega del proyecto.
 - **Salida:** cuántas unidades comprar, cómo se corta cada una, qué casa recibe cada pieza y
   qué sobrante queda.
-- **Estrategia:** first-fit-decreasing sobre la escalera, consumiendo primero bodega y
-  minimizando sobrante no estándar. Determinista: las mismas entradas dan siempre el mismo plan.
+- **Estrategia:** empaquetado *first-fit-decreasing* de piezas en láminas de capacidad `12`,
+  consumiendo primero las piezas de bodega que quepan y prefiriendo los planes que dejan
+  sobrante estándar (múltiplo de `3/12` o `4/12`) sobre los que dejan retazo inservible.
+- **Aritmética entera.** Todas las cantidades son doceavos: sin decimales, sin acumulación de
+  error. Determinista — las mismas entradas dan siempre el mismo plan, lo que la hace trivial
+  de probar con `node:test`.
 
 El plan es una **propuesta editable**, no una imposición: el corte depende del trabajo, así que
 la UI permite ajustar el destino de cada pieza antes de guardar.
@@ -239,7 +266,8 @@ Entradas de `p.bodega[]` ganan:
 ```js
 { ...campos actuales,
   largoM: 3.10,          // largo de la pieza; null para materiales sin dimensión
-  esEstandar: false,     // true si largoM pertenece a la escalera de su marca
+  doceavos: null,        // 3 para una pieza de 2.95; null si no es fracción válida
+  esEstandar: false,     // true si la pieza cae en la escalera de su marca
   marca: 'Glanze',
   origenOcId: 'oc-...'   // trazabilidad del corte que la produjo
 }
@@ -276,8 +304,8 @@ oc.cutPlan = [
     compra: { matId, name:'Glanze 11.80m - Color - Humo', largoM:11.80, qty:3, precioUSD:156.40 },
     cortes: [
       { unidad:1,
-        piezas:  [{ largoM:8.85, projId, houseId:'h-7', lineId:'l-33', qty:1 }],
-        sobrante:{ largoM:2.95, esEstandar:true, destino:'bodega', projId } }
+        piezas:  [{ doceavos:9, largoM:8.85, projId, houseId:'h-7', lineId:'l-33', qty:1 }],
+        sobrante:{ doceavos:3, largoM:2.95, esEstandar:true, destino:'bodega', projId } }
       // … una entrada por unidad comprada
     ],
     sustitucionMarca: null   // o { desde:'Polyglas', hacia:'Glanze', authReqId }
@@ -404,12 +432,12 @@ el digest, hasta que alguien registre el avance o asigne las casas a mano.
 
 | Objeto | Campo nuevo | Propósito |
 |---|---|---|
-| `SYS.cutLadders[]` | *(nuevo)* | Escaleras de corte por marca, editables |
+| `SYS.cutLadders[]` | *(nuevo)* | Base y divisores de corte por marca, editables |
 | `SYS.alertas.diasSinFactura` | *(nuevo)* | Umbral de la alerta de OC pagada sin factura |
 | `oc.status` | valores nuevos | Máquina de estados con reloj |
 | `oc.cutPlan[]` | *(nuevo)* | Plan de corte de la orden |
 | `oc.pago` | *(nuevo)* | `{monto, fecha, metodo, comprobanteKey}` |
-| `p.bodega[]` | `largoM`, `esEstandar`, `marca`, `origenOcId` | Piezas dimensionadas |
+| `p.bodega[]` | `largoM`, `doceavos`, `esEstandar`, `marca`, `origenOcId` | Piezas dimensionadas |
 | `h.purchases[]` | `origen:'corte'` | Etiqueta de presentación |
 | `inv.houseLines[]` | *(se puebla)* | Atribución derivada de avances |
 
@@ -427,7 +455,7 @@ ausente = comportamiento actual, `largoM` ausente = material sin dimensión.
   factura sin OC es una excepción a corregir, no un caso válido.
 - **Sobrante no estándar sin uso.** Queda en bodega con su largo; el plan de corte lo ofrece
   cuando aparezca una demanda que quepa.
-- **Cambio de escalera en Ajustes.** No recalcula planes ya guardados; aplica a OCs nuevas.
+- **Cambio de base o divisores en Ajustes.** No recalcula planes ya guardados; aplica a OCs nuevas.
 
 # Fuera de alcance
 
@@ -448,9 +476,11 @@ ausente = comportamiento actual, `largoM` ausente = material sin dimensión.
 3. **Nombres de producto escritos por humanos en QuickBooks.** El parser será tolerante, pero
    habrá nombres que no calcen. Mitigación: no participan del plan de corte y se comportan como
    hoy; nunca se adivina.
-4. **Medidas comerciales por confirmar.** `7.70` no calza con `3.86 × 2 = 7.72`, y el catálogo
-   `MATS` lista `ByT` con `3.90` donde Glanze tiene `3.93`. La tabla editable de escaleras
-   absorbe esto sin código, pero el usuario debe cargar los valores reales.
+4. **Los nombres del catálogo están redondeados.** QuickBooks dice `3.86m` donde la medida real
+   es `11.60/3 = 3.8667`, y `7.70m` donde es `7.7333`. El parser no puede comparar el número
+   literalmente: tiene que mapear la etiqueta a la fracción más cercana de la base de su marca
+   (dentro de un margen de ±5 cm) y trabajar con la fracción. Un nombre que no caiga cerca de
+   ningún `n/4` ni `n/3` no participa del plan de corte.
 
 # Orden de construcción
 
