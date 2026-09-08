@@ -84,23 +84,32 @@ Se construye en tres fases independientes, cada una con su propio plan de implem
 
 ## Estados de la OC
 
-La OC pasa a ser una máquina de estados con reloj:
+El campo `oc.status` **no se toca**: sigue siendo `Borrador/Enviada/Recibida/Facturada/Cancelada`
+y sigue reflejando el ciclo de QuickBooks (`Enviada` = enviada como Purchase Order). Introducir un
+estado `Completa` ahí colisionaría con `Enviada`, porque una OC puede estar completa *y* enviada
+a QBO al mismo tiempo.
 
-| Estado | Significado | Transición |
+En su lugar, el ciclo de pago se compone de tres señales independientes:
+
+| Señal | Cómo se representa | Quién la escribe |
 |---|---|---|
-| `Borrador` | En construcción | Manual |
-| `Completa` | Tiene proveedor, casas asignadas, líneas contra presupuesto y monto | Automática al cumplir requisitos |
-| `Pagada` | Con comprobante adjunto | Manual, desde "Listo para pagar" |
-| `Facturada` | Llegó la factura y quedó ligada | Automática (Fase 1) o manual |
-| `Conciliada` | Cuadra con QuickBooks | Automática vía `QB ↻` |
+| **Completa** — se puede pagar sin ambigüedad | `ocIsComplete(oc)`, **función pura derivada** | Nadie: se calcula |
+| **Pagada** — con comprobante | Presencia de `oc.pago` | El dueño, desde "Listo para pagar" |
+| **Facturada** — llegó la factura | `oc.status === 'Facturada'` | Ya lo hace `saveVendorBill()` al ligar la factura |
 
-Los estados actuales (`Borrador/Enviada/Recibida/Facturada/Cancelada`) se mapean a los nuevos;
-`Cancelada` se conserva como estado terminal fuera de la máquina.
+`ocIsComplete()` exige: proveedor, destino (casas o bodega), toda línea con cantidad imputada a un
+renglón de presupuesto (o autorizada si es extra), y monto mayor a cero. Una OC `Cancelada` nunca
+está completa.
+
+La ventaja de derivar en vez de almacenar: no hay migración de OCs históricas, no hay estados que
+se puedan quedar desincronizados con la realidad del documento, y arreglar la definición de
+"completa" no requiere recalcular nada guardado.
 
 ## Pantalla "Listo para pagar"
 
-Vista global (no por proyecto), en el menú lateral. Lista **solo OCs en estado `Completa`**,
-agrupadas por proveedor, con monto, proyecto, casas y antigüedad.
+Vista global (no por proyecto), en el menú lateral. Lista **solo las OCs que `ocIsComplete()`
+acepta y que todavía no tienen pago registrado**, agrupadas por proveedor, con monto, proyecto y
+casas.
 
 Una OC incompleta **no aparece** — y ese es el candado. Lo que no está ahí, no se paga.
 
@@ -121,8 +130,8 @@ mano — el parser es una conveniencia, nunca un requisito.
 
 ## Reloj y alertas
 
-Una OC en `Pagada` sin factura ligada por más de `SYS.alertas.diasSinFactura` días (default 10)
-genera:
+Una OC con pago registrado y sin factura ligada por más de `SYS.alertas.diasSinFactura` días
+(default 10) genera:
 
 - Entrada en 🔔 Notificaciones.
 - Línea en el correo diario, agrupada por proveedor.
@@ -434,9 +443,9 @@ el digest, hasta que alguien registre el avance o asigne las casas a mano.
 |---|---|---|
 | `SYS.cutLadders[]` | *(nuevo)* | Base y divisores de corte por marca, editables |
 | `SYS.alertas.diasSinFactura` | *(nuevo)* | Umbral de la alerta de OC pagada sin factura |
-| `oc.status` | valores nuevos | Máquina de estados con reloj |
+
 | `oc.cutPlan[]` | *(nuevo)* | Plan de corte de la orden |
-| `oc.pago` | *(nuevo)* | `{monto, fecha, metodo, comprobanteKey}` |
+| `oc.pago` | *(nuevo)* | `{montoUSD, fecha, metodo, blobId, comprobanteName, registradoPor, registradoAt}` |
 | `p.bodega[]` | `largoM`, `doceavos`, `esEstandar`, `marca`, `origenOcId` | Piezas dimensionadas |
 | `h.purchases[]` | `origen:'corte'` | Etiqueta de presentación |
 | `inv.houseLines[]` | *(se puebla)* | Atribución derivada de avances |
