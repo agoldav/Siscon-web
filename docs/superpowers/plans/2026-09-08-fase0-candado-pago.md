@@ -20,8 +20,11 @@ Microsoft Graph (`Mail.Send`) para el correo · pruebas con scripts `node` plano
 
 - **Un solo archivo de frontend.** Todo el código nuevo va en `siscon-web/index.html`. Sin
   dependencias externas, sin build step, sin frameworks.
-- **Prefijo de módulo `oc*`** para toda función nueva de este plan, según la convención de
-  prefijos por módulo del repo.
+- **Nombres según la convención del repo:** los helpers de dominio OC llevan prefijo `oc*`
+  (`ocIsComplete`, `ocDiasSinFactura`, `ocOpenPagoModal`). Las ventanas flotantes siguen el
+  patrón ya establecido `openXWin()` / `renderXBody()` (como `openBodegaWin` /
+  `renderBodegaBody`), **sin** prefijo `oc`. `parseComprobanteName()` es un parser genérico de
+  nombres de archivo y tampoco lo lleva.
 - **Render por strings:** `el.innerHTML = \`...\`` con template literals. Escapar SIEMPRE el
   texto de usuario con `esc()`.
 - **Moneda base USD.** Formatear con `fmt()` (`$1,234.56`); fechas con `fmtDate()` (dd/mm/aaaa).
