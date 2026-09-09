@@ -190,5 +190,16 @@ ok('el mensaje de pago duplicado informa cuándo (fmtDate) y quién (registradoP
 ok('la guarda de pago duplicado sigue después de la guarda existente de ocIsComplete (no la reemplaza)',
   /function ocOpenPagoModal[\s\S]{0,500}ocIsComplete\(oc\)[\s\S]{0,250}if\(oc\.pago\)/.test(html));
 
+console.log('\nPantalla Listo para pagar:');
+ok('existe openPagosWin', /function openPagosWin\(/.test(html));
+ok('existe renderPagosBody', /function renderPagosBody\(/.test(html));
+ok('la lista se arma solo con OCs listas para pagar',
+  /function renderPagosBody[\s\S]{0,1200}ocsListasParaPagar\(projects\)/.test(html));
+ok('cada fila ofrece registrar el pago',
+  /function renderPagosBody[\s\S]{0,3000}ocOpenPagoModal\(/.test(html));
+ok('hay botón en la barra lateral', /onclick="openPagosWin\(\)"/.test(html));
+ok('el vacío explica el candado en vez de decir solo "sin datos"',
+  /function renderPagosBody[\s\S]{0,3000}incompleta/i.test(html));
+
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);

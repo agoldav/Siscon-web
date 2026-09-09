@@ -821,6 +821,7 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
       <button class="sb-icon" data-newtab="calc" onclick="openCalcWin()" title="Calculadora de Avance · Cmd+clic: pestaña nueva"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><line x1="8" y1="7.5" x2="16" y2="7.5"/><line x1="8" y1="12" x2="8" y2="12"/><line x1="12" y1="12" x2="12" y2="12"/><line x1="16" y1="12" x2="16" y2="12"/><line x1="8" y1="15.5" x2="8" y2="15.5"/><line x1="12" y1="15.5" x2="12" y2="15.5"/><line x1="16" y1="15.5" x2="16" y2="19"/><line x1="8" y1="19" x2="12" y2="19"/></svg></span><span class="sb-txt">Avance</span></button>
       <button class="sb-icon" data-newtab="route" onclick="openRouteWin()" title="Creación de Ruta · Cmd+clic: pestaña nueva"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-7.2 7-12a7 7 0 1 0-14 0c0 4.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.4"/></svg></span><span class="sb-txt">Ruta</span></button>
       <button class="sb-icon" onclick="openBodegaWin()" title="Bodega"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8 12 3l9 5-9 5-9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span><span class="sb-txt">Bodega</span></button>
+      <button class="sb-icon" onclick="openPagosWin()" title="Listo para pagar"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2"/><line x1="2.5" y1="10" x2="21.5" y2="10"/><line x1="6" y1="14.5" x2="10" y2="14.5"/></svg></span><span class="sb-txt">Pagar</span></button>
       <button class="sb-icon" id="sb-ico-unclassified" onclick="openUnclassifiedWin()" title="Documentos sin clasificar"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></span><span class="sb-txt">Sin clas.</span><span id="sb-badge-unclassified" class="notif-badge" style="display:none"></span></button>
       <button class="sb-icon" onclick="openReportsWin()" title="Informes"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="20" x2="5" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="19" y1="20" x2="19" y2="15"/></svg></span><span class="sb-txt">Informes</span></button>
       <button class="sb-icon" onclick="openCotizWin()" title="Cotizaciones CRM"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="4" width="13" height="17" rx="2"/><rect x="9" y="2.3" width="6" height="3" rx="1"/><line x1="8.5" y1="10.5" x2="15.5" y2="10.5"/><line x1="8.5" y1="14.5" x2="15.5" y2="14.5"/><line x1="8.5" y1="18.5" x2="12.5" y2="18.5"/></svg></span><span class="sb-txt">Cotiz.</span></button>
@@ -15711,6 +15712,56 @@ function assignUnclassified(i){
   const key={Invoice:'invClient',Bill:'billVendor',Payment:'payments',CreditMemo:'creditNotes'}[d.type]||'billVendor';
   if(!p[key])p[key]=[]; p[key].push({...d,id:(key.slice(0,2))+'-'+Date.now()});
   SYS.unclassified.splice(i,1); saveData(); renderUnclassBody(); showToast('Documento asignado a '+p.name);
+}
+
+// ========== LISTO PARA PAGAR ==========
+// Vista global: SOLO OCs completas y sin pago registrado. Una OC incompleta no aparece —
+// ese es el candado: lo que no está acá, no se paga.
+function openPagosWin(){
+  if(fwinExists('pagos')){ fwinRestore('pagos'); return; }
+  fwinOpen('pagos',{title:'Listo para pagar',width:940,height:600,dirtyFn:()=>false,
+    bodyHTML:'<div id="pagos-body" style="padding:12px 16px"></div>',
+    footerHTML:`<button class="btn-cancel" onclick="fwinClose('pagos',true)">Cerrar</button>`});
+  renderPagosBody();
+}
+function renderPagosBody(){
+  const el=document.getElementById('pagos-body'); if(!el)return;
+  const filas=ocsListasParaPagar(projects);
+  const total=filas.reduce((s,x)=>s+(Number(x.oc.totalUSD)||0),0);
+  const porProveedor={};
+  filas.forEach(x=>{
+    const k=String(x.oc.vendorName||'— Sin proveedor —');
+    (porProveedor[k]=porProveedor[k]||[]).push(x);
+  });
+  const nombres=Object.keys(porProveedor).sort((a,b)=>a.localeCompare(b,'es'));
+  el.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:12px;color:var(--t2)">${filas.length} orden(es) lista(s) para pagar</div>
+      <div style="font-size:15px;font-weight:700;color:var(--grn)">Total: ${fmt(total)}</div>
+    </div>
+    ${filas.length?nombres.map(nombre=>`
+      <div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:600;color:var(--t1);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">${esc(nombre)}</div>
+        ${porProveedor[nombre].map(({proj,oc})=>`
+          <div class="oc-list-item">
+            <span class="oc-num-badge">${esc(oc.num||'OC')}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;color:var(--t1)">${esc(proj.name)}</div>
+              <div style="font-size:10px;color:var(--t3)">
+                ${oc.houseIds&&oc.houseIds.length?'Casas: '+oc.houseIds.map(id=>{const h=(proj.houses||[]).find(x=>String(x.id)===String(id));return h?esc(h.num):'?';}).join(', '):'Bodega'}
+                ${oc.proforma?' · Proforma: '+esc(oc.proforma):''}
+              </div>
+            </div>
+            <span style="font-size:12px;font-weight:600;color:var(--grn)">${fmt(oc.totalUSD||0)}</span>
+            <button class="btn-sm" onclick="ocOpenPagoModal('${proj.id}','${oc.id}')">💰 Registrar pago</button>
+          </div>`).join('')}
+      </div>`).join('')
+    :`<div style="color:var(--t3);text-align:center;padding:34px;font-size:12px;line-height:1.7">
+        No hay órdenes de compra listas para pagar.<br>
+        <span style="font-size:11px">Una OC aparece acá solo cuando está completa: con proveedor, con casas o bodega,
+        con todas sus líneas imputadas al presupuesto y con monto. Si una OC que esperabas no aparece,
+        está <strong>incompleta</strong> — ábrela y revisá qué le falta.</span>
+      </div>`}`;
 }
 
 // ════════════════════════════════════════════════════════════
