@@ -2897,7 +2897,7 @@ async function migrateLocalStorageToSupabase(){
 
 // ========== ACTIVITY LOG ==========
 let activityLog = [];
-function logAction(action, type, context, before, after){
+function logAction(action, type, context, before, after, projOverride){
   // Autenticarse/cerrar sesión no es un cambio de negocio. Estos eventos deben auditarse fuera del
   // settings compartido; guardarlos en settings/1 invalidaba la versión global de todos los
   // usuarios y provocaba un conflicto apenas una segunda persona iniciaba sesión.
@@ -2906,6 +2906,9 @@ function logAction(action, type, context, before, after){
   const now=Date.now();
   const entropy=(globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function')
     ?globalThis.crypto.randomUUID():Math.random().toString(36).slice(2);
+  // projOverride: proyecto dueño explícito (p.ej. modal de pago de OC abierto desde ventana global,
+  // donde curProj puede ser null o pertenecer a otro proyecto). Por defecto usa curProj como siempre.
+  const _p=projOverride||curProj;
   activityLog.unshift({
     id: `act-${now}-${entropy}`,
     action, type, context,
@@ -2913,8 +2916,8 @@ function logAction(action, type, context, before, after){
     after: after ? JSON.stringify(after).slice(0,200) : null,
     user: currentUser ? currentUser.name : 'Sistema',
     timestamp: new Date().toLocaleString('es-CR'),
-    projectId: curProj ? curProj.id : null,
-    projectName: curProj ? curProj.name : null,
+    projectId: _p ? _p.id : null,
+    projectName: _p ? _p.name : null,
   });
   saveData();
 }
@@ -7645,6 +7648,7 @@ function ocOpenPagoModal(projId,ocId){
   const oc=proj&&(proj.ocs||[]).find(o=>String(o.id)===String(ocId));
   if(!proj||!oc){ alert('No se encontró la orden de compra.'); return; }
   if(!ocIsComplete(oc)){ alert('Esta OC está incompleta y no se puede pagar.'); return; }
+  if(oc.pago){ alert(`Esta OC ya tiene un pago registrado el ${fmtDate(oc.pago.fecha)} por ${oc.pago.registradoPor||'—'}.`); return; }
   _ocPagoCtx={proj,oc,file:null};
   const hoy=new Date().toISOString().slice(0,10);
   document.getElementById('modal-inner').innerHTML=`
@@ -7723,7 +7727,7 @@ function ocConfirmPago(){
     registradoAt:new Date().toISOString() };
   proj.lastActivity=Date.now();
   logAction(`Pago registrado para "${oc.num||'OC'}" (${metodo})`,'log-create','OC',null,
-    {num:oc.num,monto:montoUSD,metodo,proyecto:proj.name});
+    {num:oc.num,monto:montoUSD,metodo,proyecto:proj.name},proj);
   _ocPagoCtx=null;
   closeModal();
   saveData();

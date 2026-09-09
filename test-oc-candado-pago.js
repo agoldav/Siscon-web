@@ -139,5 +139,56 @@ ok('el comprobante se encola para subir a R2',
 ok('el pago queda registrado con autor y fecha',
   /registradoPor:/.test(html) && /registradoAt:/.test(html));
 
+// ============================================================
+// Ronda de arreglo — bugs del brief original (no del agente anterior):
+// 1) logAction() atribuía el pago a curProj (global, puede ser null u otro proyecto) en vez
+//    de al proyecto dueño de la OC.
+// 2) ocOpenPagoModal() no impedía registrar un segundo pago sobre la misma OC.
+// ============================================================
+
+console.log('\nlogAction — atribuye al proyecto dueño de la OC, no a curProj (fix):');
+ok('ocConfirmPago le pasa el proyecto dueño (proj) a logAction, no depende de curProj implícito',
+  /function ocConfirmPago[\s\S]{0,3000}logAction\([\s\S]{0,400},\s*proj\)\s*;/.test(html));
+
+// Prueba de comportamiento real: se extrae logAction del archivo y se ejecuta en un sandbox
+// aislado con curProj apuntando a un proyecto DISTINTO del dueño de la OC — reproduce
+// exactamente el escenario del bug (modal de pago global abierto con otro proyecto activo).
+const logSandbox = {
+  activityLog: [],
+  currentUser: { name: 'Tester' },
+  curProj: { id: 999, name: 'Proyecto Global Abierto (no el dueño de la OC)' },
+  saveData: () => {},
+};
+vm.createContext(logSandbox);
+vm.runInContext(extractFunction('logAction'), logSandbox);
+
+logSandbox.logAction('Pago registrado para "OC-1" (Transferencia)', 'log-create', 'OC', null,
+  { num: 'OC-1' }, { id: 42, name: 'Proyecto Dueño de la OC' });
+const entryConProjOverride = logSandbox.activityLog[0];
+ok('con projOverride, la entrada de auditoría queda con el proyecto dueño de la OC (no curProj)',
+  entryConProjOverride.projectId === 42 && entryConProjOverride.projectName === 'Proyecto Dueño de la OC',
+  JSON.stringify({ projectId: entryConProjOverride.projectId, projectName: entryConProjOverride.projectName }));
+
+logSandbox.logAction('Acción cualquiera sin override', 'log-edit', 'OC', null, { x: 1 });
+const entrySinOverride = logSandbox.activityLog[0];
+ok('sin projOverride, las ~80 llamadas existentes siguen usando curProj exactamente como antes (retrocompatible)',
+  entrySinOverride.projectId === 999 && entrySinOverride.projectName === 'Proyecto Global Abierto (no el dueño de la OC)');
+
+logSandbox.curProj = null;
+logSandbox.logAction('Acción sin override y sin curProj', 'log-edit', 'OC', null, { x: 1 });
+const entrySinCurProj = logSandbox.activityLog[0];
+ok('sin projOverride y con curProj null, el comportamiento previo (huérfano) se mantiene intacto',
+  entrySinCurProj.projectId === null && entrySinCurProj.projectName === null);
+
+console.log('\nocOpenPagoModal — candado de pago duplicado (fix):');
+ok('ocOpenPagoModal rechaza abrir el modal si la OC ya tiene un pago registrado',
+  /function ocOpenPagoModal[\s\S]{0,900}if\(oc\.pago\)\{[\s\S]{0,250}alert\([\s\S]{0,250}return;\s*\}/.test(html));
+ok('la guarda de pago duplicado corre ANTES de armar el contexto del modal (_ocPagoCtx=)',
+  /function ocOpenPagoModal[\s\S]{0,900}if\(oc\.pago\)[\s\S]{0,250}return;[\s\S]{0,150}_ocPagoCtx=/.test(html));
+ok('el mensaje de pago duplicado informa cuándo (fmtDate) y quién (registradoPor) lo registró',
+  /if\(oc\.pago\)\{[\s\S]{0,250}fmtDate\(oc\.pago\.fecha\)[\s\S]{0,150}registradoPor/.test(html));
+ok('la guarda de pago duplicado sigue después de la guarda existente de ocIsComplete (no la reemplaza)',
+  /function ocOpenPagoModal[\s\S]{0,500}ocIsComplete\(oc\)[\s\S]{0,250}if\(oc\.pago\)/.test(html));
+
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);
