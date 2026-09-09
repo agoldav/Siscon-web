@@ -7658,12 +7658,18 @@ function ocsPagadasSinFactura(projectList,umbralDias,hoyISO){
 // Fase 0 — al entrar a la app, avisa de OCs pagadas cuya factura nunca llegó.
 // addNotif() deduplica por texto exacto: al incluir los días, la alerta se refresca al avanzar
 // el contador pero no se repite el mismo día.
-function ocAlertasAutoCheck(){
+async function ocAlertasAutoCheck(){
   const umbral=(SYS.alertas&&Number(SYS.alertas.diasSinFactura))||10;
   const pendientes=ocsPagadasSinFactura(projects,umbral,new Date().toISOString().slice(0,10));
-  pendientes.forEach(({proj,oc,dias})=>{
-    addNotif(`⏳ ${oc.num||'OC'} (${proj.name}) — pagada hace ${dias} días y el proveedor no ha enviado la factura`);
-  });
+  if(!pendientes.length) return;
+  // notifCache arranca vacío en cada carga de página y solo se hidrata en notifLoad(), que hoy
+  // corre 1200ms más tarde desde checkPendingAuthOnLogin(). Sin esperar esa hidratación, el
+  // dedup por texto de addNotif() compara contra un arreglo vacío y duplica la alerta en cada
+  // recarga, para cada usuario. Se espera acá para no depender del orden de los setTimeout.
+  try{ await notifLoad(); }catch(e){ console.warn('ocAlertasAutoCheck notifLoad',e); }
+  for(const {proj,oc,dias} of pendientes){
+    await addNotif(`⏳ ${oc.num||'OC'} (${proj.name}) — pagada hace ${dias} días y el proveedor no ha enviado la factura`);
+  }
 }
 
 // Fase 0 — registro del pago de una OC. Se abre desde la ventana global "Listo para pagar",

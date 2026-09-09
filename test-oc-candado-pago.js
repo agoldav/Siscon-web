@@ -206,8 +206,24 @@ ok('existe ocAlertasAutoCheck', /function ocAlertasAutoCheck\(/.test(html));
 ok('usa el umbral configurable', /function ocAlertasAutoCheck[\s\S]{0,700}SYS\.alertas/.test(html));
 ok('crea notificación con addNotif',
   /function ocAlertasAutoCheck[\s\S]{0,900}addNotif\(/.test(html));
-ok('se dispara tras el login', (html.match(/ocAlertasAutoCheck\(\);/g) || []).length >= 2);
-ok('la automatización de correo está declarada', /paidOcsNoInvoice/.test(html));
+// login() y bootstrapCloudflareAuth() son caminos de login mutuamente excluyentes (usuario/clave vs.
+// Cloudflare Access). Contar ocurrencias en TODO el archivo no distingue: una implementación que
+// pusiera las dos llamadas dentro de una sola función (dejando la otra sin disparar la alerta)
+// pasaría igual. Se acota la búsqueda al cuerpo de cada función por separado.
+ok('se dispara tras el login por usuario/clave (login())',
+  extractFunction('login').includes('ocAlertasAutoCheck();'));
+ok('se dispara tras el login por Cloudflare Access (bootstrapCloudflareAuth())',
+  extractFunction('bootstrapCloudflareAuth').includes('ocAlertasAutoCheck();'));
+// El string 'paidOcsNoInvoice' por sí solo pasaría con solo un comentario, o con la declaración
+// inicial sin la migración (o viceversa) — la migración es lo más fácil de romper porque instalaciones
+// existentes cargan datos guardados sin el campo. Se verifican las dos ubicaciones por separado.
+ok('paidOcsNoInvoice declarada en el SYS inicial (junto a pendingBillsDigest)',
+  /pendingBillsDigest:\s*\{[\s\S]{0,600}paidOcsNoInvoice:\s*\{[\s\S]{0,400}\}/.test(html));
+ok('paidOcsNoInvoice migrada en applyDefaults() con recipients garantizado como arreglo', (() => {
+  const body = extractFunction('applyDefaults');
+  return /SYS\.emailAutomations\.paidOcsNoInvoice\s*=\s*\{/.test(body)
+    && /Array\.isArray\(SYS\.emailAutomations\.paidOcsNoInvoice\.recipients\)/.test(body);
+})());
 
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);
