@@ -201,5 +201,13 @@ ok('hay botón en la barra lateral', /onclick="openPagosWin\(\)"/.test(html));
 ok('el vacío explica el candado en vez de decir solo "sin datos"',
   /function renderPagosBody[\s\S]{0,3000}incompleta/i.test(html));
 
+console.log('\nAlerta de OC pagada sin factura:');
+ok('existe ocAlertasAutoCheck', /function ocAlertasAutoCheck\(/.test(html));
+ok('usa el umbral configurable', /function ocAlertasAutoCheck[\s\S]{0,700}SYS\.alertas/.test(html));
+ok('crea notificación con addNotif',
+  /function ocAlertasAutoCheck[\s\S]{0,900}addNotif\(/.test(html));
+ok('se dispara tras el login', (html.match(/ocAlertasAutoCheck\(\);/g) || []).length >= 2);
+ok('la automatización de correo está declarada', /paidOcsNoInvoice/.test(html));
+
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);

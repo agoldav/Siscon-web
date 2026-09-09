@@ -997,6 +997,12 @@ let SYS = {
       enabled: true,
       recipients: [],
     },
+    paidOcsNoInvoice: {
+      label: 'OCs pagadas sin factura del proveedor',
+      description: 'Resumen diario (10:00pm) de órdenes de compra ya pagadas cuya factura del proveedor todavía no llega.',
+      enabled: true,
+      recipients: [],
+    },
   },
   // Fase 0 — umbral de la alerta "OC pagada sin factura del proveedor".
   alertas: { diasSinFactura: 10 },
@@ -2795,6 +2801,12 @@ function applyDefaults(sys){
     enabled:true, recipients:[],
   };
   if(!Array.isArray(SYS.emailAutomations.pendingBillsDigest.recipients))SYS.emailAutomations.pendingBillsDigest.recipients=[];
+  if(!SYS.emailAutomations.paidOcsNoInvoice)SYS.emailAutomations.paidOcsNoInvoice={
+    label:'OCs pagadas sin factura del proveedor',
+    description:'Resumen diario (10:00pm) de órdenes de compra ya pagadas cuya factura del proveedor todavía no llega.',
+    enabled:true, recipients:[],
+  };
+  if(!Array.isArray(SYS.emailAutomations.paidOcsNoInvoice.recipients))SYS.emailAutomations.paidOcsNoInvoice.recipients=[];
   // notifications/pendingAuthRequests (VUL-044 parte 1.5): ya no viven en SYS, ver notifCache/pendingAuthCache.
 }
 
@@ -3254,6 +3266,7 @@ async function login(){
     checkNewWinOverride();
     msAutoSync();
     msgAutoSync();
+    ocAlertasAutoCheck();
     setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);
     setTimeout(()=>checkPendingAuthOnLogin(), 1200);
     if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);
@@ -3352,6 +3365,7 @@ async function bootstrapCloudflareAuth(){
     checkNewWinOverride();
     msAutoSync();
     msgAutoSync();
+    ocAlertasAutoCheck();
     setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);
     setTimeout(()=>checkPendingAuthOnLogin(), 1200);
     if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);
@@ -7639,6 +7653,17 @@ function ocsPagadasSinFactura(projectList,umbralDias,hoyISO){
     });
   });
   return out.sort((a,b)=>b.dias-a.dias);
+}
+
+// Fase 0 — al entrar a la app, avisa de OCs pagadas cuya factura nunca llegó.
+// addNotif() deduplica por texto exacto: al incluir los días, la alerta se refresca al avanzar
+// el contador pero no se repite el mismo día.
+function ocAlertasAutoCheck(){
+  const umbral=(SYS.alertas&&Number(SYS.alertas.diasSinFactura))||10;
+  const pendientes=ocsPagadasSinFactura(projects,umbral,new Date().toISOString().slice(0,10));
+  pendientes.forEach(({proj,oc,dias})=>{
+    addNotif(`⏳ ${oc.num||'OC'} (${proj.name}) — pagada hace ${dias} días y el proveedor no ha enviado la factura`);
+  });
 }
 
 // Fase 0 — registro del pago de una OC. Se abre desde la ventana global "Listo para pagar",
