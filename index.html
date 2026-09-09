@@ -997,6 +997,8 @@ let SYS = {
       recipients: [],
     },
   },
+  // Fase 0 — umbral de la alerta "OC pagada sin factura del proveedor".
+  alertas: { diasSinFactura: 10 },
   googleMapsKey: 'AIzaSyCFKPbq02rnkIAe3cnzSeS7ztSoVP8TuTA',
   backendUrl: '',   // URL del backend (proxy) p.ej. https://siscon-backend.onrender.com
   backendToken: '', // token compartido opcional
@@ -2784,6 +2786,8 @@ function applyDefaults(sys){
   if(!SYS.stats)SYS.stats={open:true,scope:'todos',time:'todo',from:'',to:'',showGastado:false,showPendiente:false,cashWindow:'1m',cashProjects:null,unbilledProjects:null};
   if(!SYS.cotizaciones)SYS.cotizaciones=[];
   if(!SYS.emailAutomations)SYS.emailAutomations={};
+  if(!SYS.alertas)SYS.alertas={};
+  if(!(Number(SYS.alertas.diasSinFactura)>0))SYS.alertas.diasSinFactura=10;
   if(!SYS.emailAutomations.pendingBillsDigest)SYS.emailAutomations.pendingBillsDigest={
     label:'Facturas pendientes de clasificar',
     description:'Resumen diario (10:00pm) de facturas de proveedor guardadas con líneas sin casa asignada, agrupado por proyecto.',
@@ -7554,6 +7558,30 @@ function ocFmtNum(usdVal){
   const isCRC = st.vendorCurrency==='CRC' && !st.showUSD;
   if(isCRC) return ((usdVal||0)*(st.exchangeRate||SYS.exchangeRate)).toFixed(2);
   return (usdVal||0).toFixed(2);
+}
+
+// Fase 0 — una OC está "completa" (lista para pagar) cuando se puede pagar sin ambigüedad.
+// NO es un status nuevo: se deriva. El status existente (Borrador/Enviada/...) sigue reflejando
+// el ciclo de QuickBooks y no se toca.
+function ocIsComplete(oc){
+  if(!oc) return false;
+  if(oc.status==='Cancelada') return false;
+  if(!String(oc.vendorName||'').trim()) return false;
+  if(!(Number(oc.totalUSD)>0)) return false;
+  const houseIds=Array.isArray(oc.houseIds)?oc.houseIds:[];
+  const bodegaLines=(Array.isArray(oc.bodegaLines)?oc.bodegaLines:[]).filter(l=>(Number(l.qty)||0)>0);
+  if(!houseIds.length && !bodegaLines.length) return false;
+  let anyLine=bodegaLines.length>0;
+  for(const hid of houseIds){
+    const lines=(oc.lines&&oc.lines[hid])||[];
+    for(const l of lines){
+      if((Number(l.qty)||0)<=0) continue;   // línea en cero: no bloquea
+      anyLine=true;
+      if(l.isExtra){ if(!String(l.authorizedBy||'').trim()) return false; }
+      else if(l.lineId==null||l.lineId==='') return false;
+    }
+  }
+  return anyLine;
 }
 
 // Cantidad ya solicitada de un material (lineId del tipo) para una casa, sumando todas las OCs excepto la actual
