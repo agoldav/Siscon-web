@@ -7605,6 +7605,37 @@ function parseComprobanteName(fileName){
     proyecto: parts[parts.length-1],
   };
 }
+// Fase 0 — OCs completas que todavía no tienen pago registrado: son las únicas pagables.
+function ocsListasParaPagar(projectList){
+  const out=[];
+  (Array.isArray(projectList)?projectList:[]).forEach(proj=>{
+    (Array.isArray(proj&&proj.ocs)?proj.ocs:[]).forEach(oc=>{
+      if(oc&&!oc.pago&&ocIsComplete(oc)) out.push({proj,oc});
+    });
+  });
+  return out;
+}
+// Días transcurridos desde el pago sin que llegue la factura del proveedor.
+// null = no aplica (sin pago, o la factura ya llegó y saveVendorBill puso status='Facturada').
+function ocDiasSinFactura(oc,hoyISO){
+  if(!oc||!oc.pago||!oc.pago.fecha) return null;
+  if(oc.status==='Facturada') return null;
+  const pagado=new Date(oc.pago.fecha+'T00:00:00');
+  const hoy=new Date(String(hoyISO||new Date().toISOString().slice(0,10))+'T00:00:00');
+  if(isNaN(pagado)||isNaN(hoy)) return null;
+  return Math.floor((hoy-pagado)/864e5);
+}
+function ocsPagadasSinFactura(projectList,umbralDias,hoyISO){
+  const umbral=Number(umbralDias)>0?Number(umbralDias):10;
+  const out=[];
+  (Array.isArray(projectList)?projectList:[]).forEach(proj=>{
+    (Array.isArray(proj&&proj.ocs)?proj.ocs:[]).forEach(oc=>{
+      const dias=ocDiasSinFactura(oc,hoyISO);
+      if(dias!=null&&dias>=umbral) out.push({proj,oc,dias});
+    });
+  });
+  return out.sort((a,b)=>b.dias-a.dias);
+}
 
 // Cantidad ya solicitada de un material (lineId del tipo) para una casa, sumando todas las OCs excepto la actual
 function ocOrderedQty(p, houseId, lineId, excludeOcId){

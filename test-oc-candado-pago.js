@@ -35,7 +35,8 @@ function ok(name, cond, extra) {
 
 const sandbox = {};
 vm.createContext(sandbox);
-vm.runInContext(['ocIsComplete', 'parseComprobanteName'].map(extractFunction).join('\n'), sandbox);
+vm.runInContext(['ocIsComplete', 'parseComprobanteName', 'ocsListasParaPagar',
+  'ocDiasSinFactura', 'ocsPagadasSinFactura'].map(extractFunction).join('\n'), sandbox);
 
 // OC mínima válida: proveedor, una casa, una línea imputada al presupuesto, monto.
 const ocOk = {
@@ -94,6 +95,34 @@ ok('sin OC en el nombre igual devuelve el resto',
 ok('monto no numérico queda en null',
   (() => { const r = sandbox.parseComprobanteName('Prov-abc-OC-2026-001-x-Proy.pdf');
            return r && r.montoUSD === null; })());
+
+console.log('\nSelectores:');
+const mkOc = extra => ({ id: 'oc-1', num: 'OC-2026-014', status: 'Borrador', vendorName: 'Polycenter',
+  totalUSD: 100, houseIds: ['h-1'], bodegaLines: [],
+  lines: { 'h-1': [{ lineId: 'l-1', qty: 1 }] }, ...extra });
+
+const projs = [
+  { id: 1, name: 'A', ocs: [mkOc({ id: 'oc-a' }), mkOc({ id: 'oc-b', vendorName: '' })] },
+  { id: 2, name: 'B', ocs: [mkOc({ id: 'oc-c', pago: { fecha: '2026-09-01' } })] },
+  { id: 3, name: 'C' },   // sin arreglo ocs
+];
+
+const listas = sandbox.ocsListasParaPagar(projs);
+ok('solo lista OCs completas y sin pago', listas.length === 1 && listas[0].oc.id === 'oc-a',
+  listas.map(x => x.oc.id).join(','));
+ok('incluye el proyecto dueño', listas[0].proj.name === 'A');
+ok('proyecto sin ocs no revienta', Array.isArray(sandbox.ocsListasParaPagar(projs)));
+ok('lista vacía con entrada vacía', sandbox.ocsListasParaPagar([]).length === 0);
+
+ok('días desde el pago', sandbox.ocDiasSinFactura({ pago: { fecha: '2026-09-01' } }, '2026-09-11') === 10);
+ok('OC sin pago devuelve null', sandbox.ocDiasSinFactura({}, '2026-09-11') === null);
+ok('OC ya facturada devuelve null',
+  sandbox.ocDiasSinFactura({ status: 'Facturada', pago: { fecha: '2026-09-01' } }, '2026-09-11') === null);
+
+const alertas = sandbox.ocsPagadasSinFactura(projs, 10, '2026-09-11');
+ok('alerta cuando pasa el umbral', alertas.length === 1 && alertas[0].oc.id === 'oc-c');
+ok('reporta los días', alertas[0].dias === 10);
+ok('no alerta antes del umbral', sandbox.ocsPagadasSinFactura(projs, 10, '2026-09-05').length === 0);
 
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);
