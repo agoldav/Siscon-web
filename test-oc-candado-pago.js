@@ -124,5 +124,20 @@ ok('alerta cuando pasa el umbral', alertas.length === 1 && alertas[0].oc.id === 
 ok('reporta los días', alertas[0].dias === 10);
 ok('no alerta antes del umbral', sandbox.ocsPagadasSinFactura(projs, 10, '2026-09-05').length === 0);
 
+console.log('\nCableado del modal de pago:');
+ok('existe ocOpenPagoModal', /function ocOpenPagoModal\(/.test(html));
+ok('existe ocConfirmPago', /function ocConfirmPago\(/.test(html));
+ok('el modal prellena desde el nombre del archivo',
+  /function ocPagoFilePicked[\s\S]{0,900}parseComprobanteName\(/.test(html));
+ok('el comprobante va al proyecto dueño de la OC, no a curProj',
+  /function ocConfirmPago[\s\S]{0,2600}proj\.uploads/.test(html) &&
+  !/function ocConfirmPago[\s\S]{0,2600}curProj\.uploads/.test(html));
+ok('transferencia exige comprobante',
+  /function ocConfirmPago[\s\S]{0,2000}Transferencia[\s\S]{0,400}alert\(/.test(html));
+ok('el comprobante se encola para subir a R2',
+  /function ocConfirmPago[\s\S]{0,2600}_pendingDocFiles\.set\(/.test(html));
+ok('el pago queda registrado con autor y fecha',
+  /registradoPor:/.test(html) && /registradoAt:/.test(html));
+
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);

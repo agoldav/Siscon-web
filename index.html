@@ -7637,6 +7637,100 @@ function ocsPagadasSinFactura(projectList,umbralDias,hoyISO){
   return out.sort((a,b)=>b.dias-a.dias);
 }
 
+// Fase 0 — registro del pago de una OC. Se abre desde la ventana global "Listo para pagar",
+// así que SIEMPRE trabaja sobre el proyecto dueño de la OC, nunca sobre curProj.
+let _ocPagoCtx=null;   // {proj, oc, file}
+function ocOpenPagoModal(projId,ocId){
+  const proj=projects.find(p=>String(p.id)===String(projId));
+  const oc=proj&&(proj.ocs||[]).find(o=>String(o.id)===String(ocId));
+  if(!proj||!oc){ alert('No se encontró la orden de compra.'); return; }
+  if(!ocIsComplete(oc)){ alert('Esta OC está incompleta y no se puede pagar.'); return; }
+  _ocPagoCtx={proj,oc,file:null};
+  const hoy=new Date().toISOString().slice(0,10);
+  document.getElementById('modal-inner').innerHTML=`
+    <div class="modal-title">Registrar pago — ${esc(oc.num||'OC')}
+      <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div style="font-size:12px;color:var(--t2);margin-bottom:12px">
+      ${esc(oc.vendorName||'—')} · ${esc(proj.name)} · ${fmt(oc.totalUSD||0)}
+    </div>
+    <div class="ff-row">
+      <div class="ff"><label>Monto pagado (USD)</label>
+        <input id="oc-pago-monto" type="number" step="0.01" min="0" value="${Number(oc.totalUSD||0).toFixed(2)}"/></div>
+      <div class="ff"><label>Fecha de pago</label>
+        <input id="oc-pago-fecha" type="date" value="${hoy}"/></div>
+    </div>
+    <div class="ff"><label>Método de pago</label>
+      <span class="ivasel" style="display:block"><select id="oc-pago-metodo" onchange="ocPagoRenderHint()">
+        <option>Transferencia</option><option>Tarjeta</option>
+        <option>Caja Chica</option><option>Reembolso</option>
+      </select></span>
+    </div>
+    <div class="ff"><label>Comprobante</label>
+      <button class="btn-sm" onclick="document.getElementById('oc-pago-file').click()">📎 Elegir archivo</button>
+      <input id="oc-pago-file" type="file" accept="application/pdf,image/*" style="display:none" onchange="ocPagoFilePicked(this)"/>
+      <div id="oc-pago-fname" style="font-size:11px;color:var(--t3);margin-top:5px">Ninguno seleccionado</div>
+      <div id="oc-pago-hint" style="font-size:10px;color:var(--amb);margin-top:3px"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-save" onclick="ocConfirmPago()">Registrar pago</button>
+    </div>`;
+  ocPagoRenderHint();
+  document.getElementById('modal').classList.remove('hidden');
+}
+function ocPagoRenderHint(){
+  const el=document.getElementById('oc-pago-hint'); if(!el)return;
+  const metodo=(document.getElementById('oc-pago-metodo')||{}).value||'';
+  el.textContent=metodo==='Transferencia'?'El comprobante es obligatorio para transferencias.':'';
+}
+// Prellena monto y fecha desde la convención PROVEEDOR-MONTO-#OC-#PROFORMA-PROYECTO.
+function ocPagoFilePicked(input){
+  const f=input&&input.files&&input.files[0]; if(!f||!_ocPagoCtx)return;
+  _ocPagoCtx.file=f;
+  const el=document.getElementById('oc-pago-fname'); if(el)el.textContent=f.name;
+  const parsed=parseComprobanteName(f.name);
+  if(parsed&&parsed.montoUSD!=null){
+    const inp=document.getElementById('oc-pago-monto');
+    if(inp)inp.value=parsed.montoUSD.toFixed(2);
+  }
+}
+function ocConfirmPago(){
+  if(!_ocPagoCtx)return;
+  const {proj,oc,file}=_ocPagoCtx;
+  const montoUSD=parseFloat((document.getElementById('oc-pago-monto')||{}).value)||0;
+  const fecha=(document.getElementById('oc-pago-fecha')||{}).value||new Date().toISOString().slice(0,10);
+  const metodo=(document.getElementById('oc-pago-metodo')||{}).value||'Transferencia';
+  if(!(montoUSD>0)){ alert('Ingresa un monto mayor a 0.'); return; }
+  if(metodo==='Transferencia'&&!file){ alert('Adjunta el comprobante de la transferencia.'); return; }
+  let blobId='';
+  if(file){
+    blobId='blob_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+    docBlobMap[blobId]=URL.createObjectURL(file);
+    if(!proj.uploads)proj.uploads=[];
+    proj.uploads.push({
+      id:'up-'+Date.now()+'_'+Math.random().toString(36).slice(2),
+      name:file.name, type:(file.name.split('.').pop()||'PDF').toUpperCase(),
+      category:'Comprobante de Pago', date:fecha,
+      size:(file.size/1024).toFixed(0)+' KB', blobId, url:docBlobMap[blobId],
+      notes:'Pago de '+(oc.num||'OC'),
+    });
+    _pendingDocFiles.set(blobId,file);
+  }
+  oc.pago={ montoUSD, fecha, metodo, blobId,
+    comprobanteName:file?file.name:'',
+    registradoPor:currentUser?currentUser.name:'Sistema',
+    registradoAt:new Date().toISOString() };
+  proj.lastActivity=Date.now();
+  logAction(`Pago registrado para "${oc.num||'OC'}" (${metodo})`,'log-create','OC',null,
+    {num:oc.num,monto:montoUSD,metodo,proyecto:proj.name});
+  _ocPagoCtx=null;
+  closeModal();
+  saveData();
+  showToast('✅ Pago registrado');
+  if(typeof renderPagosBody==='function'&&fwinExists('pagos'))renderPagosBody();
+}
+
 // Cantidad ya solicitada de un material (lineId del tipo) para una casa, sumando todas las OCs excepto la actual
 function ocOrderedQty(p, houseId, lineId, excludeOcId){
   let q=0;
