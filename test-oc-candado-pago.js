@@ -35,7 +35,7 @@ function ok(name, cond, extra) {
 
 const sandbox = {};
 vm.createContext(sandbox);
-vm.runInContext(['ocIsComplete'].map(extractFunction).join('\n'), sandbox);
+vm.runInContext(['ocIsComplete', 'parseComprobanteName'].map(extractFunction).join('\n'), sandbox);
 
 // OC mínima válida: proveedor, una casa, una línea imputada al presupuesto, monto.
 const ocOk = {
@@ -71,6 +71,29 @@ ok('OC cancelada nunca está completa',
   sandbox.ocIsComplete({ ...ocOk, status: 'Cancelada' }) === false);
 ok('null / undefined no revientan',
   sandbox.ocIsComplete(null) === false && sandbox.ocIsComplete(undefined) === false);
+
+console.log('\nparseComprobanteName:');
+const p1 = sandbox.parseComprobanteName('Polycenter-883.11-OC-2026-014-PRO 5567-116 Este.pdf');
+ok('proveedor', p1 && p1.proveedor === 'Polycenter', p1 && p1.proveedor);
+ok('monto', p1 && p1.montoUSD === 883.11, p1 && p1.montoUSD);
+ok('número de OC reconstruido', p1 && p1.ocNum === 'OC-2026-014', p1 && p1.ocNum);
+ok('proforma', p1 && p1.proforma === 'PRO 5567', p1 && p1.proforma);
+ok('proyecto', p1 && p1.proyecto === '116 Este', p1 && p1.proyecto);
+
+const p2 = sandbox.parseComprobanteName('Extralum-1,250.00-OC-2026-7-4821-Dor.jpg');
+ok('monto con separador de miles', p2 && p2.montoUSD === 1250, p2 && p2.montoUSD);
+ok('consecutivo de OC de un dígito se rellena a 3', p2 && p2.ocNum === 'OC-2026-007', p2 && p2.ocNum);
+
+ok('nombre sin suficientes partes devuelve null',
+  sandbox.parseComprobanteName('comprobante.pdf') === null);
+ok('nombre vacío devuelve null', sandbox.parseComprobanteName('') === null);
+ok('null no revienta', sandbox.parseComprobanteName(null) === null);
+ok('sin OC en el nombre igual devuelve el resto',
+  (() => { const r = sandbox.parseComprobanteName('Ferretería X-45.00-sin ref-Proyecto Z.pdf');
+           return r && r.ocNum === '' && r.proveedor === 'Ferretería X' && r.proyecto === 'Proyecto Z'; })());
+ok('monto no numérico queda en null',
+  (() => { const r = sandbox.parseComprobanteName('Prov-abc-OC-2026-001-x-Proy.pdf');
+           return r && r.montoUSD === null; })());
 
 console.log(`\n${pass} pruebas OK, ${fail} fallas`);
 process.exit(fail ? 1 : 0);

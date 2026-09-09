@@ -7584,6 +7584,28 @@ function ocIsComplete(oc){
   return anyLine;
 }
 
+// Fase 0 — lee la convención de nombre que el usuario ya usa para los comprobantes:
+//   PROVEEDOR-MONTO-#OC-#PROFORMA-NOMBRE DEL PROYECTO
+// Conveniencia para prellenar el modal de pago. Nunca lanza; si no calza, devuelve null.
+function parseComprobanteName(fileName){
+  const base=String(fileName==null?'':fileName).replace(/\.[A-Za-z0-9]{1,5}$/,'').trim();
+  if(!base) return null;
+  const parts=base.split('-').map(s=>s.trim()).filter(s=>s!=='');
+  if(parts.length<3) return null;
+  const monto=parseFloat(String(parts[1]).replace(/,/g,'').replace(/[^\d.]/g,''));
+  const medio=parts.slice(2,-1).join('-');
+  const ocM=medio.match(/OC-?(\d{4})-?(\d{1,4})/i);
+  const ocNum=ocM?('OC-'+ocM[1]+'-'+String(ocM[2]).padStart(3,'0')):'';
+  const proforma=medio.replace(/OC-?\d{4}-?\d{1,4}/i,'').replace(/^[-\s]+|[-\s]+$/g,'').trim();
+  return {
+    proveedor: parts[0],
+    montoUSD: Number.isFinite(monto)?monto:null,
+    ocNum,
+    proforma,
+    proyecto: parts[parts.length-1],
+  };
+}
+
 // Cantidad ya solicitada de un material (lineId del tipo) para una casa, sumando todas las OCs excepto la actual
 function ocOrderedQty(p, houseId, lineId, excludeOcId){
   let q=0;
