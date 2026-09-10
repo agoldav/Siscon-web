@@ -35,7 +35,7 @@ function ok(name, cond, extra) {
 
 const sandbox = {};
 vm.createContext(sandbox);
-vm.runInContext(['ocIsComplete', 'parseComprobanteName', 'ocsListasParaPagar',
+vm.runInContext(['crcCleanMonto', 'ocIsComplete', 'parseComprobanteName', 'ocsListasParaPagar',
   'ocDiasSinFactura', 'ocsPagadasSinFactura'].map(extractFunction).join('\n'), sandbox);
 
 // OC mínima válida: proveedor, una casa, una línea imputada al presupuesto, monto.
@@ -153,6 +153,52 @@ ok('punto 4 — en dólares el punto sigue siendo decimal: $1,250.00 = 1250, no 
 // forma de saber si el separador de miles pretendido es CRC o USD sin el símbolo.
 ok('punto 4 — sin símbolo de moneda, el punto sigue siendo decimal (comportamiento previo intacto)',
   sandbox.parseComprobanteName('Extralum-1,250.00-OC-2026-7-4821-Dor.jpg').monto === 1250);
+
+// ---------- Arreglo final (2026-09-10, punto 2) — CRC con decimales ya no se infla ×100 ----------
+// La regla anterior (punto 4, arriba) trataba punto Y coma SIEMPRE como separador de miles en
+// colones. Correcto para ₡450.000 (450000), pero ₡450000.50 daba 45000050 (×100) y ₡100.5 daba
+// 1005 — un pago en colones CON decimales se registraba cien veces más grande. Heurística nueva
+// (crcCleanMonto()): el separador ('.' o ',') más a la derecha es de MILES solo si lo siguen
+// exactamente 3 dígitos y nada más después; si no, es decimal y todo separador anterior sí es de
+// miles. Se prueba crcCleanMonto() directo y también a través de parseComprobanteName() (con el
+// símbolo real pegado al monto, como llega desde el nombre del archivo).
+console.log('\ncrcCleanMonto (arreglo final, punto 2) — decimales en colones ya no se inflan ×100:');
+ok('crcCleanMonto — miles con un solo grupo: 450.000 → 450000 (sin cambio de comportamiento)',
+  sandbox.crcCleanMonto('450.000') === 450000, sandbox.crcCleanMonto('450.000'));
+ok('crcCleanMonto — miles con varios grupos: 1.250.000 → 1250000',
+  sandbox.crcCleanMonto('1.250.000') === 1250000, sandbox.crcCleanMonto('1.250.000'));
+ok('crcCleanMonto — decimal de 2 dígitos tras miles: 450000.50 → 450000.50 (NO 45000050)',
+  sandbox.crcCleanMonto('450000.50') === 450000.5, sandbox.crcCleanMonto('450000.50'));
+ok('crcCleanMonto — decimal de 1 dígito sin miles: 100.5 → 100.5 (NO 1005)',
+  sandbox.crcCleanMonto('100.5') === 100.5, sandbox.crcCleanMonto('100.5'));
+ok('crcCleanMonto — separadores mixtos: 12,345.67 → 12345.67 (coma=miles, punto=decimal)',
+  sandbox.crcCleanMonto('12,345.67') === 12345.67, sandbox.crcCleanMonto('12,345.67'));
+ok('crcCleanMonto — decimal de 4 dígitos (no exactamente 3): 450.0000 → 450 (no se confunde con miles)',
+  sandbox.crcCleanMonto('450.0000') === 450, sandbox.crcCleanMonto('450.0000'));
+
+const pDecimalCRC = sandbox.parseComprobanteName('Extralum-₡450000.50-OC-2026-014-4821-Dor.pdf');
+ok('punto 2 — ₡450000.50 vía parseComprobanteName da 450000.50, no 45000050',
+  pDecimalCRC && pDecimalCRC.monto === 450000.5 && pDecimalCRC.moneda === 'CRC',
+  JSON.stringify(pDecimalCRC));
+const pMilesGrandeCRC = sandbox.parseComprobanteName('Extralum-₡1.250.000-OC-2026-014-4821-Dor.pdf');
+ok('punto 2 — ₡1.250.000 vía parseComprobanteName da 1250000 (varios grupos de miles)',
+  pMilesGrandeCRC && pMilesGrandeCRC.monto === 1250000, pMilesGrandeCRC && pMilesGrandeCRC.monto);
+const pDecimalChicoCRC = sandbox.parseComprobanteName('Extralum-¢100.5-OC-2026-014-4821-Dor.pdf');
+ok('punto 2 — ¢100.5 vía parseComprobanteName da 100.5, no 1005',
+  pDecimalChicoCRC && pDecimalChicoCRC.monto === 100.5, pDecimalChicoCRC && pDecimalChicoCRC.monto);
+const pMixtoCRC = sandbox.parseComprobanteName('Extralum-₡12,345.67-OC-2026-014-4821-Dor.pdf');
+ok('punto 2 — ₡12,345.67 vía parseComprobanteName da 12345.67 (separadores mixtos)',
+  pMixtoCRC && pMixtoCRC.monto === 12345.67, pMixtoCRC && pMixtoCRC.monto);
+
+// El camino USD y el camino "sin símbolo" NO pasan por crcCleanMonto — barrido aparte (ver
+// moneda-final-report.md) confirmó 78/78 combinaciones idénticas bit a bit antes/después de este
+// cambio. Estas dos aserciones lo dejan también como regresión dentro de la suite: un monto CON
+// coma+punto en dólares, y el mismo patrón sin símbolo, tienen que seguir usando la regla vieja
+// (coma=miles, punto=decimal) y NO la heurística nueva de CRC.
+ok('punto 2 — el camino USD no usa la heurística nueva: $12,345.67 sigue siendo 12345.67 (coma=miles siempre, no condicional)',
+  sandbox.parseComprobanteName('Polycenter-$12,345.67-OC-2026-014-4821-Dor.pdf').monto === 12345.67);
+ok('punto 2 — sin símbolo tampoco usa la heurística nueva: 12,345.67 sigue siendo 12345.67',
+  sandbox.parseComprobanteName('Extralum-12,345.67-OC-2026-014-4821-Dor.pdf').monto === 12345.67);
 
 console.log('\nSelectores:');
 // C1(b) — desde esta ola de arreglos, `ocsListasParaPagar()` exige el sello `createdAtISO`, que
@@ -1002,6 +1048,89 @@ ok('punto 7 — sin _ocPagoCtx (modal cerrado a mitad de camino) ninguna de las 
            monedaSandbox.document = { getElementById: () => null };
            try { monedaSandbox.ocPagoMonedaChanged(); monedaSandbox.ocPagoMontoEditadoManual(); return true; }
            catch (e) { return false; } })());
+
+// ---------- Arreglo final (2026-09-10) — ocPagoFilePicked ya no saltea el recálculo del sugerido ----------
+// ocPagoFilePicked() cambiaba el selector de moneda y llamaba a ocPagoRenderMontoLabel() DIRECTO,
+// salteando ocPagoMonedaChanged(). Con un nombre de archivo que trae símbolo de moneda pero cuyo
+// monto NO se puede parsear (el número cae en un segmento distinto del que trae el símbolo, p.ej.
+// "Extralum-₡-450000-...", donde parts[1] es solo "₡"), el selector pasaba a CRC y el rótulo decía
+// "Monto pagado (₡)" pero el campo se quedaba con el sugerido en dólares (oc.totalUSD, p.ej.
+// 883.11) — ahora leído como ₡883,11. Es el mismo modo de falla que ocPagoMonedaChanged() (punto 7)
+// existe para prevenir, entrando por otra puerta. El arreglo cambia esa llamada por
+// ocPagoMonedaChanged(), que además de renderizar el rótulo recalcula el sugerido cuando
+// corresponde. Reusa monedaSandbox (con SYS.exchangeRate=500 y _ocPagoResolve/tcGet/
+// ocPagoRenderMontoLabel/ocPagoMonedaChanged/ocPagoMontoEditadoManual ya cargados arriba).
+console.log('\nArreglo final — ocPagoFilePicked ya no saltea el recálculo del monto sugerido:');
+vm.runInContext([
+  extractFunction('crcCleanMonto'),
+  extractFunction('parseComprobanteName'),
+  extractFunction('ocPagoFormatos'),
+  extractFunction('ocPagoExtOk'),
+  extractFunction('ocPagoNumCoincide'),
+  extractFunction('ocPagoFilePicked'),
+].join('\n'), monedaSandbox);
+
+function runFilePicked({ fileName, montoEsSugerido = true, totalUSD = 883.11, montoActual = '883.11',
+                          monedaInicial = 'USD', ocNumReal = 'OC-2026-014' }) {
+  monedaSandbox.projects = [{ id: 7, ocs: [{ id: 'oc-14', num: ocNumReal, totalUSD }] }];
+  monedaSandbox._ocPagoCtx = { projId: 7, ocId: 'oc-14', montoEsSugerido, file: null };
+  const campos = {
+    'oc-pago-moneda': { value: monedaInicial },
+    'oc-pago-monto': { value: montoActual },
+    'oc-pago-monto-label': { textContent: '' },
+    'oc-pago-fname': { textContent: '' },
+    'oc-pago-warn': { textContent: '' },
+  };
+  monedaSandbox.document = { getElementById: id => campos[id] || null };
+  monedaSandbox.alert = () => {};
+  const input = { files: [{ name: fileName }], value: '' };
+  monedaSandbox.ocPagoFilePicked(input);
+  return { campos, ctx: monedaSandbox._ocPagoCtx };
+}
+
+// Los dos ejemplos EXACTOS del brief: símbolo de moneda presente, monto ILEGIBLE.
+for (const fileName of [
+  'Extralum-₡-450000-OC-2026-007-4821-Dor.pdf',
+  'Extralum-¢-OC-2026-007-4821-Dor.pdf',
+]) {
+  const parsedCheck = monedaSandbox.parseComprobanteName(fileName);
+  ok(`arreglo final — precondición: "${fileName}" trae símbolo de moneda pero el monto NO se puede parsear (repro exacto del bug)`,
+    parsedCheck && parsedCheck.moneda === 'CRC' && parsedCheck.monto === null,
+    JSON.stringify(parsedCheck));
+
+  const { campos } = runFilePicked({ fileName, montoEsSugerido: true, totalUSD: 883.11, montoActual: '883.11', monedaInicial: 'USD' });
+  ok(`arreglo final — "${fileName}": el selector pasa a CRC`,
+    campos['oc-pago-moneda'].value === 'CRC');
+  ok(`arreglo final — "${fileName}": el rótulo dice "Monto pagado (₡)"`,
+    campos['oc-pago-monto-label'].textContent === 'Monto pagado (₡)');
+  ok(`arreglo final — "${fileName}": el campo YA NO se queda con el sugerido en dólares (883.11, que se leería como ₡883,11) — se recalcula a totalUSD × tcGet()`,
+    campos['oc-pago-monto'].value === (883.11 * 500).toFixed(2), campos['oc-pago-monto'].value);
+}
+
+// Equivalencia con el comportamiento previo: cuando el monto SÍ se pudo parsear, el flag
+// montoEsSugerido ya se apagó ANTES de este bloque (ver punto 7), así que ocPagoMonedaChanged()
+// sale temprano después de renderizar el rótulo — igual que antes hacía ocPagoRenderMontoLabel()
+// directo. El arreglo no cambia nada en el caso que ya funcionaba bien.
+const okParseable = runFilePicked({
+  fileName: 'Extralum-₡450000-OC-2026-007-4821-Dor.pdf',
+  montoEsSugerido: true, totalUSD: 883.11, montoActual: '883.11', monedaInicial: 'USD',
+});
+ok('arreglo final — equivalencia: con un monto que SÍ se pudo parsear, el campo toma ese monto (450000.00), no el recalculado por tc',
+  okParseable.campos['oc-pago-monto'].value === '450000.00', okParseable.campos['oc-pago-monto'].value);
+ok('arreglo final — equivalencia: con un monto que SÍ se pudo parsear, montoEsSugerido queda en false (ya no es "el sugerido")',
+  okParseable.ctx.montoEsSugerido === false);
+ok('arreglo final — equivalencia: con un monto que SÍ se pudo parsear, el rótulo también se actualiza',
+  okParseable.campos['oc-pago-monto-label'].textContent === 'Monto pagado (₡)');
+
+// Si el usuario YA había editado el monto a mano antes de elegir el archivo (montoEsSugerido ya en
+// false) y el archivo trae símbolo sin monto parseable, ocPagoMonedaChanged() no debe pisarlo —
+// mismo invariante que el punto 7 garantiza para el selector, ejercitado acá vía ocPagoFilePicked.
+const yaEditado = runFilePicked({
+  fileName: 'Extralum-₡-450000-OC-2026-007-4821-Dor.pdf',
+  montoEsSugerido: false, totalUSD: 883.11, montoActual: '150.00', monedaInicial: 'USD',
+});
+ok('arreglo final — si el usuario YA había editado el monto a mano, el símbolo sin monto parseable NO se lo pisa',
+  yaEditado.campos['oc-pago-monto'].value === '150.00');
 
 // ---------- Ola de cierre (punto 1) — no se puede eliminar una OC con pago registrado ----------
 // Prueba de comportamiento real: se extrae deleteOC() de index.html y se ejecuta en un sandbox

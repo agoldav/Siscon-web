@@ -7616,6 +7616,22 @@ function ocIsComplete(oc){
   return anyLine;
 }
 
+// Arreglo final (2026-09-10, punto 2) — desambigua '.'/',' en un monto en colones cuando pueden
+// ser separador de miles O decimal (la regla anterior los trataba SIEMPRE como miles: ₡450000.50
+// se leía 45000050). Heurística estándar: el separador (el que sea, '.' o ',') más a la derecha
+// es decimal SOLO si NO lo siguen exactamente 3 dígitos hasta el final del texto — en ese caso es
+// un monto con centavos (450000.50, 100.5). Si sí lo siguen exactamente 3 dígitos y nada más
+// después, es un grupo de miles (450.000, 1.250.000) y TODOS los separadores se descartan. Con
+// separadores mixtos (12,345.67) el de miles queda antes del decimal y se descarta igual.
+function crcCleanMonto(raw){
+  const cleaned=String(raw||'').replace(/[^\d.,]/g,'');
+  const m=cleaned.match(/[.,](\d+)$/);
+  if(m&&m[1].length!==3){
+    const intPart=cleaned.slice(0,m.index).replace(/[.,]/g,'');
+    return parseFloat((intPart||'0')+'.'+m[1]);
+  }
+  return parseFloat(cleaned.replace(/[.,]/g,''));
+}
 // Fase 0 — lee la convención de nombre que el usuario ya usa para los comprobantes:
 //   PROVEEDOR-MONTO-#OC-#PROFORMA-NOMBRE DEL PROYECTO
 // El MONTO lleva su símbolo pegado ($ o ₡; también se reconoce USD/CRC en texto). Conveniencia
@@ -7638,13 +7654,15 @@ function parseComprobanteName(fileName){
   // que no reconocerlo acá era una inconsistencia interna además de un bug.
   else if(/₡|¢|CRC/i.test(montoRaw)) moneda='CRC';
   // Seguimiento del arreglo de moneda (punto 4) — la limpieza del número depende de la moneda
-  // detectada. En CRC el punto Y la coma son separador de MILES (formato es-CR, el mismo con el
-  // que fmtCRC() imprime colones: ₡450.000) — los colones no se manejan con decimales en la
-  // práctica, así que se descartan los dos como puros separadores. En USD la coma sigue siendo
-  // separador de miles y el punto decimal, como siempre. Sin moneda detectada, se mantiene el
-  // comportamiento previo (punto = decimal) — no hay forma de saber cuál convención aplica.
+  // detectada. En USD la coma sigue siendo separador de miles y el punto decimal, como siempre.
+  // Sin moneda detectada, se mantiene el comportamiento previo (punto = decimal) — no hay forma
+  // de saber cuál convención aplica.
+  // Arreglo final (2026-09-10, punto 2) — en CRC, punto y coma YA NO se tratan siempre como
+  // separador de miles: crcCleanMonto() desambigua (ver comentario junto a esa función) para no
+  // inflar ×100 un monto con decimales (₡450000.50 → antes 45000050, ahora 450000.50) mientras
+  // sigue leyendo bien los formatos con miles (₡450.000 → 450000, ₡1.250.000 → 1250000).
   const monto=moneda==='CRC'
-    ?parseFloat(montoRaw.replace(/[^\d]/g,''))
+    ?crcCleanMonto(montoRaw)
     :parseFloat(montoRaw.replace(/,/g,'').replace(/[^\d.]/g,''));
   const medio=parts.slice(2,-1).join('-');
   const ocM=medio.match(/OC-?(\d{4})-?(\d{1,4})/i);
@@ -7906,9 +7924,17 @@ function ocPagoFilePicked(input){
   // Arreglo de moneda — si el nombre trae símbolo ($/₡) se preselecciona esa moneda. Si no
   // (parsed.moneda === null), el selector queda como estaba para que el usuario la confirme:
   // no se adivina.
+  // Arreglo final (2026-09-10) — antes esto llamaba a ocPagoRenderMontoLabel() directo, salteando
+  // ocPagoMonedaChanged(). Con un nombre que trae símbolo de moneda pero cuyo monto NO se pudo
+  // parsear (p.ej. "Extralum-₡-450000-...", donde el monto queda en el siguiente segmento tras el
+  // símbolo), montoEsSugerido seguía en true, el selector pasaba a CRC, el rótulo decía "Monto
+  // pagado (₡)" pero el campo se quedaba con el sugerido en dólares — el mismo modo de falla que
+  // ocPagoMonedaChanged() existe para prevenir, entrando por otra puerta. ocPagoMonedaChanged() ya
+  // llama a ocPagoRenderMontoLabel() como primer paso, así que en los casos donde el monto SÍ se
+  // parseó (montoEsSugerido ya en false, apagado arriba) el comportamiento es idéntico.
   if(parsed&&parsed.moneda){
     const selMoneda=document.getElementById('oc-pago-moneda');
-    if(selMoneda){ selMoneda.value=parsed.moneda; ocPagoRenderMontoLabel(); }
+    if(selMoneda){ selMoneda.value=parsed.moneda; ocPagoMonedaChanged(); }
   }
   if(warnEl){
     const ctx=_ocPagoResolve();
