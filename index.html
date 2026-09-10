@@ -821,7 +821,7 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
       <button class="sb-icon" data-newtab="calc" onclick="openCalcWin()" title="Calculadora de Avance · Cmd+clic: pestaña nueva"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><line x1="8" y1="7.5" x2="16" y2="7.5"/><line x1="8" y1="12" x2="8" y2="12"/><line x1="12" y1="12" x2="12" y2="12"/><line x1="16" y1="12" x2="16" y2="12"/><line x1="8" y1="15.5" x2="8" y2="15.5"/><line x1="12" y1="15.5" x2="12" y2="15.5"/><line x1="16" y1="15.5" x2="16" y2="19"/><line x1="8" y1="19" x2="12" y2="19"/></svg></span><span class="sb-txt">Avance</span></button>
       <button class="sb-icon" data-newtab="route" onclick="openRouteWin()" title="Creación de Ruta · Cmd+clic: pestaña nueva"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-7.2 7-12a7 7 0 1 0-14 0c0 4.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.4"/></svg></span><span class="sb-txt">Ruta</span></button>
       <button class="sb-icon" onclick="openBodegaWin()" title="Bodega"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8 12 3l9 5-9 5-9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span><span class="sb-txt">Bodega</span></button>
-      <button class="sb-icon" onclick="openPagosWin()" title="Listo para pagar"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2"/><line x1="2.5" y1="10" x2="21.5" y2="10"/><line x1="6" y1="14.5" x2="10" y2="14.5"/></svg></span><span class="sb-txt">Pagar</span></button>
+      <button class="sb-icon" id="sb-btn-pagos" onclick="openPagosWin()" title="Listo para pagar" style="display:none"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2"/><line x1="2.5" y1="10" x2="21.5" y2="10"/><line x1="6" y1="14.5" x2="10" y2="14.5"/></svg></span><span class="sb-txt">Pagar</span></button>
       <button class="sb-icon" id="sb-ico-unclassified" onclick="openUnclassifiedWin()" title="Documentos sin clasificar"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></span><span class="sb-txt">Sin clas.</span><span id="sb-badge-unclassified" class="notif-badge" style="display:none"></span></button>
       <button class="sb-icon" onclick="openReportsWin()" title="Informes"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="20" x2="5" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="19" y1="20" x2="19" y2="15"/></svg></span><span class="sb-txt">Informes</span></button>
       <button class="sb-icon" onclick="openCotizWin()" title="Cotizaciones CRM"><span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="4" width="13" height="17" rx="2"/><rect x="9" y="2.3" width="6" height="3" rx="1"/><line x1="8.5" y1="10.5" x2="15.5" y2="10.5"/><line x1="8.5" y1="14.5" x2="15.5" y2="14.5"/><line x1="8.5" y1="18.5" x2="12.5" y2="18.5"/></svg></span><span class="sb-txt">Cotiz.</span></button>
@@ -3216,6 +3216,9 @@ async function loginLocalFallback(email,password){
     document.getElementById('topbar-user-label').textContent=currentUser.name;
     document.getElementById('btn-settings').style.display='none';
     document.getElementById('sb-btn-settings').style.display='none';
+    // I4 — "Listo para pagar" sigue exactamente el mismo mecanismo de visibilidad por rol
+    // que el botón de Ajustes: solo Administrador.
+    document.getElementById('sb-btn-pagos').style.display='none';
     loadData();
     renderDash();
     handleOpenHash();
@@ -3253,6 +3256,7 @@ async function login(){
     document.getElementById('topbar-user-label').textContent=data.user.name;
     document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';
     document.getElementById('sb-btn-settings').style.display=data.user.role==='Administrador'?'':'none';
+    document.getElementById('sb-btn-pagos').style.display=data.user.role==='Administrador'?'':'none';
     // Cargar primero fija versión + snapshot. El login es un evento de autenticación, no un cambio
     // de negocio: NO debe agregarse al activityLog compartido ni ejecutar saveData(), porque eso
     // invalida settings/1 para todas las demás sesiones apenas alguien entra.
@@ -3357,6 +3361,7 @@ async function bootstrapCloudflareAuth(){
     document.getElementById('topbar-user-label').textContent=currentUser.email;
     document.getElementById('btn-settings').style.display=currentUser.role==='Administrador'?'':'none';
     document.getElementById('sb-btn-settings').style.display=currentUser.role==='Administrador'?'':'none';
+    document.getElementById('sb-btn-pagos').style.display=currentUser.role==='Administrador'?'':'none';
     // Igual que login(): autenticarse no debe mutar settings/1 ni generar conflictos artificiales.
     const _apiOk=await loadDataFromAPI();
     if(!_apiOk) loadData();
@@ -7200,6 +7205,7 @@ function renderOCList(){
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
           <span class="qbo-badge${qboSynced?'':' pending'}">${qboSynced?'✓ QBO':'⏳ Pendiente QBO'}</span>
+          ${ocPagoBadgeHTML(oc)}
           <span style="font-size:10px;color:var(--t3)">${oc.createdAt||''}</span>
         </div>
         <div style="position:relative">
@@ -7263,6 +7269,9 @@ function ocFromHouse(houseId){
     activeTab:'resumen', totalUSD:0, ivaUSD:0, ivaRate:0.13,
     qboPOId:'', qboBillId:'',
     createdAt:new Date().toLocaleDateString('es-CR'),
+    // C1: sello de "OC nueva". `createdAt` es un string localizado dd/mm/aaaa, frágil de parsear;
+    // `createdAtISO` es la marca que ocsListasParaPagar() exige para dejar entrar una OC.
+    createdAtISO:new Date().toISOString(),
     createdBy:currentUser?currentUser.name:'Sistema',
   };
   if(t&&t.categories){
@@ -7309,6 +7318,8 @@ function openNewOC(){
     totalUSD: 0, ivaUSD: 0, ivaRate: 0.13,
     qboPOId: '', qboBillId: '',
     createdAt: new Date().toLocaleDateString('es-CR'),
+    // C1: sello de "OC nueva" — ver ocsListasParaPagar().
+    createdAtISO: new Date().toISOString(),
     createdBy: currentUser ? currentUser.name : 'Sistema',
   };
   renderOCForm();
@@ -7394,6 +7405,9 @@ function renderOCForm(){
           <span style="font-size:10px;color:var(--t3)">Creado por ${st.createdBy} · ${st.createdAt}</span>
         </div>
       </div>
+
+      <!-- I6 — franja de pago (vacía si la OC no tiene pago registrado) -->
+      <div id="oc-pago-strip">${ocPagoStripHTML()}</div>
 
       <!-- Campos -->
       <div class="oc-fields-area">
@@ -7623,21 +7637,43 @@ function parseComprobanteName(fileName){
     proyecto: parts[parts.length-1],
   };
 }
+// Estados en los que una OC ya no se paga por esta pantalla, aunque sus datos estén completos.
+// `Facturada` la pone saveVendorBill() al ligar la factura del proveedor (y ocConvertToBill al
+// crear el Bill en QBO): el ciclo de esa OC ya siguió adelante. `Recibida` significa que el
+// material ya entró. `Cancelada` no se paga nunca.
+// Ojo con la distinción: `ocIsComplete()` responde "¿esta OC tiene los datos completos?" —
+// completitud —, mientras que `ocsListasParaPagar()` responde "¿esta OC se puede pagar HOY?" —
+// pagabilidad. El estado terminal es pagabilidad, no completitud, por eso la exclusión vive acá.
 // Fase 0 — OCs completas que todavía no tienen pago registrado: son las únicas pagables.
+// C1: además de completa y sin pago, la OC tiene que (a) no estar en un estado terminal y
+// (b) traer el sello `createdAtISO`, que solo llevan las OCs creadas a partir de este despliegue.
+// Las OCs históricas no lo tienen, así que nunca aparecen acá — sin migración ni configuración.
+// El día del despliegue la pantalla arranca vacía en vez de llenarse de OCs viejas ya liquidadas.
 function ocsListasParaPagar(projectList){
+  const noPagables=['Facturada','Recibida','Cancelada'];
   const out=[];
   (Array.isArray(projectList)?projectList:[]).forEach(proj=>{
     (Array.isArray(proj&&proj.ocs)?proj.ocs:[]).forEach(oc=>{
-      if(oc&&!oc.pago&&ocIsComplete(oc)) out.push({proj,oc});
+      if(!oc||oc.pago) return;
+      if(!String(oc.createdAtISO||'').trim()) return;   // OC histórica: fuera para siempre
+      if(noPagables.includes(oc.status)) return;        // estado terminal: ya no se paga acá
+      if(ocIsComplete(oc)) out.push({proj,oc});
     });
   });
   return out;
 }
 // Días transcurridos desde el pago sin que llegue la factura del proveedor.
-// null = no aplica (sin pago, o la factura ya llegó y saveVendorBill puso status='Facturada').
+// null = no aplica (sin pago, o la factura ya llegó y saveVendorBill puso status='Facturada',
+// o la OC se canceló después de pagarla).
+// I5 — el criterio de estado terminal DEBE ser idéntico al de `buildPaidOcsDigestRows()` en
+// siscon-backend/server.js, que excluye 'Facturada' y 'Cancelada'. Si se desincronizan, una OC
+// cancelada después de pagarse genera una notificación in-app nueva CADA DÍA para siempre
+// (addNotif deduplica por texto exacto y el texto lleva los días, así que nunca colisiona) que
+// el correo diario jamás corrobora y que ninguna acción del usuario puede detener.
+// Si acá se agrega o quita un estado, hay que hacer el mismo cambio del otro lado.
 function ocDiasSinFactura(oc,hoyISO){
   if(!oc||!oc.pago||!oc.pago.fecha) return null;
-  if(oc.status==='Facturada') return null;
+  if(oc.status==='Facturada'||oc.status==='Cancelada') return null;
   const pagado=new Date(oc.pago.fecha+'T00:00:00');
   const hoy=new Date(String(hoyISO||new Date().toISOString().slice(0,10))+'T00:00:00');
   if(isNaN(pagado)||isNaN(hoy)) return null;
@@ -7674,17 +7710,60 @@ async function ocAlertasAutoCheck(){
 
 // Fase 0 — registro del pago de una OC. Se abre desde la ventana global "Listo para pagar",
 // así que SIEMPRE trabaja sobre el proyecto dueño de la OC, nunca sobre curProj.
-let _ocPagoCtx=null;   // {proj, oc, file}
-function ocOpenPagoModal(projId,ocId){
+
+// I1 — el `accept` tiene que coincidir con la allowlist REAL del backend
+// (DOCUMENT_MIME_ALLOWLIST en siscon-backend/r2-storage.js). Antes decía `image/*`, que en un
+// iPhone deja elegir un .heic: el archivo se aceptaba en el modal y recién fallaba al subir a R2,
+// abortando la cadena de guardado con el pago ya "confirmado" en pantalla.
+// Una sola fuente de verdad: el atributo `accept` del input y la validación al elegir el archivo
+// salen de la misma lista, así no pueden desincronizarse.
+function ocPagoFormatos(){ return ['pdf','png','jpg','jpeg','gif','webp','docx','xlsx']; }
+function ocPagoAccept(){ return ocPagoFormatos().map(e=>'.'+e).join(','); }
+function ocPagoExtOk(fileName){
+  const ext=String(fileName||'').split('.').pop().toLowerCase();
+  return ocPagoFormatos().includes(ext);
+}
+// I4 — decisión del dueño: solo el rol Administrador registra pagos. Ocultar el botón de la
+// barra lateral no es control de acceso; ambas puertas (la ventana y el modal) se gatean acá.
+function ocPagoPuedeRegistrar(){ return !!(currentUser&&currentUser.role==='Administrador'); }
+function ocPagoGateRol(){
+  if(ocPagoPuedeRegistrar()) return true;
+  alert('Solo el Administrador puede registrar, editar o anular pagos de órdenes de compra.');
+  return false;
+}
+
+// I3 — el contexto guarda IDS, no objetos. El modal queda abierto mientras el usuario busca el
+// archivo, y startVersionSync() hace polling cada 10 s: loadDataFromAPI() reemplaza el arreglo
+// `projects` completo, así que cualquier referencia capturada acá queda huérfana y escribir sobre
+// ella pierde el pago en silencio. Se re-resuelve por id justo antes de escribir, mismo patrón
+// que assignUnclassified().
+let _ocPagoCtx=null;   // {projId, ocId, file, editando, pagoPrevio}
+function _ocPagoResolve(){
+  if(!_ocPagoCtx) return null;
+  const proj=projects.find(p=>String(p.id)===String(_ocPagoCtx.projId));
+  const oc=proj&&(proj.ocs||[]).find(o=>String(o.id)===String(_ocPagoCtx.ocId));
+  if(!proj||!oc) return null;
+  return {proj,oc};
+}
+function ocOpenPagoModal(projId,ocId,modoEdicion){
+  if(!ocPagoGateRol()) return;
   const proj=projects.find(p=>String(p.id)===String(projId));
   const oc=proj&&(proj.ocs||[]).find(o=>String(o.id)===String(ocId));
   if(!proj||!oc){ alert('No se encontró la orden de compra.'); return; }
   if(!ocIsComplete(oc)){ alert('Esta OC está incompleta y no se puede pagar.'); return; }
-  if(oc.pago){ alert(`Esta OC ya tiene un pago registrado el ${fmtDate(oc.pago.fecha)} por ${oc.pago.registradoPor||'—'}.`); return; }
-  _ocPagoCtx={proj,oc,file:null};
+  const editando=!!modoEdicion;
+  if(oc.pago&&!editando){ alert(`Esta OC ya tiene un pago registrado el ${fmtDate(oc.pago.fecha)} por ${oc.pago.registradoPor||'—'}.`); return; }
+  if(!oc.pago&&editando){ alert('Esta OC no tiene un pago registrado que se pueda editar.'); return; }
+  const previo=editando?oc.pago:null;
+  _ocPagoCtx={projId:proj.id,ocId:oc.id,file:null,editando,pagoPrevio:previo||null};
   const hoy=new Date().toISOString().slice(0,10);
+  const metodos=['Transferencia','Tarjeta','Caja Chica','Reembolso'];
+  const metodoActual=previo&&previo.metodo?String(previo.metodo):'Transferencia';
+  const montoInicial=previo?Number(previo.montoUSD||0):Number(oc.totalUSD||0);
+  const fechaInicial=previo&&previo.fecha?String(previo.fecha):hoy;
+  const nombreArchivo=previo&&previo.comprobanteName?String(previo.comprobanteName):'';
   document.getElementById('modal-inner').innerHTML=`
-    <div class="modal-title">Registrar pago — ${esc(oc.num||'OC')}
+    <div class="modal-title">${editando?'Editar pago':'Registrar pago'} — ${esc(oc.num||'OC')}
       <button onclick="closeModal()" style="background:transparent;border:none;color:var(--t3);font-size:18px;cursor:pointer">✕</button>
     </div>
     <div style="font-size:12px;color:var(--t2);margin-bottom:12px">
@@ -7692,25 +7771,25 @@ function ocOpenPagoModal(projId,ocId){
     </div>
     <div class="ff-row">
       <div class="ff"><label>Monto pagado (USD)</label>
-        <input id="oc-pago-monto" type="number" step="0.01" min="0" value="${Number(oc.totalUSD||0).toFixed(2)}"/></div>
+        <input id="oc-pago-monto" type="number" step="0.01" min="0" value="${montoInicial.toFixed(2)}"/></div>
       <div class="ff"><label>Fecha de pago</label>
-        <input id="oc-pago-fecha" type="date" value="${hoy}"/></div>
+        <input id="oc-pago-fecha" type="date" value="${esc(fechaInicial)}"/></div>
     </div>
     <div class="ff"><label>Método de pago</label>
       <span class="ivasel" style="display:block"><select id="oc-pago-metodo" onchange="ocPagoRenderHint()">
-        <option>Transferencia</option><option>Tarjeta</option>
-        <option>Caja Chica</option><option>Reembolso</option>
+        ${metodos.map(m=>`<option${m===metodoActual?' selected':''}>${esc(m)}</option>`).join('')}
       </select></span>
     </div>
     <div class="ff"><label>Comprobante</label>
-      <button class="btn-sm" onclick="document.getElementById('oc-pago-file').click()">📎 Elegir archivo</button>
-      <input id="oc-pago-file" type="file" accept="application/pdf,image/*" style="display:none" onchange="ocPagoFilePicked(this)"/>
-      <div id="oc-pago-fname" style="font-size:11px;color:var(--t3);margin-top:5px">Ninguno seleccionado</div>
+      <button class="btn-sm" onclick="document.getElementById('oc-pago-file').click()">📎 ${editando&&nombreArchivo?'Reemplazar archivo':'Elegir archivo'}</button>
+      <input id="oc-pago-file" type="file" accept="${ocPagoAccept()}" style="display:none" onchange="ocPagoFilePicked(this)"/>
+      <div id="oc-pago-fname" style="font-size:11px;color:var(--t3);margin-top:5px">${nombreArchivo?esc(nombreArchivo)+' (actual)':'Ninguno seleccionado'}</div>
+      <div id="oc-pago-warn" style="font-size:11px;color:var(--red);margin-top:4px"></div>
       <div id="oc-pago-hint" style="font-size:10px;color:var(--amb);margin-top:3px"></div>
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
-      <button class="btn-save" onclick="ocConfirmPago()">Registrar pago</button>
+      <button class="btn-save" onclick="ocConfirmPago()">${editando?'Guardar cambios':'Registrar pago'}</button>
     </div>`;
   ocPagoRenderHint();
   document.getElementById('modal').classList.remove('hidden');
@@ -7720,9 +7799,28 @@ function ocPagoRenderHint(){
   const metodo=(document.getElementById('oc-pago-metodo')||{}).value||'';
   el.textContent=metodo==='Transferencia'?'El comprobante es obligatorio para transferencias.':'';
 }
-// Prellena monto y fecha desde la convención PROVEEDOR-MONTO-#OC-#PROFORMA-PROYECTO.
+// M5 — la convención de nombre ya trae el número de OC; compararlo es gratis y es exactamente
+// el punto de la cadena de custodia. Advertencia, NO bloqueo: el nombre es una conveniencia y el
+// usuario puede tener razones para adjuntar otra cosa.
+function ocPagoNumCoincide(ocNumParseado,ocNumReal){
+  const a=String(ocNumParseado||'').trim().toUpperCase();
+  const b=String(ocNumReal||'').trim().toUpperCase();
+  if(!a||!b) return true;   // sin dato que comparar, no se advierte nada
+  return a===b;
+}
+// Prellena monto desde la convención PROVEEDOR-MONTO-#OC-#PROFORMA-PROYECTO.
 function ocPagoFilePicked(input){
   const f=input&&input.files&&input.files[0]; if(!f||!_ocPagoCtx)return;
+  const warnEl=document.getElementById('oc-pago-warn');
+  // I1 — avisar acá, al elegir, en vez de dejar que reviente al subir a R2 durante el guardado.
+  if(!ocPagoExtOk(f.name)){
+    _ocPagoCtx.file=null;
+    if(input)input.value='';
+    const el=document.getElementById('oc-pago-fname'); if(el)el.textContent='Ninguno seleccionado';
+    if(warnEl)warnEl.textContent='';
+    alert(`El archivo "${f.name}" no es un formato admitido.\n\nSe aceptan: PDF, PNG, JPG, GIF, WEBP, DOCX y XLSX.\n\nLas fotos de iPhone en formato HEIC no sirven: compartilas como JPG o exportalas a PDF antes de adjuntarlas.`);
+    return;
+  }
   _ocPagoCtx.file=f;
   const el=document.getElementById('oc-pago-fname'); if(el)el.textContent=f.name;
   const parsed=parseComprobanteName(f.name);
@@ -7730,18 +7828,38 @@ function ocPagoFilePicked(input){
     const inp=document.getElementById('oc-pago-monto');
     if(inp)inp.value=parsed.montoUSD.toFixed(2);
   }
+  if(warnEl){
+    const ctx=_ocPagoResolve();
+    const ocNumReal=ctx?ctx.oc.num:'';
+    const coincide=!parsed||ocPagoNumCoincide(parsed.ocNum,ocNumReal);
+    warnEl.textContent=coincide
+      ? ''
+      : `⚠ El comprobante dice ${parsed.ocNum} y estás pagando ${ocNumReal}. Revisá que sea el archivo correcto.`;
+  }
 }
-function ocConfirmPago(){
+async function ocConfirmPago(){
   if(!_ocPagoCtx)return;
-  const {proj,oc,file}=_ocPagoCtx;
+  if(!ocPagoGateRol())return;
+  // I3 — re-resolver por id: el polling pudo haber reemplazado `projects` mientras el modal
+  // estaba abierto. Si la OC ya no existe, no se escribe NADA.
+  const ctx=_ocPagoResolve();
+  if(!ctx){
+    alert('La orden de compra ya no está disponible (pudo eliminarse o recargarse desde el servidor). El pago NO se registró. Volvé a abrir "Listo para pagar" e intentá de nuevo.');
+    _ocPagoCtx=null; closeModal(); return;
+  }
+  const {proj,oc}=ctx;
+  const {file,editando,pagoPrevio}=_ocPagoCtx;
   const montoUSD=parseFloat((document.getElementById('oc-pago-monto')||{}).value)||0;
   const fecha=(document.getElementById('oc-pago-fecha')||{}).value||new Date().toISOString().slice(0,10);
   const metodo=(document.getElementById('oc-pago-metodo')||{}).value||'Transferencia';
   if(!(montoUSD>0)){ alert('Ingresa un monto mayor a 0.'); return; }
-  if(metodo==='Transferencia'&&!file){ alert('Adjunta el comprobante de la transferencia.'); return; }
-  let blobId='';
+  const comprobantePrevioId=editando&&pagoPrevio?String(pagoPrevio.blobId||''):'';
+  if(metodo==='Transferencia'&&!file&&!comprobantePrevioId){ alert('Adjunta el comprobante de la transferencia.'); return; }
+  let blobId=comprobantePrevioId;
+  let comprobanteName=editando&&pagoPrevio?String(pagoPrevio.comprobanteName||''):'';
   if(file){
     blobId='blob_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+    comprobanteName=file.name;
     docBlobMap[blobId]=URL.createObjectURL(file);
     if(!proj.uploads)proj.uploads=[];
     proj.uploads.push({
@@ -7753,18 +7871,116 @@ function ocConfirmPago(){
     });
     _pendingDocFiles.set(blobId,file);
   }
-  oc.pago={ montoUSD, fecha, metodo, blobId,
-    comprobanteName:file?file.name:'',
-    registradoPor:currentUser?currentUser.name:'Sistema',
-    registradoAt:new Date().toISOString() };
+  oc.pago={ montoUSD, fecha, metodo, blobId, comprobanteName,
+    registradoPor:(editando&&pagoPrevio&&pagoPrevio.registradoPor)?pagoPrevio.registradoPor:(currentUser?currentUser.name:'Sistema'),
+    registradoAt:(editando&&pagoPrevio&&pagoPrevio.registradoAt)?pagoPrevio.registradoAt:new Date().toISOString() };
+  if(editando){
+    oc.pago.editadoPor=currentUser?currentUser.name:'Sistema';
+    oc.pago.editadoAt=new Date().toISOString();
+  }
   proj.lastActivity=Date.now();
-  logAction(`Pago registrado para "${oc.num||'OC'}" (${metodo})`,'log-create','OC',null,
-    {num:oc.num,monto:montoUSD,metodo,proyecto:proj.name},proj);
+  logAction(editando?`Pago editado en "${oc.num||'OC'}" (${metodo})`:`Pago registrado para "${oc.num||'OC'}" (${metodo})`,
+    editando?'log-edit':'log-create','OC',
+    editando&&pagoPrevio?{monto:pagoPrevio.montoUSD,fecha:pagoPrevio.fecha,metodo:pagoPrevio.metodo,comprobante:pagoPrevio.comprobanteName||''}:null,
+    {num:oc.num,monto:montoUSD,fecha,metodo,comprobante:comprobanteName,proyecto:proj.name},proj);
   _ocPagoCtx=null;
   closeModal();
-  saveData();
-  showToast('✅ Pago registrado');
+  // I1 — el toast de éxito SOLO después de que el guardado terminó bien. La cadena sube los
+  // adjuntos a R2 antes de sincronizar las transacciones: si la subida falla, la cadena aborta
+  // y `oc.pago` nunca llega a Supabase. saveData() no lanza (atrapa adentro) sino que resuelve
+  // `false`; se cubren los dos casos.
+  let guardado=false;
+  try{ guardado=(await saveData())!==false; }
+  catch(e){ console.error('Error guardando el pago de la OC:',e); guardado=false; }
+  if(!guardado){
+    // alert() bloqueante a propósito: un toast de 2 s no alcanza para algo que le hace creer al
+    // dueño que pagó cuando no quedó registrado (ver commit 97a2715, "Visibilidad de errores al
+    // enviar autorización").
+    alert(`⚠ EL PAGO NO QUEDÓ REGISTRADO.\n\nNo se pudo guardar en el servidor${editando?' la edición del pago':' el pago'} de ${oc.num||'la OC'}. Si adjuntaste un comprobante, revisá que el archivo sea PDF, PNG, JPG, GIF, WEBP, DOCX o XLSX.\n\nNo cierres ni recargues la aplicación: volvé a intentarlo desde la franja de pago de la OC. Si recargás, el intento se pierde y la OC vuelve a "Listo para pagar".`);
+  } else {
+    showToast(editando?'✅ Pago actualizado':'✅ Pago registrado');
+  }
   if(typeof renderPagosBody==='function'&&fwinExists('pagos'))renderPagosBody();
+  if(curTab==='txn'&&curTxnTab==='oc'&&curOCId&&String(curOCId)===String(oc.id)&&typeof ocPagoRefreshStrip==='function')ocPagoRefreshStrip();
+}
+
+// ---- Decisión 3 — editar y anular un pago, con contraseña de administrador ----
+// Un monto, una fecha o un comprobante equivocado no puede ser permanente: una OC marcada por
+// error desaparece de "Listo para pagar" Y arranca el reloj de "sin factura", así que el digest
+// reclama la factura de algo que nunca se pagó.
+function ocEditarPago(projId,ocId){
+  if(!ocPagoGateRol()) return;
+  const proj=projects.find(p=>String(p.id)===String(projId));
+  const oc=proj&&(proj.ocs||[]).find(o=>String(o.id)===String(ocId));
+  if(!proj||!oc||!oc.pago){ alert('No se encontró el pago de esta orden de compra.'); return; }
+  const pwd=prompt('Editar un pago registrado requiere contraseña de administrador:');
+  if(pwd===null) return;
+  if(!isAdminPwd(pwd)){ alert('Contraseña incorrecta'); return; }
+  ocOpenPagoModal(proj.id,oc.id,true);
+}
+async function ocAnularPago(projId,ocId){
+  if(!ocPagoGateRol()) return;
+  const proj=projects.find(p=>String(p.id)===String(projId));
+  const oc=proj&&(proj.ocs||[]).find(o=>String(o.id)===String(ocId));
+  if(!proj||!oc||!oc.pago){ alert('No se encontró el pago de esta orden de compra.'); return; }
+  const pwd=prompt('Anular un pago registrado requiere contraseña de administrador:');
+  if(pwd===null) return;
+  if(!isAdminPwd(pwd)){ alert('Contraseña incorrecta'); return; }
+  const anulado=oc.pago;
+  if(!confirm(`¿Anular el pago de ${oc.num||'la OC'} por ${fmt(anulado.montoUSD||0)} del ${fmtDate(anulado.fecha)}?\n\nLa orden vuelve a "Listo para pagar". El comprobante adjunto se conserva en Documentos.`))return;
+  delete oc.pago;
+  proj.lastActivity=Date.now();
+  // El log deja constancia del pago que se anuló, no solo de que se anuló algo.
+  logAction(`Pago anulado en "${oc.num||'OC'}"`,'log-delete','OC',
+    {monto:anulado.montoUSD,fecha:anulado.fecha,metodo:anulado.metodo,
+     comprobante:anulado.comprobanteName||'',registradoPor:anulado.registradoPor||''},
+    {num:oc.num,proyecto:proj.name,anuladoPor:currentUser?currentUser.name:'Sistema'},proj);
+  let guardado=false;
+  try{ guardado=(await saveData())!==false; }
+  catch(e){ console.error('Error guardando la anulación del pago:',e); guardado=false; }
+  if(!guardado){
+    alert(`⚠ LA ANULACIÓN NO QUEDÓ GUARDADA.\n\nNo se pudo guardar en el servidor la anulación del pago de ${oc.num||'la OC'}. No cierres ni recargues la aplicación: volvé a intentarlo.`);
+  } else {
+    showToast('Pago anulado');
+  }
+  if(typeof renderPagosBody==='function'&&fwinExists('pagos'))renderPagosBody();
+  if(curTab==='txn'&&curTxnTab==='oc'&&curOCId&&String(curOCId)===String(oc.id)&&typeof ocPagoRefreshStrip==='function')ocPagoRefreshStrip();
+}
+
+// ---- I6 — el pago tiene que verse ----
+// Franja del formulario de OC: monto, fecha, método, quién lo registró y el enlace al
+// comprobante. El comprobante se abre por el mismo camino que usa Documentos para los adjuntos
+// de R2 (openPdfNewTab por blobId).
+function ocPagoStripHTML(){
+  if(!curProj||!curOCId||curOCId==='new') return '';
+  const oc=(curProj.ocs||[]).find(o=>String(o.id)===String(curOCId));
+  if(!oc||!oc.pago) return '';
+  const pg=oc.pago;
+  const puede=ocPagoPuedeRegistrar();
+  const comprobante=pg.blobId
+    ? `<a onclick="openPdfNewTab('${esc(String(pg.blobId))}')" style="color:var(--acc);cursor:pointer;text-decoration:underline">${esc(pg.comprobanteName||'Ver comprobante')}</a>`
+    : `<span style="color:var(--t3)">Sin comprobante adjunto</span>`;
+  return `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:rgba(29,184,122,.08);border:1px solid rgba(29,184,122,.28);border-radius:var(--r);padding:9px 14px;margin-bottom:10px">
+    <span style="font-size:12px;font-weight:700;color:var(--grn)">💰 Pagada</span>
+    <span style="font-size:12px;color:var(--t1);font-weight:600">${fmt(pg.montoUSD||0)}</span>
+    <span style="font-size:11px;color:var(--t2)">${esc(fmtDate(pg.fecha))}</span>
+    <span style="font-size:11px;color:var(--t2)">${esc(pg.metodo||'—')}</span>
+    <span style="font-size:11px;color:var(--t3)">Registrado por ${esc(pg.registradoPor||'—')}${pg.editadoPor?' · editado por '+esc(pg.editadoPor):''}</span>
+    <span style="font-size:11px">${comprobante}</span>
+    ${puede?`<span style="margin-left:auto;display:flex;gap:8px">
+      <button class="btn-sm" onclick="ocEditarPago('${esc(String(curProj.id))}','${esc(String(oc.id))}')">Editar pago</button>
+      <button class="btn-sm" style="color:var(--red);border-color:var(--red)" onclick="ocAnularPago('${esc(String(curProj.id))}','${esc(String(oc.id))}')">Anular pago</button>
+    </span>`:''}
+  </div>`;
+}
+function ocPagoRefreshStrip(){
+  const el=document.getElementById('oc-pago-strip');
+  if(el) el.innerHTML=ocPagoStripHTML();
+}
+// Distintivo para la lista de OCs (renderOCList): mismo estilo que los badges que ya viven ahí.
+function ocPagoBadgeHTML(oc){
+  if(!oc||!oc.pago) return '';
+  return `<span class="qbo-badge" style="background:rgba(29,184,122,.12);color:var(--grn);border-color:rgba(29,184,122,.3)">💰 Pagada ${esc(fmtDate(oc.pago.fecha))}</span>`;
 }
 
 // Cantidad ya solicitada de un material (lineId del tipo) para una casa, sumando todas las OCs excepto la actual
@@ -8748,6 +8964,23 @@ async function pollPendingAuth(){
 }
 
 // ========== GUARDAR OC ==========
+// I2 — el formulario de OC trabaja sobre un CLON de la fila (`openOCForm` hace
+// JSON.parse(JSON.stringify(oc))) y al guardar reemplaza la fila entera. Si mientras el
+// formulario está abierto se registra el pago desde la ventana global "Listo para pagar"
+// (es flotante: el formulario sigue montado detrás), el clon queda viejo y el guardado
+// borraría `oc.pago` sin ningún 409 de por medio — la OC volvería a "Listo para pagar" y el
+// comprobante quedaría huérfano en Documentos. Lo mismo vale para `createdAtISO`, el sello
+// que decide si la OC es pagable.
+// Estos dos campos NUNCA se editan desde el formulario, así que la fila viva es la autoridad:
+// se copian de ella sobre el objeto que va a reemplazarla, en TODOS los caminos de guardado
+// que hacen reemplazo total.
+function ocPreserveLiveFields(ocData,liveOc){
+  if(!ocData) return ocData;
+  if(!liveOc){ return ocData; }
+  if(liveOc.pago) ocData.pago=liveOc.pago; else delete ocData.pago;
+  if(liveOc.createdAtISO) ocData.createdAtISO=liveOc.createdAtISO; else delete ocData.createdAtISO;
+  return ocData;
+}
 function ocSave(asBorrador){
   const st=ocState;
   const p=curProj;
@@ -8767,7 +9000,7 @@ function ocSave(asBorrador){
   } else {
     ocData.id=curOCId;
     const idx=p.ocs.findIndex(x=>x.id===curOCId);
-    if(idx>=0) p.ocs[idx]=ocData;
+    if(idx>=0){ ocPreserveLiveFields(ocData,p.ocs[idx]); p.ocs[idx]=ocData; }
     logAction(`OC "${ocData.num}" actualizada`,'log-edit','OC',null,{num:ocData.num,status:ocData.status});
   }
   p.lastActivity=Date.now();
@@ -8780,7 +9013,8 @@ function ocSaveSilent(skipCloudSync){
   const ocData={...st,lastModified:new Date().toLocaleString('es-CR')};
   if(curOCId==='new'){ ocData.id='oc-'+Date.now(); ocData.status=ocData.status||'Borrador'; p.ocs.push(ocData);
     logAction(`OC "${ocData.num}" creada`,'log-create','OC',null,{num:ocData.num}); curOCId=ocData.id; ocState.id=ocData.id;
-  } else { ocData.id=curOCId; const idx=p.ocs.findIndex(x=>x.id===curOCId); if(idx>=0)p.ocs[idx]=ocData;
+  } else { ocData.id=curOCId; const idx=p.ocs.findIndex(x=>x.id===curOCId);
+    if(idx>=0){ ocPreserveLiveFields(ocData,p.ocs[idx]); p.ocs[idx]=ocData; }
     logAction(`OC "${ocData.num}" actualizada`,'log-edit','OC',null,{num:ocData.num}); }
   // Fix 19: casas con movimientos pasan a "Iniciado"
   (ocData.houseIds||[]).forEach(hid=>markHouseMovement(p,hid));
@@ -9080,7 +9314,12 @@ function duplicateOC(ocId){
   const clone=JSON.parse(JSON.stringify(oc));
   clone.id='oc-'+Date.now(); clone.num=ocNextNum(); clone.status='Borrador';
   clone.qboPOId=''; clone.qboBillId=''; clone.linkedBillId='';
-  clone.createdAt=new Date().toLocaleDateString('es-CR'); clone.createdBy=currentUser?currentUser.name:'Sistema';
+  // La copia es una OC nueva: sello propio, no el del original (que puede ser histórico y no
+  // tenerlo). Y nunca hereda el pago del original — ese pago pertenece a la OC de origen.
+  delete clone.pago;
+  clone.createdAt=new Date().toLocaleDateString('es-CR');
+  clone.createdAtISO=new Date().toISOString();
+  clone.createdBy=currentUser?currentUser.name:'Sistema';
   p.ocs.push(clone);
   logAction(`OC "${oc.num}" duplicada como "${clone.num}"`,'log-create','OC',null,{num:clone.num});
   saveData(); showToast('OC duplicada: '+clone.num); renderOCList();
@@ -10249,7 +10488,9 @@ async function qboCreatePO(oc){
     const p=curProj;
     if(p.ocs&&curOCId&&curOCId!=='new'){
       const ocIdx=p.ocs.findIndex(x=>x.id===curOCId);
-      if(ocIdx>=0){ p.ocs[ocIdx]=ocState; saveData(); }
+      // I2: este respaldo también reemplaza la fila entera con el clon del formulario —
+      // conserva pago/createdAtISO de la fila viva antes de pisarla.
+      if(ocIdx>=0){ ocPreserveLiveFields(ocState,p.ocs[ocIdx]); p.ocs[ocIdx]=ocState; saveData(); }
     }
     curOCId=null; renderOCList();
   }
@@ -15749,6 +15990,10 @@ function assignUnclassified(i){
 // Vista global: SOLO OCs completas y sin pago registrado. Una OC incompleta no aparece —
 // ese es el candado: lo que no está acá, no se paga.
 function openPagosWin(){
+  // I4 — ocultar el botón de la barra lateral no es control de acceso: esta función es
+  // alcanzable por otros caminos (consola, hash de navegación, un botón que se quedara visible
+  // por un render viejo). El gate real vive acá, y el otro en ocOpenPagoModal().
+  if(!ocPagoGateRol()) return;
   if(fwinExists('pagos')){ fwinRestore('pagos'); return; }
   fwinOpen('pagos',{title:'Listo para pagar',width:940,height:600,dirtyFn:()=>false,
     bodyHTML:'<div id="pagos-body" style="padding:12px 16px"></div>',
@@ -17122,7 +17367,7 @@ function clearErrors(){['lerr','serr','ferr','ierr'].forEach(id=>{document.getEl
 function validateEmail(email){return/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);}
 function validatePassword(password){return password.length>=8&&/[A-Z]/.test(password)&&/\d/.test(password);}
 async function forgotPassword(){const email=document.getElementById('fe').value.trim();if(!validateEmail(email)){showError('ferr','Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){showError('ferr',await authErrMsg(resp));return;}showToast('✓ Instrucciones enviadas al email');showLogin();}catch(e){showError('ferr','Error: '+e.message);}}
-async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}authLoading(true,'accept-btn','Creando cuenta…');try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){authLoading(false,'accept-btn');showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();if(data.needsManualLogin||!data.access_token){authLoading(false,'accept-btn');try{showLogin();}catch(e){}const lu=document.getElementById('lu');if(lu)lu.value=email;alert(data.message||'Tu cuenta fue creada. Inicia sesión con tu email y contraseña.');return;}currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);startTokenRefresh();authLoading(false,'accept-btn');document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';document.getElementById('sb-btn-settings').style.display=data.user.role==='Administrador'?'':'none';const _apiOk2=await loadDataFromAPI();logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});if(!_apiOk2)loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){authLoading(false,'accept-btn');showError('ierr','Error: '+e.message);}}
+async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}authLoading(true,'accept-btn','Creando cuenta…');try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){authLoading(false,'accept-btn');showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();if(data.needsManualLogin||!data.access_token){authLoading(false,'accept-btn');try{showLogin();}catch(e){}const lu=document.getElementById('lu');if(lu)lu.value=email;alert(data.message||'Tu cuenta fue creada. Inicia sesión con tu email y contraseña.');return;}currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);startTokenRefresh();authLoading(false,'accept-btn');document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';document.getElementById('sb-btn-settings').style.display=data.user.role==='Administrador'?'':'none';document.getElementById('sb-btn-pagos').style.display=data.user.role==='Administrador'?'':'none';const _apiOk2=await loadDataFromAPI();logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});if(!_apiOk2)loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){authLoading(false,'accept-btn');showError('ierr','Error: '+e.message);}}
 function checkInvitationCode(){const params=new URLSearchParams(window.location.search);const code=params.get('invite');const email=params.get('email');if(code&&email){document.getElementById('login-form').classList.add('hidden');document.getElementById('invite-form').classList.remove('hidden');document.getElementById('invite-email-display').textContent='Email: '+email;window._inviteCode=code;window._inviteEmail=email;}}
 // FASE 2: Bootstrap desde Cloudflare Access al cargar
 if(document.readyState==='loading'){

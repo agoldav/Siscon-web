@@ -97,8 +97,11 @@ ok('monto no numérico queda en null',
            return r && r.montoUSD === null; })());
 
 console.log('\nSelectores:');
+// C1(b) — desde esta ola de arreglos, `ocsListasParaPagar()` exige el sello `createdAtISO`, que
+// solo llevan las OCs creadas a partir del despliegue. Las fixtures de abajo lo traen porque
+// representan OCs nuevas; las pruebas específicas del sello viven más abajo.
 const mkOc = extra => ({ id: 'oc-1', num: 'OC-2026-014', status: 'Borrador', vendorName: 'Polycenter',
-  totalUSD: 100, houseIds: ['h-1'], bodegaLines: [],
+  totalUSD: 100, houseIds: ['h-1'], bodegaLines: [], createdAtISO: '2026-09-09T15:00:00.000Z',
   lines: { 'h-1': [{ lineId: 'l-1', qty: 1 }] }, ...extra });
 
 const projs = [
@@ -181,14 +184,21 @@ ok('sin projOverride y con curProj null, el comportamiento previo (huérfano) se
   entrySinCurProj.projectId === null && entrySinCurProj.projectName === null);
 
 console.log('\nocOpenPagoModal — candado de pago duplicado (fix):');
-ok('ocOpenPagoModal rechaza abrir el modal si la OC ya tiene un pago registrado',
-  /function ocOpenPagoModal[\s\S]{0,900}if\(oc\.pago\)\{[\s\S]{0,250}alert\([\s\S]{0,250}return;\s*\}/.test(html));
+// ACTUALIZADO por la Decisión 3 (editar/anular pago): la guarda ya no puede ser `if(oc.pago)` a
+// secas, porque el modo edición reabre el modal con el pago existente a propósito. El invariante
+// que importa —no se puede registrar un SEGUNDO pago sobre una OC ya pagada— es el mismo, y la
+// condición pasó a `if(oc.pago && !editando)`. Las 4 aserciones siguen verificando lo mismo,
+// escritas contra la condición nueva; ninguna se debilitó.
+ok('ocOpenPagoModal rechaza abrir el modal en modo registro si la OC ya tiene un pago',
+  /function ocOpenPagoModal[\s\S]{0,1500}if\(oc\.pago&&!editando\)\{[\s\S]{0,250}alert\([\s\S]{0,250}return;\s*\}/.test(html));
 ok('la guarda de pago duplicado corre ANTES de armar el contexto del modal (_ocPagoCtx=)',
-  /function ocOpenPagoModal[\s\S]{0,900}if\(oc\.pago\)[\s\S]{0,250}return;[\s\S]{0,150}_ocPagoCtx=/.test(html));
+  /function ocOpenPagoModal[\s\S]{0,1500}if\(oc\.pago&&!editando\)[\s\S]{0,250}return;[\s\S]{0,400}_ocPagoCtx=/.test(html));
 ok('el mensaje de pago duplicado informa cuándo (fmtDate) y quién (registradoPor) lo registró',
-  /if\(oc\.pago\)\{[\s\S]{0,250}fmtDate\(oc\.pago\.fecha\)[\s\S]{0,150}registradoPor/.test(html));
+  /if\(oc\.pago&&!editando\)\{[\s\S]{0,250}fmtDate\(oc\.pago\.fecha\)[\s\S]{0,150}registradoPor/.test(html));
 ok('la guarda de pago duplicado sigue después de la guarda existente de ocIsComplete (no la reemplaza)',
-  /function ocOpenPagoModal[\s\S]{0,500}ocIsComplete\(oc\)[\s\S]{0,250}if\(oc\.pago\)/.test(html));
+  /function ocOpenPagoModal[\s\S]{0,900}ocIsComplete\(oc\)[\s\S]{0,400}if\(oc\.pago&&!editando\)/.test(html));
+ok('el modo edición no se puede abrir sobre una OC que nunca tuvo pago',
+  /function ocOpenPagoModal[\s\S]{0,1500}if\(!oc\.pago&&editando\)\{[\s\S]{0,200}return;\s*\}/.test(html));
 
 console.log('\nPantalla Listo para pagar:');
 ok('existe openPagosWin', /function openPagosWin\(/.test(html));
@@ -225,5 +235,419 @@ ok('paidOcsNoInvoice migrada en applyDefaults() con recipients garantizado como 
     && /Array\.isArray\(SYS\.emailAutomations\.paidOcsNoInvoice\.recipients\)/.test(body);
 })());
 
-console.log(`\n${pass} pruebas OK, ${fail} fallas`);
-process.exit(fail ? 1 : 0);
+(async function nuevosArreglos(){
+
+// ============================================================
+//  Ola de arreglos de la revisión final (C1, I1-I6, M5 + Decisión 3).
+//  Los defectos estaban en el PLAN, no en la implementación anterior.
+// ============================================================
+
+// El extractor de arriba busca `function <nombre>(`; para una función async hay que incluir el
+// prefijo `async `, si no el cuerpo extraído tiene `await` dentro de una función no-async
+// (SyntaxError). Mismo algoritmo de conteo de llaves.
+function extractAsyncFunction(name) {
+  const start = html.indexOf(`async function ${name}(`);
+  if (start < 0) throw new Error(`No se encontró async function ${name}`);
+  const brace = html.indexOf('{', start);
+  let depth = 0, quote = '', escaped = false;
+  for (let i = brace; i < html.length; i++) {
+    const ch = html[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') { quote = ch; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}' && --depth === 0) return html.slice(start, i + 1);
+  }
+  throw new Error(`Función incompleta: ${name}`);
+}
+
+// ---------- C1 — la pantalla no puede nacer llena de OCs viejas ya liquidadas ----------
+console.log('\nC1 — estados terminales y sello de OC nueva:');
+const SELLO = '2026-09-09T15:00:00.000Z';
+const c1Base = { id: 'x', num: 'OC-2026-100', status: 'Borrador', vendorName: 'Polycenter',
+  totalUSD: 500, houseIds: ['h-1'], bodegaLines: [], createdAtISO: SELLO,
+  lines: { 'h-1': [{ lineId: 'l-1', qty: 2 }] } };
+const c1 = extra => sandbox.ocsListasParaPagar([{ id: 9, name: 'P', ocs: [{ ...c1Base, ...extra }] }]);
+
+ok('una OC nueva, completa y sin pago sí es pagable', c1().length === 1);
+ok('C1(a) — status Facturada NO es pagable (saveVendorBill ya ligó la factura)',
+  c1({ status: 'Facturada' }).length === 0);
+ok('C1(a) — status Recibida NO es pagable (el material ya entró)',
+  c1({ status: 'Recibida' }).length === 0);
+ok('C1(a) — status Cancelada NO es pagable', c1({ status: 'Cancelada' }).length === 0);
+ok('C1(a) — Enviada sigue siendo pagable (no es terminal)', c1({ status: 'Enviada' }).length === 1);
+ok('C1(b) — una OC histórica (sin createdAtISO) queda fuera para siempre',
+  c1({ createdAtISO: undefined }).length === 0);
+ok('C1(b) — createdAtISO vacío o solo espacios tampoco cuenta como sello',
+  c1({ createdAtISO: '' }).length === 0 && c1({ createdAtISO: '   ' }).length === 0);
+// El escenario exacto del hallazgo: el día del despliegue, una cartera entera de OCs históricas
+// completas (incluidas las ya facturadas de hace un año) NO puede aparecer como pagable.
+const carteraHistorica = [{ id: 1, name: 'Histórico', ocs: [
+  { ...c1Base, id: 'h1', createdAtISO: undefined, status: 'Facturada' },
+  { ...c1Base, id: 'h2', createdAtISO: undefined, status: 'Recibida' },
+  { ...c1Base, id: 'h3', createdAtISO: undefined, status: 'Enviada' },
+  { ...c1Base, id: 'h4', createdAtISO: undefined, status: 'Borrador' },
+] }];
+ok('C1 — la pantalla nace VACÍA con una cartera de OCs históricas completas',
+  sandbox.ocsListasParaPagar(carteraHistorica).length === 0,
+  JSON.stringify(sandbox.ocsListasParaPagar(carteraHistorica).map(x => x.oc.id)));
+ok('C1 — ocIsComplete() sigue midiendo completitud de datos, no pagabilidad: una OC Facturada con datos completos sigue siendo "completa"',
+  sandbox.ocIsComplete({ ...c1Base, status: 'Facturada' }) === true);
+
+ok('C1(b) — openNewOC() sella la OC nueva con createdAtISO',
+  extractFunction('openNewOC').includes('createdAtISO: new Date().toISOString()'));
+ok('C1(b) — ocFromHouse() sella la OC nueva con createdAtISO',
+  /createdAtISO:\s*new Date\(\)\.toISOString\(\)/.test(extractFunction('ocFromHouse')));
+ok('C1(b) — duplicateOC() sella la copia con SU PROPIO createdAtISO, no el del original',
+  /clone\.createdAtISO\s*=\s*new Date\(\)\.toISOString\(\)/.test(extractFunction('duplicateOC')));
+ok('C1(b) — duplicateOC() no hereda el pago del original',
+  /delete clone\.pago/.test(extractFunction('duplicateOC')));
+// Si aparece un cuarto lugar que cree una OC, tiene que sellarla o nunca será pagable.
+ok('C1(b) — no hay más puntos de creación de OC que los tres sellados',
+  (html.match(/\.ocs\.push\(/g) || []).length === 3,
+  (html.match(/\.ocs\.push\(/g) || []).length);
+
+// ---------- I2 — guardar la OC no puede borrar el pago ya registrado ----------
+console.log('\nI2 — el guardado del formulario preserva el pago de la fila viva:');
+vm.runInContext(extractFunction('ocPreserveLiveFields'), sandbox);
+
+// Escenario real, un solo usuario: la OC está abierta en el formulario (clon sin pago), se
+// registra el pago desde la ventana flotante "Listo para pagar", y después se guarda el
+// formulario. Sin el fix, el spread del clon pisaba oc.pago y no había 409 que lo frenara.
+const clonViejo = { id: 'oc-14', num: 'OC-2026-014', totalUSD: 100 };       // clonado ANTES del pago
+const filaViva = { id: 'oc-14', num: 'OC-2026-014', totalUSD: 100,
+  createdAtISO: SELLO, pago: { montoUSD: 100, fecha: '2026-09-09', blobId: 'blob_x' } };
+const guardado = sandbox.ocPreserveLiveFields({ ...clonViejo }, filaViva);
+ok('I2 — el pago sobrevive al guardado del formulario',
+  guardado.pago && guardado.pago.blobId === 'blob_x', JSON.stringify(guardado.pago));
+ok('I2 — el sello createdAtISO también sobrevive', guardado.createdAtISO === SELLO);
+ok('I2 — si la fila viva no tiene pago, el clon no puede inventar uno',
+  sandbox.ocPreserveLiveFields({ ...clonViejo, pago: { montoUSD: 1 } }, { id: 'oc-14' }).pago === undefined);
+ok('I2 — si la fila viva no tiene sello, el clon no puede inventarlo (una OC histórica no se vuelve pagable al editarla)',
+  sandbox.ocPreserveLiveFields({ ...clonViejo, createdAtISO: SELLO }, { id: 'oc-14' }).createdAtISO === undefined);
+ok('I2 — el resto de los campos editados en el formulario NO se tocan',
+  sandbox.ocPreserveLiveFields({ ...clonViejo, totalUSD: 250 }, filaViva).totalUSD === 250);
+ok('I2 — sin fila viva (OC nueva) devuelve el objeto tal cual',
+  sandbox.ocPreserveLiveFields({ id: 'nueva', totalUSD: 5 }, null).totalUSD === 5);
+// Cableado: los tres caminos que reemplazan la fila entera tienen que usarlo.
+ok('I2 — ocSave() preserva antes de reemplazar la fila',
+  /ocPreserveLiveFields\(ocData,p\.ocs\[idx\]\);\s*p\.ocs\[idx\]=ocData;/.test(extractFunction('ocSave')));
+ok('I2 — ocSaveSilent() preserva antes de reemplazar la fila',
+  /ocPreserveLiveFields\(ocData,p\.ocs\[idx\]\);\s*p\.ocs\[idx\]=ocData;/.test(extractFunction('ocSaveSilent')));
+ok('I2 — ningún reemplazo total de fila de OC quedó sin la preservación',
+  (html.match(/p\.ocs\[(?:idx|ocIdx)\]=/g) || []).length === 3
+  && (html.match(/ocPreserveLiveFields\(/g) || []).length === 4,
+  `reemplazos=${(html.match(/p\.ocs\[(?:idx|ocIdx)\]=/g) || []).length} usos=${(html.match(/ocPreserveLiveFields\(/g) || []).length}`);
+
+// ---------- I5 — nada de notificaciones eternas para una OC cancelada ----------
+console.log('\nI5 — criterio terminal alineado con el backend:');
+ok('I5 — una OC pagada y luego CANCELADA deja de contar días (no genera alerta diaria eterna)',
+  sandbox.ocDiasSinFactura({ status: 'Cancelada', pago: { fecha: '2026-08-01' } }, '2026-09-11') === null);
+ok('I5 — Facturada sigue devolviendo null (comportamiento previo intacto)',
+  sandbox.ocDiasSinFactura({ status: 'Facturada', pago: { fecha: '2026-08-01' } }, '2026-09-11') === null);
+ok('I5 — un estado no terminal sigue contando días',
+  sandbox.ocDiasSinFactura({ status: 'Enviada', pago: { fecha: '2026-09-01' } }, '2026-09-11') === 10);
+ok('I5 — ocsPagadasSinFactura ya no reporta la OC cancelada',
+  sandbox.ocsPagadasSinFactura(
+    [{ id: 1, name: 'P', ocs: [{ id: 'oc-x', status: 'Cancelada', pago: { fecha: '2026-01-01' } }] }],
+    10, '2026-09-11').length === 0);
+ok('I5 — queda anotado que el criterio debe seguir al de buildPaidOcsDigestRows del backend',
+  /buildPaidOcsDigestRows[\s\S]{0,600}function ocDiasSinFactura/.test(html));
+
+// ---------- M5 — el número de OC del comprobante se compara ----------
+console.log('\nM5 — advertencia cuando el comprobante es de otra OC:');
+vm.runInContext([extractFunction('ocPagoNumCoincide'), extractFunction('ocPagoFormatos'),
+  extractFunction('ocPagoAccept'), extractFunction('ocPagoExtOk')].join('\n'), sandbox);
+ok('M5 — mismo número no advierte', sandbox.ocPagoNumCoincide('OC-2026-014', 'OC-2026-014') === true);
+ok('M5 — número distinto advierte (comprobante de la 020 sobre la 014)',
+  sandbox.ocPagoNumCoincide('OC-2026-020', 'OC-2026-014') === false);
+ok('M5 — la comparación ignora mayúsculas y espacios',
+  sandbox.ocPagoNumCoincide(' oc-2026-014 ', 'OC-2026-014') === true);
+ok('M5 — sin número parseado no se advierte nada (el nombre es una conveniencia)',
+  sandbox.ocPagoNumCoincide('', 'OC-2026-014') === true);
+const pickedSrc = extractFunction('ocPagoFilePicked');
+const warnBlock = pickedSrc.slice(pickedSrc.indexOf('if(warnEl){'));
+ok('M5 — ocPagoFilePicked compara el número y pinta el aviso en el modal',
+  /ocPagoNumCoincide\(parsed\.ocNum,ocNumReal\)/.test(warnBlock)
+  && /warnEl\.textContent=/.test(warnBlock));
+ok('M5 — es advertencia, NO bloqueo: el bloque del aviso no corta el flujo ni descarta el archivo',
+  !/return/.test(warnBlock) && !/_ocPagoCtx\.file=null/.test(warnBlock) && !/alert\(/.test(warnBlock));
+ok('M5 — el archivo se acepta ANTES de evaluar el número (el aviso nunca lo descarta)',
+  pickedSrc.indexOf('_ocPagoCtx.file=f;') >= 0
+  && pickedSrc.indexOf('_ocPagoCtx.file=f;') < pickedSrc.indexOf('ocPagoNumCoincide('));
+ok('M5 — el modal tiene su propio contenedor de advertencia, sin pisar el hint de transferencia',
+  /id="oc-pago-warn"/.test(html) && /id="oc-pago-hint"/.test(html));
+
+// ---------- I1 — el toast de éxito no puede salir antes del guardado ----------
+console.log('\nI1 — accept acotado a la allowlist real del backend:');
+// La allowlist real vive en siscon-backend/r2-storage.js (DOCUMENT_MIME_ALLOWLIST):
+// pdf, png, jpeg, gif, webp, docx, xlsx.
+ok('I1 — el accept ya no dice image/* (que dejaba elegir un .heic de iPhone)',
+  !/id="oc-pago-file"[^>]*accept="application\/pdf,image\/\*"/.test(html));
+ok('I1 — el accept sale de la misma lista que valida el archivo elegido',
+  /id="oc-pago-file"[^>]*accept="\$\{ocPagoAccept\(\)\}"/.test(html));
+ok('I1 — ocPagoAccept() genera exactamente la allowlist del backend',
+  sandbox.ocPagoAccept() === '.pdf,.png,.jpg,.jpeg,.gif,.webp,.docx,.xlsx', sandbox.ocPagoAccept());
+ok('I1 — un .heic se rechaza al elegirlo (era el disparador real del bug)',
+  sandbox.ocPagoExtOk('IMG_0421.HEIC') === false);
+ok('I1 — pdf/jpg/png/webp/gif/docx/xlsx se aceptan',
+  ['a.pdf', 'a.JPG', 'a.jpeg', 'a.png', 'a.webp', 'a.gif', 'a.docx', 'a.xlsx']
+    .every(n => sandbox.ocPagoExtOk(n) === true));
+ok('I1 — archivo sin extensión se rechaza', sandbox.ocPagoExtOk('comprobante') === false);
+ok('I1 — ocPagoFilePicked avisa al elegir en vez de dejar que falle al guardar',
+  /function ocPagoFilePicked[\s\S]{0,900}ocPagoExtOk\(f\.name\)[\s\S]{0,700}alert\(/.test(html));
+
+// ---------- I1 + I3 + I4 — comportamiento real de ocConfirmPago ----------
+// No es una prueba de patrón: se extrae la función real de index.html y se ejecuta en un sandbox
+// con `saveData` simulado (que resuelve false / true / lanza) y con el arreglo `projects`
+// reemplazado a mitad de camino, exactamente como lo hace el polling de startVersionSync().
+console.log('\nI1 + I3 + I4 — ocConfirmPago ejecutado de verdad:');
+const pagoSandbox = { console, JSON, Date, Math, Number, parseFloat, String, Array, Object };
+pagoSandbox.window = pagoSandbox;
+vm.createContext(pagoSandbox);
+vm.runInContext([
+  extractFunction('ocPagoPuedeRegistrar'),
+  extractFunction('ocPagoGateRol'),
+  extractFunction('_ocPagoResolve'),
+  extractAsyncFunction('ocConfirmPago'),
+].join('\n'), pagoSandbox);
+
+function mkPagoProjects() {
+  return [{
+    id: 7, name: 'Dor', lastActivity: 0, uploads: [],
+    ocs: [{ id: 'oc-14', num: 'OC-2026-014', status: 'Enviada', vendorName: 'Polycenter',
+      totalUSD: 883.11, createdAtISO: SELLO }],
+  }];
+}
+// Devuelve {alerts, toasts, projects, oc} tras ejecutar ocConfirmPago con el escenario pedido.
+async function runConfirm({ saveResult = true, saveThrows = false, role = 'Administrador',
+                            ocId = 'oc-14', metodo = 'Tarjeta', file = null, repollear = false } = {}) {
+  const alerts = [], toasts = [], logs = [];
+  pagoSandbox.projects = mkPagoProjects();
+  const ocOriginal = pagoSandbox.projects[0].ocs[0];
+  pagoSandbox.currentUser = { name: 'Abraham', role };
+  pagoSandbox._ocPagoCtx = { projId: 7, ocId, file, editando: false, pagoPrevio: null };
+  pagoSandbox.docBlobMap = {};
+  pagoSandbox._pendingDocFiles = new Map();
+  pagoSandbox.URL = { createObjectURL: () => 'blob:fake' };
+  pagoSandbox.alert = m => alerts.push(String(m));
+  pagoSandbox.showToast = m => toasts.push(String(m));
+  pagoSandbox.logAction = (...a) => logs.push(a);
+  pagoSandbox.closeModal = () => {};
+  pagoSandbox.curTab = 'info'; pagoSandbox.curTxnTab = 'oc'; pagoSandbox.curOCId = null;
+  const campos = { 'oc-pago-monto': { value: '883.11' }, 'oc-pago-fecha': { value: '2026-09-10' },
+                   'oc-pago-metodo': { value: metodo } };
+  pagoSandbox.document = { getElementById: id => campos[id] || null };
+  pagoSandbox.saveData = () => {
+    if (saveThrows) return Promise.reject(new Error('R2 caído'));
+    return Promise.resolve(saveResult);
+  };
+  // startVersionSync() hace polling cada 10 s y loadDataFromAPI() reemplaza `projects` completo:
+  // eso ocurre mientras el modal está abierto, entre abrirlo y confirmar. Las referencias que el
+  // contexto hubiera capturado al abrir quedan huérfanas a partir de acá.
+  if (repollear) pagoSandbox.projects = mkPagoProjects();
+  await pagoSandbox.ocConfirmPago();
+  return { alerts, toasts, logs, ocOriginal,
+    ocVivo: (pagoSandbox.projects[0].ocs || []).find(o => o.id === 'oc-14') };
+}
+
+const okExito = await runConfirm({ saveResult: true });
+ok('I1 — con guardado exitoso sí sale el toast de éxito',
+  okExito.toasts.some(t => t.includes('Pago registrado')) && okExito.alerts.length === 0,
+  JSON.stringify({ toasts: okExito.toasts, alerts: okExito.alerts }));
+ok('I1 — el pago queda escrito en la OC', !!(okExito.ocVivo && okExito.ocVivo.pago));
+
+const falla = await runConfirm({ saveResult: false });
+ok('I1 — si saveData() resuelve false NO sale el toast de éxito',
+  !falla.toasts.some(t => t.includes('Pago registrado')), JSON.stringify(falla.toasts));
+ok('I1 — si saveData() resuelve false sale un alert() bloqueante que dice que el pago NO quedó registrado',
+  falla.alerts.length === 1 && /NO QUED[ÓO] REGISTRADO/i.test(falla.alerts[0]),
+  JSON.stringify(falla.alerts));
+ok('I1 — el alert le dice al usuario que reintente',
+  /intent/i.test(falla.alerts[0] || ''));
+
+const revienta = await runConfirm({ saveThrows: true });
+ok('I1 — si el guardado lanza tampoco sale el toast y sí sale el alert bloqueante',
+  !revienta.toasts.some(t => t.includes('Pago registrado'))
+  && revienta.alerts.length === 1 && /NO QUED[ÓO] REGISTRADO/i.test(revienta.alerts[0]),
+  JSON.stringify({ toasts: revienta.toasts, alerts: revienta.alerts }));
+
+// I3: el modal quedó abierto mientras el polling reemplazó `projects`. Sin el fix, ocConfirmPago
+// escribía sobre el objeto huérfano capturado al abrir el modal y el pago se perdía en silencio.
+const repoll = await runConfirm({ repollear: true });
+ok('I3 — el pago se escribe sobre la fila VIVA re-resuelta por id, no sobre la capturada al abrir',
+  !!(repoll.ocVivo && repoll.ocVivo.pago), JSON.stringify(repoll.ocVivo && repoll.ocVivo.pago));
+ok('I3 — el objeto huérfano de antes del polling NO queda con el pago',
+  repoll.ocOriginal.pago === undefined);
+ok('I3 — con re-resolución exitosa no hay alerta de error', repoll.alerts.length === 0,
+  JSON.stringify(repoll.alerts));
+
+const desaparecida = await runConfirm({ ocId: 'oc-que-ya-no-existe' });
+ok('I3 — si la OC ya no existe al re-resolver, avisa con alert()',
+  desaparecida.alerts.length === 1 && /NO se registr/i.test(desaparecida.alerts[0]),
+  JSON.stringify(desaparecida.alerts));
+ok('I3 — si la OC ya no existe NO se escribe nada',
+  !desaparecida.ocVivo.pago && desaparecida.logs.length === 0 && desaparecida.toasts.length === 0);
+
+const noAdmin = await runConfirm({ role: 'Supervisor' });
+ok('I4 — un Supervisor no puede registrar el pago ni aunque llegue a ocConfirmPago',
+  noAdmin.alerts.length === 1 && /Administrador/.test(noAdmin.alerts[0])
+  && !noAdmin.ocVivo.pago && noAdmin.toasts.length === 0,
+  JSON.stringify(noAdmin.alerts));
+const noAdmin2 = await runConfirm({ role: 'Regular' });
+ok('I4 — un Regular tampoco', !noAdmin2.ocVivo.pago && noAdmin2.toasts.length === 0);
+
+ok('I1 — el toast está DESPUÉS del await del guardado, no antes',
+  /await saveData\(\)[\s\S]{0,900}showToast\(/.test(extractAsyncFunction('ocConfirmPago'))
+  && !/showToast\([\s\S]{0,200}await saveData\(\)/.test(extractAsyncFunction('ocConfirmPago'))); 
+ok('I3 — _ocPagoCtx guarda ids, no los objetos proj/oc',
+  /_ocPagoCtx=\{projId:proj\.id,ocId:oc\.id/.test(html)
+  && !/_ocPagoCtx=\{proj,oc/.test(html));
+ok('I3 — la re-resolución sigue el patrón de assignUnclassified (find por id sobre projects)',
+  /function _ocPagoResolve[\s\S]{0,400}projects\.find\(p=>String\(p\.id\)===String\(_ocPagoCtx\.projId\)\)/.test(html));
+
+// ---------- I4 — control de rol también en la puerta de la ventana ----------
+console.log('\nI4 — gate de rol Administrador:');
+ok('I4 — el botón de la barra lateral tiene id y nace oculto, igual que sb-btn-settings',
+  /id="sb-btn-pagos"[^>]*style="display:none"/.test(html));
+ok('I4 — la visibilidad se fija en los mismos 4 lugares que sb-btn-settings',
+  (html.match(/sb-btn-pagos'\)\.style\.display/g) || []).length
+    === (html.match(/sb-btn-settings'\)\.style\.display/g) || []).length,
+  `pagos=${(html.match(/sb-btn-pagos'\)\.style\.display/g) || []).length} settings=${(html.match(/sb-btn-settings'\)\.style\.display/g) || []).length}`);
+ok('I4 — openPagosWin() gatea por rol antes de abrir la ventana',
+  /function openPagosWin\(\)\{[\s\S]{0,600}ocPagoGateRol\(\)[\s\S]{0,200}fwinExists\('pagos'\)/.test(html));
+ok('I4 — ocOpenPagoModal() gatea por rol en su primera línea',
+  /function ocOpenPagoModal\([^)]*\)\{\s*(?:\/\/[^\n]*\n\s*)*if\(!ocPagoGateRol\(\)\)\s*return;/.test(html));
+ok('I4 — el gate reconoce exactamente el rol Administrador',
+  /function ocPagoPuedeRegistrar\(\)\{[^}]*currentUser\.role==='Administrador'/.test(html));
+
+// ---------- I6 — el pago se ve en la lista y en el formulario ----------
+console.log('\nI6 — el pago es visible:');
+ok('I6 — renderOCList pinta el distintivo de OC pagada',
+  /function renderOCList[\s\S]{0,4000}\$\{ocPagoBadgeHTML\(oc\)\}/.test(html));
+ok('I6 — el distintivo dice "Pagada" y lleva la fecha',
+  /function ocPagoBadgeHTML[\s\S]{0,500}Pagada \$\{esc\(fmtDate\(oc\.pago\.fecha\)\)\}/.test(html));
+ok('I6 — el distintivo no se pinta si la OC no tiene pago',
+  /function ocPagoBadgeHTML\(oc\)\{\s*if\(!oc\|\|!oc\.pago\) return '';/.test(html));
+ok('I6 — el formulario de OC reserva el contenedor de la franja de pago',
+  /id="oc-pago-strip">\$\{ocPagoStripHTML\(\)\}/.test(html));
+const stripSrc = html.slice(html.indexOf('function ocPagoStripHTML'),
+  html.indexOf('function ocPagoRefreshStrip'));
+ok('I6 — la franja muestra monto, fecha, método y quién lo registró',
+  /pg\.montoUSD/.test(stripSrc) && /fmtDate\(pg\.fecha\)/.test(stripSrc)
+  && /pg\.metodo/.test(stripSrc) && /pg\.registradoPor/.test(stripSrc));
+ok('I6 — el comprobante se abre por el mismo camino que Documentos (openPdfNewTab por blobId)',
+  /openPdfNewTab\('\$\{esc\(String\(pg\.blobId\)\)\}'\)/.test(stripSrc));
+ok('I6 — la franja lee la fila VIVA de curProj.ocs, no el clon ocState del formulario',
+  /function ocPagoStripHTML[\s\S]{0,400}curProj\.ocs\|\|\[\]\)\.find\(o=>String\(o\.id\)===String\(curOCId\)\)/.test(html));
+ok('I6 — todo el texto de usuario de la franja pasa por esc()',
+  !/\$\{pg\.(comprobanteName|metodo|registradoPor)\}/.test(stripSrc));
+
+// Render real de la franja: se ejecuta la función tal cual está en index.html.
+// (No se puede usar extractFunction acá: el cuerpo tiene template literals anidados y el
+// contador de llaves del extractor se pierde; por eso se acota por posición, como arriba.)
+const stripSandbox = { console, JSON, String, Number, Array, Object, Date };
+vm.createContext(stripSandbox);
+// esc() no se puede sacar con extractFunction: su cuerpo tiene literales de expresión regular
+// (/"/g, /'/g) y el contador de llaves los confunde con comillas. Es un one-liner, así que se
+// toma la línea real del archivo — sigue siendo el esc() de producción, no una copia.
+const escSrc = html.split('\n').find(l => l.trim().startsWith('function esc(s)'));
+if (!escSrc) throw new Error('No se encontró la definición de esc()');
+vm.runInContext([stripSrc, escSrc, extractFunction('fmtDate'),
+  extractFunction('ocPagoPuedeRegistrar'),
+  "function fmt(v){return '$'+(Number(v)||0).toFixed(2);}"].join('\n'), stripSandbox);
+function renderStrip({ pago, role = 'Administrador', ocId = 'oc-14' } = {}) {
+  stripSandbox.currentUser = { name: 'Abraham', role };
+  stripSandbox.curProj = { id: 7, name: 'Dor', ocs: [{ id: 'oc-14', num: 'OC-2026-014', pago }] };
+  stripSandbox.curOCId = ocId;
+  return stripSandbox.ocPagoStripHTML();
+}
+const pagoDemo = { montoUSD: 883.11, fecha: '2026-09-09', metodo: 'Transferencia',
+  blobId: 'blob_abc', comprobanteName: 'Polycenter-883.11-OC-2026-014.pdf', registradoPor: 'Abraham' };
+const strip = renderStrip({ pago: pagoDemo });
+ok('I6 (render real) — la franja muestra el monto', strip.includes('$883.11'), strip.slice(0, 200));
+// fmtDate() es la función de fechas de toda la app (dd/mm/aaaa); lo que se verifica es que la
+// franja pase la fecha por ella y no vuelque el ISO crudo.
+ok('I6 (render real) — la franja muestra la fecha con fmtDate (dd/mm/aaaa), no el ISO crudo',
+  /\d{2}\/\d{2}\/\d{4}/.test(strip) && strip.includes(stripSandbox.fmtDate(pagoDemo.fecha))
+  && !strip.includes('2026-09-09'), strip);
+ok('I6 (render real) — la franja muestra el método', strip.includes('Transferencia'));
+ok('I6 (render real) — la franja dice quién lo registró', strip.includes('Abraham'));
+ok('I6 (render real) — la franja enlaza el comprobante por blobId',
+  strip.includes("openPdfNewTab('blob_abc')") && strip.includes('Polycenter-883.11-OC-2026-014.pdf'));
+ok('I6 (render real) — una OC sin pago no pinta nada', renderStrip({ pago: undefined }) === '');
+ok('I6 (render real) — una OC nueva (curOCId === "new") no pinta nada',
+  renderStrip({ pago: pagoDemo, ocId: 'new' }) === '');
+ok('I6 (render real) — sin comprobante lo dice en vez de dejar un enlace roto',
+  renderStrip({ pago: { ...pagoDemo, blobId: '', comprobanteName: '' } }).includes('Sin comprobante adjunto'));
+ok('D3 (render real) — el Administrador ve Editar y Anular',
+  strip.includes('ocEditarPago(') && strip.includes('ocAnularPago('));
+ok('D3 (render real) — un Supervisor NO ve esos botones',
+  (() => { const s = renderStrip({ pago: pagoDemo, role: 'Supervisor' });
+           return s.includes('Pagada') && !s.includes('ocEditarPago(') && !s.includes('ocAnularPago('); })());
+ok('I6 (render real) — un nombre de comprobante con payload XSS no sobrevive crudo',
+  (() => { const s = renderStrip({ pago: { ...pagoDemo,
+             comprobanteName: '<img src=x onerror=alert(1)>', registradoPor: '"><script>alert(2)</script>' } });
+           return !s.includes('<img src=x onerror=alert(1)>') && !s.includes('<script>alert(2)</script>')
+             && s.includes('&lt;img src=x onerror=alert(1)&gt;'); })());
+
+// Render real del distintivo de la lista.
+vm.runInContext([extractFunction('ocPagoBadgeHTML')].join('\n'), stripSandbox);
+ok('I6 (render real) — el distintivo de la lista dice "Pagada" con la fecha en dd/mm/aaaa',
+  (() => { const b = stripSandbox.ocPagoBadgeHTML({ pago: pagoDemo });
+           return b.includes('Pagada') && b.includes(stripSandbox.fmtDate(pagoDemo.fecha))
+             && /\d{2}\/\d{2}\/\d{4}/.test(b); })(),
+  stripSandbox.ocPagoBadgeHTML({ pago: pagoDemo }));
+ok('I6 (render real) — sin pago el distintivo es vacío',
+  stripSandbox.ocPagoBadgeHTML({ num: 'OC-1' }) === '' && stripSandbox.ocPagoBadgeHTML(null) === '');
+
+// ---------- Decisión 3 — editar y anular un pago con contraseña de administrador ----------
+console.log('\nDecisión 3 — editar y anular pago:');
+ok('D3 — existe ocEditarPago', /function ocEditarPago\(/.test(html));
+ok('D3 — existe ocAnularPago', /async function ocAnularPago\(/.test(html));
+ok('D3 — la franja de pago ofrece las dos acciones',
+  /ocEditarPago\(/.test(stripSrc) && /ocAnularPago\(/.test(stripSrc));
+ok('D3 — las dos acciones solo se ofrecen al rol que puede pagar',
+  /const puede=ocPagoPuedeRegistrar\(\)/.test(stripSrc) && /\$\{puede\?/.test(stripSrc));
+ok('D3 — editar pide contraseña de administrador con el mismo mecanismo que borrar un proyecto (isAdminPwd)',
+  /function ocEditarPago[\s\S]{0,900}prompt\([\s\S]{0,200}isAdminPwd\(pwd\)[\s\S]{0,120}Contraseña incorrecta/.test(html));
+ok('D3 — anular pide contraseña de administrador (isAdminPwd)',
+  /function ocAnularPago[\s\S]{0,900}prompt\([\s\S]{0,200}isAdminPwd\(pwd\)[\s\S]{0,120}Contraseña incorrecta/.test(html));
+ok('D3 — cancelar el prompt no hace nada (pwd===null)',
+  (extractFunction('ocEditarPago').match(/if\(pwd===null\) return;/g) || []).length === 1
+  && (extractAsyncFunction('ocAnularPago').match(/if\(pwd===null\) return;/g) || []).length === 1);
+ok('D3 — editar reabre el modal en modo edición sobre la MISMA OC',
+  /function ocEditarPago[\s\S]{0,900}ocOpenPagoModal\(proj\.id,oc\.id,true\)/.test(html));
+ok('D3 — el modal en modo edición prellena monto, fecha, método y el nombre del comprobante actual',
+  /const previo=editando\?oc\.pago:null/.test(html)
+  && /const montoInicial=previo\?Number\(previo\.montoUSD\|\|0\)/.test(html)
+  && /const fechaInicial=previo&&previo\.fecha/.test(html)
+  && /const metodoActual=previo&&previo\.metodo/.test(html)
+  && /const nombreArchivo=previo&&previo\.comprobanteName/.test(html));
+ok('D3 — editar sin reemplazar el archivo conserva el comprobante anterior',
+  /let blobId=comprobantePrevioId;/.test(html));
+ok('D3 — anular borra el pago y devuelve la OC a "Listo para pagar"',
+  /function ocAnularPago[\s\S]{0,1400}delete oc\.pago;/.test(html));
+ok('D3 — anular deja en el log EL PAGO que se anuló, no solo que se anuló algo',
+  /logAction\(`Pago anulado en[\s\S]{0,400}monto:anulado\.montoUSD[\s\S]{0,200}comprobante:anulado\.comprobanteName/.test(html));
+// logAction toma el proyecto de la global curProj si no se le pasa, y estas pantallas son globales.
+ok('D3 — ambas acciones pasan el proyecto dueño como último argumento de logAction',
+  /function ocAnularPago[\s\S]{0,1600}logAction\([\s\S]{0,600},proj\);/.test(html));
+ok('D3 — la edición del pago también atribuye el log al proyecto dueño',
+  /logAction\(editando\?`Pago editado[\s\S]{0,900},proj\);/.test(html));
+ok('D3 — la edición no reescribe quién registró el pago original; deja rastro aparte de quién editó',
+  /oc\.pago\.editadoPor=/.test(html) && /registradoPor:\(editando&&pagoPrevio&&pagoPrevio\.registradoPor\)/.test(html));
+ok('D3 — anular también espera el guardado antes de cantar victoria',
+  /function ocAnularPago[\s\S]{0,1800}await saveData\(\)[\s\S]{0,700}NO QUED[ÓO] GUARDADA/.test(html));
+
+})().then(() => {
+  console.log(`\n${pass} pruebas OK, ${fail} fallas`);
+  process.exit(fail ? 1 : 0);
+}).catch(e => {
+  console.error('\n✗ La suite reventó:', e);
+  process.exit(1);
+});
