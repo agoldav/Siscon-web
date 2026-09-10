@@ -120,6 +120,40 @@ ok('monto no numérico queda en null (y tampoco hay símbolo que detectar)',
   (() => { const r = sandbox.parseComprobanteName('Prov-abc-OC-2026-001-x-Proy.pdf');
            return r && r.monto === null && r.moneda === null; })());
 
+// ---------- Seguimiento del arreglo de moneda (punto 3) — el símbolo ¢ también es colones ----------
+// ¢ (U+00A2, "cent sign") se usa en Costa Rica como sustituto de ₡ porque está en más teclados.
+// El propio archivo ya lo trataba como colones en el prompt de importación de Excel
+// (ctImportExcelViaClaude: "si tiene ¢ es CRC"), así que no reconocerlo acá era además una
+// inconsistencia interna. Sin el arreglo, este comprobante quedaba en moneda:null y el modal se
+// quedaba en USD — $450.000 en vez de ₡450.000, el modo de falla exacto que este arreglo evita.
+const pCent = sandbox.parseComprobanteName('Extralum-¢450000-OC-2026-014-4821-Dor.pdf');
+ok('punto 3 — el símbolo ¢ (U+00A2) se reconoce como colones, igual que ₡',
+  pCent && pCent.moneda === 'CRC', pCent && pCent.moneda);
+ok('punto 3 — con ¢ el monto se limpia igual que con ₡ (450000)',
+  pCent && pCent.monto === 450000, pCent && pCent.monto);
+
+// ---------- Seguimiento del arreglo de moneda (punto 4) — separador de miles según la moneda ----------
+// En CRC, el punto es separador de MILES (formato es-CR, el mismo con el que fmtCRC() imprime
+// colones: fmtCRC(450000) === '₡450.000'), no decimal. Sin el arreglo, `parseFloat('450.000')`
+// da 450 — un error de mil veces si alguien copia el monto tal como la propia app lo muestra.
+const pPuntoCRC = sandbox.parseComprobanteName('Extralum-₡450.000-OC-2026-014-4821-Dor.pdf');
+ok('punto 4 — en colones, el punto es separador de miles: ₡450.000 = 450000, no 450',
+  pPuntoCRC && pPuntoCRC.monto === 450000, pPuntoCRC && pPuntoCRC.monto);
+ok('punto 4 — la moneda se sigue detectando bien aunque el monto lleve separador',
+  pPuntoCRC && pPuntoCRC.moneda === 'CRC', pPuntoCRC && pPuntoCRC.moneda);
+// La coma también es separador de miles en CRC (no hay una única convención tipográfica fija).
+const pComaCRC = sandbox.parseComprobanteName('Extralum-¢450,000-OC-2026-014-4821-Dor.pdf');
+ok('punto 4 — en colones, la coma también es separador de miles: ¢450,000 = 450000',
+  pComaCRC && pComaCRC.monto === 450000, pComaCRC && pComaCRC.monto);
+// En USD el criterio no cambia: coma = miles, punto = decimal (ya cubierto arriba por p4, se deja
+// explícito acá para que las tres reglas queden una al lado de la otra en el mismo bloque).
+ok('punto 4 — en dólares el punto sigue siendo decimal: $1,250.00 = 1250, no 1250000',
+  sandbox.parseComprobanteName('Polycenter-$1,250.00-OC-2026-014-4821-Dor.pdf').monto === 1250);
+// Sin moneda detectada, el comportamiento previo se mantiene intacto: punto = decimal. No hay
+// forma de saber si el separador de miles pretendido es CRC o USD sin el símbolo.
+ok('punto 4 — sin símbolo de moneda, el punto sigue siendo decimal (comportamiento previo intacto)',
+  sandbox.parseComprobanteName('Extralum-1,250.00-OC-2026-7-4821-Dor.jpg').monto === 1250);
+
 console.log('\nSelectores:');
 // C1(b) — desde esta ola de arreglos, `ocsListasParaPagar()` exige el sello `createdAtISO`, que
 // solo llevan las OCs creadas a partir del despliegue. Las fixtures de abajo lo traen porque
@@ -176,10 +210,14 @@ ok('el pago queda registrado con autor y fecha',
 console.log('\nlogAction — atribuye al proyecto dueño de la OC, no a curProj (fix):');
 // Rangos ampliados tras el arreglo de moneda: el bloque de comentario nuevo antes de armar
 // oc.pago empuja la llamada a logAction() más lejos del inicio de la función (3000→3400), y el
-// objeto que se le pasa ahora también lleva `moneda` y `montoUSD` (antes/después), así que la
-// llamada en sí es más larga (400→700).
+// objeto que se le pasa ahora también lleva `moneda` (antes/después), así que la llamada en sí
+// es más larga (400→700). Seguimiento del arreglo de moneda (punto 1 + punto 2): la distancia
+// función→logAction() creció otra vez (3400→3986 reales) por el bloque nuevo que decide si se
+// conserva el exchangeRate histórico al editar, y la llamada en sí también (700→964 reales) por
+// el comentario que explica por qué `montoUSD` ya no va en `after` — medido con un script aparte
+// antes de ajustar los rangos, no ampliado a ciegas.
 ok('ocConfirmPago le pasa el proyecto dueño (proj) a logAction, no depende de curProj implícito',
-  /function ocConfirmPago[\s\S]{0,3400}logAction\([\s\S]{0,700},\s*proj\)\s*;/.test(html));
+  /function ocConfirmPago[\s\S]{0,4100}logAction\([\s\S]{0,1050},\s*proj\)\s*;/.test(html));
 
 // Prueba de comportamiento real: se extrae logAction del archivo y se ejecuta en un sandbox
 // aislado con curProj apuntando a un proyecto DISTINTO del dueño de la OC — reproduce
@@ -219,8 +257,10 @@ console.log('\nocOpenPagoModal — candado de pago duplicado (fix):');
 // escritas contra la condición nueva; ninguna se debilitó.
 ok('ocOpenPagoModal rechaza abrir el modal en modo registro si la OC ya tiene un pago',
   /function ocOpenPagoModal[\s\S]{0,1500}if\(oc\.pago&&!editando\)\{[\s\S]{0,250}alert\([\s\S]{0,250}return;\s*\}/.test(html));
+// Seguimiento del arreglo de moneda (punto 7) — el comentario nuevo que explica montoEsSugerido
+// empuja _ocPagoCtx= más lejos del return; de la guarda (400→616 reales, medido antes de ajustar).
 ok('la guarda de pago duplicado corre ANTES de armar el contexto del modal (_ocPagoCtx=)',
-  /function ocOpenPagoModal[\s\S]{0,1500}if\(oc\.pago&&!editando\)[\s\S]{0,250}return;[\s\S]{0,400}_ocPagoCtx=/.test(html));
+  /function ocOpenPagoModal[\s\S]{0,1500}if\(oc\.pago&&!editando\)[\s\S]{0,250}return;[\s\S]{0,750}_ocPagoCtx=/.test(html));
 ok('el mensaje de pago duplicado informa cuándo (fmtDate) y quién (registradoPor) lo registró',
   /if\(oc\.pago&&!editando\)\{[\s\S]{0,250}fmtDate\(oc\.pago\.fecha\)[\s\S]{0,150}registradoPor/.test(html));
 ok('la guarda de pago duplicado sigue después de la guarda existente de ocIsComplete (no la reemplaza)',
@@ -474,12 +514,12 @@ function mkPagoProjects() {
 // reproducen el caso de siempre: 883.11 dólares (el total de la OC de la fixture).
 async function runConfirm({ saveResult = true, saveThrows = false, role = 'Administrador',
                             ocId = 'oc-14', metodo = 'Tarjeta', file = null, repollear = false,
-                            monto = '883.11', moneda = 'USD' } = {}) {
+                            monto = '883.11', moneda = 'USD', editando = false, pagoPrevio = null } = {}) {
   const alerts = [], toasts = [], logs = [];
   pagoSandbox.projects = mkPagoProjects();
   const ocOriginal = pagoSandbox.projects[0].ocs[0];
   pagoSandbox.currentUser = { name: 'Abraham', role };
-  pagoSandbox._ocPagoCtx = { projId: 7, ocId, file, editando: false, pagoPrevio: null };
+  pagoSandbox._ocPagoCtx = { projId: 7, ocId, file, editando, pagoPrevio };
   pagoSandbox.docBlobMap = {};
   pagoSandbox._pendingDocFiles = new Map();
   pagoSandbox.URL = { createObjectURL: () => 'blob:fake' };
@@ -510,6 +550,17 @@ ok('I1 — con guardado exitoso sí sale el toast de éxito',
   JSON.stringify({ toasts: okExito.toasts, alerts: okExito.alerts }));
 ok('I1 — el pago queda escrito en la OC', !!(okExito.ocVivo && okExito.ocVivo.pago));
 
+// Seguimiento del arreglo de moneda (punto 2) — el objeto `after` que ocConfirmPago le pasa a
+// logAction() ya NO lleva `montoUSD`: `monto`+`moneda` alcanzan para auditar, igual que `before`
+// (que nunca lo llevó). Antes `montoUSD` era un flotante de hasta 17 dígitos que, sumado al
+// resto del objeto, empujaba el JSON serializado sobre el corte de 200 caracteres de logAction()
+// y lo invalidaba a la mitad (se pierde `fecha`, `metodo` y `proyecto`, ver historial en 80
+// caracteres — index.html:~3715).
+ok('punto 2 — el log de ocConfirmPago ya no lleva montoUSD en `after` (evita el corte a 200 caracteres)',
+  okExito.logs.length === 1 && !('montoUSD' in okExito.logs[0][4])
+  && 'monto' in okExito.logs[0][4] && 'moneda' in okExito.logs[0][4],
+  JSON.stringify(okExito.logs[0] && okExito.logs[0][4]));
+
 // ---------- Arreglo de moneda — ocConfirmPago ejecutado de verdad, las dos monedas ----------
 // runConfirm() por defecto no toca el selector de moneda (queda en 'USD', el valor con el que
 // abre el modal siempre) y paga el total de la OC de la fixture (883.11). Con SYS.exchangeRate
@@ -536,6 +587,54 @@ ok('moneda — un pago en colones también sale exitoso (toast, sin alertas)',
   JSON.stringify({ toasts: pagoCRC.toasts, alerts: pagoCRC.alerts }));
 ok('moneda — la validación de monto mayor a 0 usa el monto nativo, no el equivalente en dólares',
   (await runConfirm({ monto: '0', moneda: 'CRC' })).alerts.some(a => /monto mayor a 0/i.test(a)));
+
+// ---------- Seguimiento del arreglo de moneda (punto 1) — editar no reescribe el tc histórico ----------
+// Escenario exacto del brief: un pago de ₡450.000 registrado con tc 500 (montoUSD 900) se edita
+// un mes después, con el dólar ya en 530, tocando SOLO el método de pago. Sin el arreglo,
+// ocConfirmPago llamaba a tcGet() sin condición y el registro pasaba a exchangeRate:530,
+// montoUSD:849.06 — el equivalente en dólares de un pago histórico cambiaba solo, sin que nadie
+// tocara el monto.
+pagoSandbox.SYS.exchangeRate = 530; // "hoy": el tc subió desde que se registró el pago original
+const pagoOriginalCRC = { monto: 450000, moneda: 'CRC', exchangeRate: 500, montoUSD: 900,
+  fecha: '2026-08-01', metodo: 'Transferencia', registradoPor: 'Abraham',
+  registradoAt: '2026-08-01T10:00:00.000Z', blobId: 'blob_old',
+  comprobanteName: 'Extralum-₡450000-OC-2026-014-Dor.pdf' };
+
+const edicionSinTocarMonto = await runConfirm({
+  editando: true, pagoPrevio: pagoOriginalCRC, monto: '450000', moneda: 'CRC', metodo: 'Tarjeta',
+});
+ok('punto 1 — editar solo el método de pago NO reescribe el tipo de cambio histórico (sigue en 500, no 530)',
+  edicionSinTocarMonto.ocVivo.pago.exchangeRate === 500, edicionSinTocarMonto.ocVivo.pago.exchangeRate);
+ok('punto 1 — montoUSD tampoco cambia si nadie tocó el monto ni la moneda (900, no 849.06)',
+  edicionSinTocarMonto.ocVivo.pago.montoUSD === 900, edicionSinTocarMonto.ocVivo.pago.montoUSD);
+
+// Si el monto SÍ cambió, recalcular con el tc de hoy es lo correcto (es un pago distinto).
+const edicionCambiandoMonto = await runConfirm({
+  editando: true, pagoPrevio: pagoOriginalCRC, monto: '500000', moneda: 'CRC', metodo: 'Transferencia',
+});
+ok('punto 1 — si el monto cambió, el tc SÍ se recalcula con tcGet() (el de hoy: 530)',
+  edicionCambiandoMonto.ocVivo.pago.exchangeRate === 530, edicionCambiandoMonto.ocVivo.pago.exchangeRate);
+ok('punto 1 — montoUSD sigue siendo monto/exchangeRate, con el tc nuevo (500000/530)',
+  Math.abs(edicionCambiandoMonto.ocVivo.pago.montoUSD - (500000 / 530)) < 1e-9,
+  edicionCambiandoMonto.ocVivo.pago.montoUSD);
+
+// Si la moneda cambió (aunque el número sea el mismo), también hay que recalcular: no es el
+// mismo pago que se registró en la otra moneda.
+const edicionCambiandoMoneda = await runConfirm({
+  editando: true, pagoPrevio: pagoOriginalCRC, monto: '450000', moneda: 'USD', metodo: 'Transferencia',
+});
+ok('punto 1 — si la moneda cambió, también se recalcula el tc con tcGet() actual',
+  edicionCambiandoMoneda.ocVivo.pago.exchangeRate === 530);
+ok('punto 1 — con moneda USD, montoUSD===monto sin importar el tc',
+  edicionCambiandoMoneda.ocVivo.pago.montoUSD === 450000);
+
+// Un pago NUEVO (no edición) siempre usa el tc de hoy, sin excepción — comportamiento intacto:
+// la condición del arreglo es `editando&&pagoPrevio&&pagoPrevio.exchangeRate`, así que un alta
+// nueva (editando=false) nunca entra a esa rama.
+const altaNueva = await runConfirm({ monto: '450000', moneda: 'CRC' });
+ok('punto 1 — un pago nuevo (no edición) sigue usando siempre el tc de hoy (530), sin excepción',
+  altaNueva.ocVivo.pago.exchangeRate === 530);
+pagoSandbox.SYS.exchangeRate = 500; // vuelve a la tasa base del resto de esta sección
 
 const falla = await runConfirm({ saveResult: false });
 ok('I1 — si saveData() resuelve false NO sale el toast de éxito',
@@ -762,17 +861,147 @@ ok('D3 — editar sin reemplazar el archivo conserva el comprobante anterior',
   /let blobId=comprobantePrevioId;/.test(html));
 ok('D3 — anular borra el pago y devuelve la OC a "Listo para pagar"',
   /function ocAnularPago[\s\S]{0,1400}delete oc\.pago;/.test(html));
+// Seguimiento del arreglo de moneda (punto 6) — el log de anulación ahora guarda el monto NATIVO
+// (con fallback a montoUSD solo para pagos viejos sin `monto` propio) más `moneda`, igual que el
+// log de registro, en vez de `monto:anulado.montoUSD` a secas.
 ok('D3 — anular deja en el log EL PAGO que se anuló, no solo que se anuló algo',
-  /logAction\(`Pago anulado en[\s\S]{0,400}monto:anulado\.montoUSD[\s\S]{0,200}comprobante:anulado\.comprobanteName/.test(html));
+  /logAction\(`Pago anulado en[\s\S]{0,400}monto:\(anulado\.monto!=null\?anulado\.monto:anulado\.montoUSD\),moneda:anulado\.moneda\|\|'USD'[\s\S]{0,200}comprobante:anulado\.comprobanteName/.test(html));
 // logAction toma el proyecto de la global curProj si no se le pasa, y estas pantallas son globales.
 ok('D3 — ambas acciones pasan el proyecto dueño como último argumento de logAction',
   /function ocAnularPago[\s\S]{0,1600}logAction\([\s\S]{0,600},proj\);/.test(html));
 ok('D3 — la edición del pago también atribuye el log al proyecto dueño',
-  /logAction\(editando\?`Pago editado[\s\S]{0,900},proj\);/.test(html));
+  /logAction\(editando\?`Pago editado[\s\S]{0,1050},proj\);/.test(html));
 ok('D3 — la edición no reescribe quién registró el pago original; deja rastro aparte de quién editó',
   /oc\.pago\.editadoPor=/.test(html) && /registradoPor:\(editando&&pagoPrevio&&pagoPrevio\.registradoPor\)/.test(html));
 ok('D3 — anular también espera el guardado antes de cantar victoria',
   /function ocAnularPago[\s\S]{0,1800}await saveData\(\)[\s\S]{0,700}NO QUED[ÓO] GUARDADA/.test(html));
+
+// ---------- Seguimiento del arreglo de moneda (puntos 5 y 6) — anular respeta la moneda real ----------
+// Prueba de comportamiento real: se extrae ocAnularPago() de index.html y se ejecuta en un
+// sandbox aislado (mismo patrón que deleteOC() más abajo), con ocPagoGateRol()/isAdminPwd()
+// stubbeadas a "siempre pasa" porque el rol y la contraseña no son el objeto de estas pruebas.
+console.log('\nArreglo de moneda (puntos 5 y 6) — anular un pago respeta la moneda real:');
+const anularSandbox = { console, JSON, Date, Math, Number, parseFloat, String, Array, Object };
+anularSandbox.window = anularSandbox;
+vm.createContext(anularSandbox);
+vm.runInContext([
+  extractFunction('fmtDate'),
+  "function fmt(n){ return '$' + (Number(n)||0).toFixed(2); }",
+  "function fmtCRC(n){ return '₡' + Math.round(n).toLocaleString('es-CR'); }",
+  extractFunction('ocPagoMontoTexto'),
+  "function ocPagoGateRol(){ return true; }",
+  "function isAdminPwd(pwd){ return !!pwd; }",
+  extractAsyncFunction('ocAnularPago'),
+].join('\n'), anularSandbox);
+
+async function runAnular({ pago }) {
+  anularSandbox.projects = [{ id: 7, name: 'Dor', lastActivity: 0,
+    ocs: [{ id: 'oc-14', num: 'OC-2026-014', pago }] }];
+  anularSandbox.currentUser = { name: 'Abraham', role: 'Administrador' };
+  const alerts = [], toasts = [], logs = [];
+  let confirmMsg = null;
+  anularSandbox.alert = m => alerts.push(String(m));
+  anularSandbox.showToast = m => toasts.push(String(m));
+  anularSandbox.logAction = (...a) => logs.push(a);
+  anularSandbox.prompt = () => 'admin123';
+  anularSandbox.confirm = m => { confirmMsg = m; return true; };
+  anularSandbox.saveData = () => Promise.resolve(true);
+  anularSandbox.closeModal = () => {};
+  anularSandbox.curTab = 'info'; anularSandbox.curTxnTab = 'oc'; anularSandbox.curOCId = null;
+  await anularSandbox.ocAnularPago(7, 'oc-14');
+  return { alerts, toasts, logs, confirmMsg,
+    ocVivo: anularSandbox.projects[0].ocs.find(o => o.id === 'oc-14') };
+}
+
+const pagoCRCAnular = { monto: 450000, moneda: 'CRC', exchangeRate: 500, montoUSD: 900,
+  fecha: '2026-08-01', metodo: 'Transferencia', registradoPor: 'Abraham', comprobanteName: 'x.pdf' };
+const anulacionCRC = await runAnular({ pago: pagoCRCAnular });
+ok('punto 5 — el diálogo de confirmación de ocAnularPago muestra el monto nativo en colones (ocPagoMontoTexto), no solo el equivalente en dólares',
+  anulacionCRC.confirmMsg.includes(anularSandbox.fmtCRC(450000))
+  && anulacionCRC.confirmMsg.indexOf(anularSandbox.fmtCRC(450000)) < anulacionCRC.confirmMsg.indexOf(anularSandbox.fmt(900)),
+  anulacionCRC.confirmMsg);
+ok('punto 6 — el log de anulación guarda el monto NATIVO (450000) y la moneda (CRC), no montoUSD (900)',
+  anulacionCRC.logs.length === 1 && anulacionCRC.logs[0][3].monto === 450000
+  && anulacionCRC.logs[0][3].moneda === 'CRC',
+  JSON.stringify(anulacionCRC.logs[0] && anulacionCRC.logs[0][3]));
+ok('punto 6 — el ciclo completo de un pago en colones queda consistente en el log: 450000 al crear (punto 2) y 450000 al anular, no 900 en un lado y otra cosa en el otro',
+  anulacionCRC.logs[0][3].monto === 450000);
+ok('el pago se anula igual que antes (compatibilidad): oc.pago desaparece y la OC vuelve a "Listo para pagar"',
+  anulacionCRC.ocVivo && anulacionCRC.ocVivo.pago === undefined);
+ok('el flujo de anulación sigue guardando y avisando con toast, sin alertas de error',
+  anulacionCRC.toasts.includes('Pago anulado') && anulacionCRC.alerts.length === 0,
+  JSON.stringify({ toasts: anulacionCRC.toasts, alerts: anulacionCRC.alerts }));
+
+// Compatibilidad hacia atrás: un pago viejo en dólares (solo montoUSD, sin `moneda` ni `monto`
+// propios) se sigue viendo y auditando exactamente como antes de este arreglo.
+const pagoUSDAnular = { montoUSD: 883.11, fecha: '2026-08-01', metodo: 'Transferencia', registradoPor: 'Abraham' };
+const anulacionUSD = await runAnular({ pago: pagoUSDAnular });
+ok('compatibilidad — un pago viejo en dólares (sin campo `moneda`) sigue mostrando $ en el diálogo de anular',
+  anulacionUSD.confirmMsg.includes('$883.11'), anulacionUSD.confirmMsg);
+ok('compatibilidad — y el log de anulación lo sigue guardando como USD (moneda||\'USD\')',
+  anulacionUSD.logs[0][3].monto === 883.11 && anulacionUSD.logs[0][3].moneda === 'USD');
+
+// ---------- Seguimiento del arreglo de moneda (punto 7) — cambiar la moneda recalcula el sugerido ----------
+// Al abrir el modal para un pago NUEVO, el monto se prellena con oc.totalUSD (p.ej. 883.11). Sin
+// el arreglo, cambiar el selector a CRC dejaba el campo diciendo "883.11" — ahora interpretado
+// como ₡883,11 en vez de convertir el total a colones. Precedente: vbOpenPaymentModal()
+// (index.html:~14909) ya calcula su monto por defecto en la moneda del documento.
+console.log('\nArreglo de moneda (punto 7) — cambiar la moneda del selector recalcula el monto SUGERIDO:');
+ok('punto 7 — ocOpenPagoModal() arranca _ocPagoCtx.montoEsSugerido en true SOLO para pago nuevo (false en edición: el monto inicial ahí es un dato real, no una sugerencia)',
+  /_ocPagoCtx=\{projId:proj\.id,ocId:oc\.id,file:null,editando,pagoPrevio:previo\|\|null,montoEsSugerido:!editando\}/.test(html));
+ok('punto 7 — el selector de moneda llama a ocPagoMonedaChanged(), que además de renderizar el rótulo puede recalcular el sugerido',
+  /id="oc-pago-moneda" onchange="ocPagoMonedaChanged\(\)"/.test(html));
+ok('punto 7 — el campo de monto apaga el flag de "sugerido" en cuanto el usuario escribe (oninput)',
+  /id="oc-pago-monto"[^>]*oninput="ocPagoMontoEditadoManual\(\)"/.test(html));
+ok('punto 7 — el prellenado desde el nombre del archivo también apaga "sugerido" (no se pisa un monto ya explícito)',
+  /if\(parsed&&parsed\.monto!=null\)\{[\s\S]{0,350}_ocPagoCtx\.montoEsSugerido=false;/.test(extractFunction('ocPagoFilePicked')));
+
+// Prueba de comportamiento real: se extraen ocPagoMonedaChanged()/ocPagoMontoEditadoManual() (y
+// sus dependencias _ocPagoResolve()/tcGet()/ocPagoRenderMontoLabel()) y se ejecutan en un sandbox
+// con stubs de `document`/`projects`, exactamente como el resto de esta suite.
+const monedaSandbox = { console, Number, String, Math };
+monedaSandbox.window = monedaSandbox;
+vm.createContext(monedaSandbox);
+vm.runInContext([
+  extractFunction('_ocPagoResolve'),
+  extractFunction('tcGet'),
+  extractFunction('ocPagoRenderMontoLabel'),
+  extractFunction('ocPagoMonedaChanged'),
+  extractFunction('ocPagoMontoEditadoManual'),
+].join('\n'), monedaSandbox);
+monedaSandbox.SYS = { exchangeRate: 500 };
+
+function runMonedaChanged({ montoEsSugerido, monedaDestino, montoActual = '883.11', totalUSD = 883.11 }) {
+  monedaSandbox.projects = [{ id: 7, ocs: [{ id: 'oc-14', totalUSD }] }];
+  monedaSandbox._ocPagoCtx = { projId: 7, ocId: 'oc-14', montoEsSugerido };
+  const campos = { 'oc-pago-moneda': { value: monedaDestino }, 'oc-pago-monto': { value: montoActual },
+                   'oc-pago-monto-label': { textContent: '' } };
+  monedaSandbox.document = { getElementById: id => campos[id] || null };
+  monedaSandbox.ocPagoMonedaChanged();
+  return campos;
+}
+
+ok('punto 7 — con el monto todavía SUGERIDO, cambiar a CRC lo recalcula convirtiendo oc.totalUSD con tcGet() (883.11 × 500)',
+  runMonedaChanged({ montoEsSugerido: true, monedaDestino: 'CRC', montoActual: '883.11', totalUSD: 883.11 })
+    ['oc-pago-monto'].value === (883.11 * 500).toFixed(2));
+ok('punto 7 — con el monto todavía SUGERIDO, volver a USD lo recalcula al totalUSD tal cual (sin multiplicar por tc)',
+  runMonedaChanged({ montoEsSugerido: true, monedaDestino: 'USD', montoActual: '441555.00', totalUSD: 883.11 })
+    ['oc-pago-monto'].value === (883.11).toFixed(2));
+ok('punto 7 — si el usuario YA editó el monto a mano (montoEsSugerido=false), cambiar la moneda NO lo toca',
+  runMonedaChanged({ montoEsSugerido: false, monedaDestino: 'CRC', montoActual: '150.00', totalUSD: 883.11 })
+    ['oc-pago-monto'].value === '150.00');
+ok('punto 7 — el rótulo del campo también se actualiza al cambiar la moneda (ocPagoRenderMontoLabel sigue corriendo)',
+  runMonedaChanged({ montoEsSugerido: true, monedaDestino: 'CRC', montoActual: '883.11', totalUSD: 883.11 })
+    ['oc-pago-monto-label'].textContent === 'Monto pagado (₡)');
+ok('punto 7 — ocPagoMontoEditadoManual() apaga el flag de "sugerido" en el contexto activo',
+  (() => { monedaSandbox._ocPagoCtx = { montoEsSugerido: true };
+           monedaSandbox.ocPagoMontoEditadoManual();
+           return monedaSandbox._ocPagoCtx.montoEsSugerido === false; })());
+ok('punto 7 — sin _ocPagoCtx (modal cerrado a mitad de camino) ninguna de las dos funciones revienta',
+  (() => { monedaSandbox._ocPagoCtx = null;
+           monedaSandbox.document = { getElementById: () => null };
+           try { monedaSandbox.ocPagoMonedaChanged(); monedaSandbox.ocPagoMontoEditadoManual(); return true; }
+           catch (e) { return false; } })());
 
 // ---------- Ola de cierre (punto 1) — no se puede eliminar una OC con pago registrado ----------
 // Prueba de comportamiento real: se extrae deleteOC() de index.html y se ejecuta en un sandbox
@@ -788,6 +1017,10 @@ vm.runInContext([
   // `const fmt=...` en vm.runInContext no queda como propiedad del contexto (solo `function`/`var`
   // lo hacen) — se usa function declaration, mismo patrón que el stub de fmt() en la sección I6.
   "function fmt(n){ return '$' + (Number(n)||0).toFixed(2); }",
+  // Seguimiento del arreglo de moneda (punto 5) — deleteOC() ahora llama a ocPagoMontoTexto(),
+  // que a su vez llama a fmtCRC() cuando el pago es en colones. Mismos stubs que la sección I6.
+  "function fmtCRC(n){ return '₡' + Math.round(n).toLocaleString('es-CR'); }",
+  extractFunction('ocPagoMontoTexto'),
   extractFunction('deleteOC'),
 ].join('\n'), deleteSandbox);
 
@@ -822,9 +1055,24 @@ ok('sin excepción de rol: ni el Administrador puede saltarse la guarda del pago
 ok('el alert explica qué pasó (fecha y monto del pago) y qué hacer (anular primero)',
   /2026/.test(conPagoAdmin.alerts[0])
   && conPagoAdmin.alerts[0].includes(deleteSandbox.fmtDate(pagoExistente.fecha))
-  && conPagoAdmin.alerts[0].includes(deleteSandbox.fmt(pagoExistente.montoUSD))
+  && conPagoAdmin.alerts[0].includes(deleteSandbox.ocPagoMontoTexto(pagoExistente))
   && /anular/i.test(conPagoAdmin.alerts[0]),
   JSON.stringify(conPagoAdmin.alerts));
+
+// Seguimiento del arreglo de moneda (punto 5) — el diálogo destructivo de deleteOC() ahora
+// respeta la moneda real del pago: un pago en colones debe mostrar fmtCRC(), no el equivalente
+// en dólares crudo (antes decía "$849.06", un número que no aparece en ninguna otra pantalla).
+const pagoExistenteCRC = { monto: 450000, moneda: 'CRC', exchangeRate: 500, montoUSD: 900,
+  fecha: '2026-09-01', metodo: 'Transferencia', registradoPor: 'Abraham' };
+const conPagoAdminCRC = runDeleteOC({ pago: pagoExistenteCRC, role: 'Administrador' });
+// ocPagoMontoTexto() muestra fmtCRC() como cifra principal y fmt() (el equivalente en dólares)
+// entre paréntesis a propósito (mismo patrón que la franja del formulario) — lo que el bug
+// original hacía mal era mostrar SOLO fmt(montoUSD) suelto, sin el monto nativo en colones. Se
+// verifica que el monto nativo esté presente y que aparezca ANTES del equivalente en dólares.
+ok('punto 5 — deleteOC() con un pago en colones muestra el monto nativo en colones (fmtCRC), no solo el equivalente en dólares',
+  conPagoAdminCRC.alerts[0].includes(deleteSandbox.fmtCRC(450000))
+  && conPagoAdminCRC.alerts[0].indexOf(deleteSandbox.fmtCRC(450000)) < conPagoAdminCRC.alerts[0].indexOf(deleteSandbox.fmt(900)),
+  JSON.stringify(conPagoAdminCRC.alerts));
 
 const conPagoSupervisor = runDeleteOC({ pago: pagoExistente, role: 'Supervisor' });
 ok('un rol no-Administrador tampoco llega a confirm() (mismo bloqueo, sin distinción de rol)',
@@ -848,8 +1096,12 @@ ok('la guarda existente de factura pagada sigue intacta: sin pago en la OC pero 
 
 ok('la guarda de pago es la PRIMERA verificación del cuerpo (corre antes que la de factura pagada)',
   /function deleteOC\(ocId\)\{\s*const oc=curProj\.ocs\.find[^;]+;\s*if\(!oc\)return;\s*(?:\/\/[^\n]*\n\s*)*if\(oc\.pago\)\{/.test(html));
-ok('el mensaje formatea el monto con fmt() y la fecha con fmtDate(), como pide el brief',
-  /if\(oc\.pago\)\{[\s\S]{0,80}alert\(`[\s\S]{0,250}fmtDate\(oc\.pago\.fecha\)[\s\S]{0,120}fmt\(oc\.pago\.montoUSD/.test(html));
+// Seguimiento del arreglo de moneda (punto 5) — el mensaje ya no usa fmt(oc.pago.montoUSD)
+// crudo: pasa por ocPagoMontoTexto(oc.pago), igual que la franja del formulario y el distintivo
+// de la lista, para mostrar el monto en la moneda con la que el usuario realmente lo registró.
+ok('el mensaje formatea el monto con ocPagoMontoTexto() y la fecha con fmtDate(), como pide el brief',
+  /if\(oc\.pago\)\{[\s\S]{0,300}alert\(`[\s\S]{0,250}fmtDate\(oc\.pago\.fecha\)[\s\S]{0,120}ocPagoMontoTexto\(oc\.pago\)/.test(html)
+  && !/fmt\(oc\.pago\.montoUSD/.test(html));
 
 })().then(() => {
   console.log(`\n${pass} pruebas OK, ${fail} fallas`);

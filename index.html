@@ -7632,8 +7632,20 @@ function parseComprobanteName(fileName){
   const montoRaw=String(parts[1]);
   let moneda=null;
   if(/\$|USD/i.test(montoRaw)) moneda='USD';
-  else if(/₡|CRC/i.test(montoRaw)) moneda='CRC';
-  const monto=parseFloat(montoRaw.replace(/,/g,'').replace(/[^\d.]/g,''));
+  // Seguimiento del arreglo de moneda (punto 3) — ¢ (U+00A2, "cent sign") se acepta junto a ₡: en
+  // Costa Rica se usa como sustituto porque está en más teclados. El propio archivo ya lo trata
+  // como colones en el prompt de importación de Excel (ctImportExcelViaClaude, más abajo), así
+  // que no reconocerlo acá era una inconsistencia interna además de un bug.
+  else if(/₡|¢|CRC/i.test(montoRaw)) moneda='CRC';
+  // Seguimiento del arreglo de moneda (punto 4) — la limpieza del número depende de la moneda
+  // detectada. En CRC el punto Y la coma son separador de MILES (formato es-CR, el mismo con el
+  // que fmtCRC() imprime colones: ₡450.000) — los colones no se manejan con decimales en la
+  // práctica, así que se descartan los dos como puros separadores. En USD la coma sigue siendo
+  // separador de miles y el punto decimal, como siempre. Sin moneda detectada, se mantiene el
+  // comportamiento previo (punto = decimal) — no hay forma de saber cuál convención aplica.
+  const monto=moneda==='CRC'
+    ?parseFloat(montoRaw.replace(/[^\d]/g,''))
+    :parseFloat(montoRaw.replace(/,/g,'').replace(/[^\d.]/g,''));
   const medio=parts.slice(2,-1).join('-');
   const ocM=medio.match(/OC-?(\d{4})-?(\d{1,4})/i);
   const ocNum=ocM?('OC-'+ocM[1]+'-'+String(ocM[2]).padStart(3,'0')):'';
@@ -7773,7 +7785,12 @@ function ocOpenPagoModal(projId,ocId,modoEdicion){
   if(oc.pago&&!editando){ alert(`Esta OC ya tiene un pago registrado el ${fmtDate(oc.pago.fecha)} por ${oc.pago.registradoPor||'—'}.`); return; }
   if(!oc.pago&&editando){ alert('Esta OC no tiene un pago registrado que se pueda editar.'); return; }
   const previo=editando?oc.pago:null;
-  _ocPagoCtx={projId:proj.id,ocId:oc.id,file:null,editando,pagoPrevio:previo||null};
+  // Seguimiento del arreglo de moneda (punto 7) — `montoEsSugerido` marca si el número en pantalla
+  // sigue siendo el default calculado (oc.totalUSD) o si ya es un valor real: en edición, el monto
+  // inicial es el del pago histórico (dato real, no sugerencia), así que arranca en false. En un
+  // pago nuevo arranca en true — recién se apaga cuando el usuario lo edita a mano o cuando el
+  // nombre del archivo trae un monto propio (ver ocPagoFilePicked).
+  _ocPagoCtx={projId:proj.id,ocId:oc.id,file:null,editando,pagoPrevio:previo||null,montoEsSugerido:!editando};
   const hoy=new Date().toISOString().slice(0,10);
   const metodos=['Transferencia','Tarjeta','Caja Chica','Reembolso'];
   const metodoActual=previo&&previo.metodo?String(previo.metodo):'Transferencia';
@@ -7793,13 +7810,13 @@ function ocOpenPagoModal(projId,ocId,modoEdicion){
     </div>
     <div class="ff-row">
       <div class="ff"><label>Moneda</label>
-        <span class="ivasel" style="display:block"><select id="oc-pago-moneda" onchange="ocPagoRenderMontoLabel()">
+        <span class="ivasel" style="display:block"><select id="oc-pago-moneda" onchange="ocPagoMonedaChanged()">
           <option value="USD"${monedaActual==='USD'?' selected':''}>Dólares ($)</option>
           <option value="CRC"${monedaActual==='CRC'?' selected':''}>Colones (₡)</option>
         </select></span>
       </div>
       <div class="ff"><label id="oc-pago-monto-label">Monto pagado (${monedaActual==='CRC'?'₡':'$'})</label>
-        <input id="oc-pago-monto" type="number" step="0.01" min="0" value="${montoInicial.toFixed(2)}"/></div>
+        <input id="oc-pago-monto" type="number" step="0.01" min="0" value="${montoInicial.toFixed(2)}" oninput="ocPagoMontoEditadoManual()"/></div>
     </div>
     <div class="ff-row">
       <div class="ff"><label>Fecha de pago</label>
@@ -7836,6 +7853,24 @@ function ocPagoRenderMontoLabel(){
   if(!sel||!lbl) return;
   lbl.textContent='Monto pagado ('+(sel.value==='CRC'?'₡':'$')+')';
 }
+// Seguimiento del arreglo de moneda (punto 7) — si el monto en pantalla sigue siendo el sugerido
+// por defecto (montoEsSugerido), cambiar la moneda recalcula ese sugerido convirtiendo
+// oc.totalUSD con tcGet(): mismo patrón que vbOpenPaymentModal(), que ya calcula su monto por
+// defecto en la moneda del documento en vez de dejar el número crudo con otro símbolo al lado.
+// Si el usuario ya tocó el campo (a mano, con ocPagoMontoEditadoManual, o vía el nombre del
+// archivo, en ocPagoFilePicked) NO se le pisa el número.
+function ocPagoMonedaChanged(){
+  ocPagoRenderMontoLabel();
+  if(!_ocPagoCtx||!_ocPagoCtx.montoEsSugerido) return;
+  const ctx=_ocPagoResolve(); if(!ctx) return;
+  const sel=document.getElementById('oc-pago-moneda'); const inp=document.getElementById('oc-pago-monto');
+  if(!sel||!inp) return;
+  const totalUSD=Number(ctx.oc.totalUSD||0);
+  inp.value=(sel.value==='CRC'?(totalUSD*tcGet()):totalUSD).toFixed(2);
+}
+function ocPagoMontoEditadoManual(){
+  if(_ocPagoCtx) _ocPagoCtx.montoEsSugerido=false;
+}
 // M5 — la convención de nombre ya trae el número de OC; compararlo es gratis y es exactamente
 // el punto de la cadena de custodia. Advertencia, NO bloqueo: el nombre es una conveniencia y el
 // usuario puede tener razones para adjuntar otra cosa.
@@ -7864,6 +7899,9 @@ function ocPagoFilePicked(input){
   if(parsed&&parsed.monto!=null){
     const inp=document.getElementById('oc-pago-monto');
     if(inp)inp.value=parsed.monto.toFixed(2);
+    // Seguimiento del arreglo de moneda (punto 7) — un monto que vino del nombre del archivo ya
+    // no es "el sugerido" por oc.totalUSD: cambiar la moneda después de esto no debe pisarlo.
+    _ocPagoCtx.montoEsSugerido=false;
   }
   // Arreglo de moneda — si el nombre trae símbolo ($/₡) se preselecciona esa moneda. Si no
   // (parsed.moneda === null), el selector queda como estaba para que el usuario la confirme:
@@ -7922,7 +7960,18 @@ async function ocConfirmPago(){
   // tabla `transactions` guarda total_usd junto a total_crc; `exchangeRate` es el tcGet() de este
   // momento y solo es relevante cuando moneda==='CRC'. Un pago registrado ANTES de este cambio
   // solo tiene montoUSD — se lee como dólares al editarlo (montoInicial más arriba).
-  const exchangeRate=tcGet();
+  // Seguimiento del arreglo de moneda (punto 1) — si se está EDITANDO y ni el monto ni la moneda
+  // cambiaron respecto al pago anterior, se conserva el exchangeRate histórico en vez de
+  // recalcularlo con el tc de HOY: de lo contrario, corregir solo el método de pago un mes después
+  // (con el dólar en otro valor) reescribía en silencio el equivalente en dólares de un pago viejo
+  // que nadie tocó. Si el monto o la moneda SÍ cambiaron, es un pago distinto en la práctica y
+  // recalcular con el tc actual es lo correcto.
+  let exchangeRate=tcGet();
+  if(editando&&pagoPrevio&&pagoPrevio.exchangeRate){
+    const prevMoneda=pagoPrevio.moneda||'USD';
+    const prevMonto=Number(pagoPrevio.monto!=null?pagoPrevio.monto:(pagoPrevio.montoUSD||0));
+    if(moneda===prevMoneda&&Math.abs(monto-prevMonto)<0.005) exchangeRate=pagoPrevio.exchangeRate;
+  }
   const montoUSD=moneda==='CRC'?(monto/exchangeRate):monto;
   oc.pago={ monto, moneda, exchangeRate, montoUSD, fecha, metodo, blobId, comprobanteName,
     registradoPor:(editando&&pagoPrevio&&pagoPrevio.registradoPor)?pagoPrevio.registradoPor:(currentUser?currentUser.name:'Sistema'),
@@ -7935,7 +7984,12 @@ async function ocConfirmPago(){
   logAction(editando?`Pago editado en "${oc.num||'OC'}" (${metodo})`:`Pago registrado para "${oc.num||'OC'}" (${metodo})`,
     editando?'log-edit':'log-create','OC',
     editando&&pagoPrevio?{monto:(pagoPrevio.monto!=null?pagoPrevio.monto:pagoPrevio.montoUSD),moneda:pagoPrevio.moneda||'USD',fecha:pagoPrevio.fecha,metodo:pagoPrevio.metodo,comprobante:pagoPrevio.comprobanteName||''}:null,
-    {num:oc.num,monto,moneda,montoUSD,fecha,metodo,comprobante:comprobanteName,proyecto:proj.name},proj);
+    // Seguimiento del arreglo de moneda (punto 2) — `montoUSD` NO va al log: `monto`+`moneda` ya
+    // dicen todo lo que un auditor necesita (mismo criterio que `before`, arriba, que nunca lo
+    // llevó). Antes `montoUSD` era un flotante de hasta 17 dígitos (p.ej. 849.0566037735849) que,
+    // sumado al resto del objeto, empujaba `after` sobre el corte de 200 caracteres de logAction()
+    // (más abajo) y lo cortaba a la mitad — JSON inválido, con campos como `proyecto` perdidos.
+    {num:oc.num,monto,moneda,fecha,metodo,comprobante:comprobanteName,proyecto:proj.name},proj);
   _ocPagoCtx=null;
   closeModal();
   // I1 — el toast de éxito SOLO después de que el guardado terminó bien. La cadena sube los
@@ -7980,12 +8034,18 @@ async function ocAnularPago(projId,ocId){
   if(pwd===null) return;
   if(!isAdminPwd(pwd)){ alert('Contraseña incorrecta'); return; }
   const anulado=oc.pago;
-  if(!confirm(`¿Anular el pago de ${oc.num||'la OC'} por ${fmt(anulado.montoUSD||0)} del ${fmtDate(anulado.fecha)}?\n\nLa orden vuelve a "Listo para pagar". El comprobante adjunto se conserva en Documentos.`))return;
+  // Seguimiento del arreglo de moneda (punto 5) — el diálogo destructivo usa ocPagoMontoTexto(),
+  // igual que la franja del formulario y el distintivo de la lista: anular un pago en colones
+  // mostraba "$849.06" acá, un número que no aparece en ninguna otra parte de la pantalla.
+  if(!confirm(`¿Anular el pago de ${oc.num||'la OC'} por ${ocPagoMontoTexto(anulado)} del ${fmtDate(anulado.fecha)}?\n\nLa orden vuelve a "Listo para pagar". El comprobante adjunto se conserva en Documentos.`))return;
   delete oc.pago;
   proj.lastActivity=Date.now();
   // El log deja constancia del pago que se anuló, no solo de que se anuló algo.
+  // Seguimiento del arreglo de moneda (punto 6) — mismo formato que el log de registro: monto
+  // NATIVO + moneda, no el equivalente en dólares. Antes decía 450000 al crear el pago y 849.06 al
+  // anularlo, como si fueran dos montos distintos del mismo pago.
   logAction(`Pago anulado en "${oc.num||'OC'}"`,'log-delete','OC',
-    {monto:anulado.montoUSD,fecha:anulado.fecha,metodo:anulado.metodo,
+    {monto:(anulado.monto!=null?anulado.monto:anulado.montoUSD),moneda:anulado.moneda||'USD',fecha:anulado.fecha,metodo:anulado.metodo,
      comprobante:anulado.comprobanteName||'',registradoPor:anulado.registradoPor||''},
     {num:oc.num,proyecto:proj.name,anuladoPor:currentUser?currentUser.name:'Sistema'},proj);
   let guardado=false;
@@ -9367,7 +9427,10 @@ function deleteOC(ocId){
   // borrar la OC sin anular el pago primero dejaría ambos huérfanos (el pago y el comprobante en
   // R2/Documentos). Sin excepción de rol: ni el Administrador puede saltarse esto.
   if(oc.pago){
-    alert(`No se puede eliminar la OC ${oc.num}.\n\nTiene un pago registrado el ${fmtDate(oc.pago.fecha)} por ${fmt(oc.pago.montoUSD||0)}.\n\nPrimero anulá el pago desde la franja de pago del formulario de la OC ("Anular pago"); recién entonces se puede eliminar la orden.`);
+    // Seguimiento del arreglo de moneda (punto 5) — ocPagoMontoTexto(), no fmt(montoUSD): un pago
+    // en colones mostraba acá "$849.06", un número que el usuario nunca vio en ninguna otra
+    // pantalla, en un diálogo que además es destructivo.
+    alert(`No se puede eliminar la OC ${oc.num}.\n\nTiene un pago registrado el ${fmtDate(oc.pago.fecha)} por ${ocPagoMontoTexto(oc.pago)}.\n\nPrimero anulá el pago desde la franja de pago del formulario de la OC ("Anular pago"); recién entonces se puede eliminar la orden.`);
     return;
   }
   // Verificar si existe factura de proveedor pagada vinculada a esta OC
