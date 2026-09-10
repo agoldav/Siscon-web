@@ -3216,9 +3216,9 @@ async function loginLocalFallback(email,password){
     document.getElementById('topbar-user-label').textContent=currentUser.name;
     document.getElementById('btn-settings').style.display='none';
     document.getElementById('sb-btn-settings').style.display='none';
-    // I4 — "Listo para pagar" sigue exactamente el mismo mecanismo de visibilidad por rol
-    // que el botón de Ajustes: solo Administrador.
-    document.getElementById('sb-btn-pagos').style.display='none';
+    // Ola de cierre — "Listo para pagar" ya no sigue la visibilidad por rol de Ajustes: el dueño
+    // revirtió I4 y el botón vuelve a ser visible para cualquier usuario autenticado.
+    document.getElementById('sb-btn-pagos').style.display='';
     loadData();
     renderDash();
     handleOpenHash();
@@ -3256,7 +3256,7 @@ async function login(){
     document.getElementById('topbar-user-label').textContent=data.user.name;
     document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';
     document.getElementById('sb-btn-settings').style.display=data.user.role==='Administrador'?'':'none';
-    document.getElementById('sb-btn-pagos').style.display=data.user.role==='Administrador'?'':'none';
+    document.getElementById('sb-btn-pagos').style.display='';   // visible para cualquier rol
     // Cargar primero fija versión + snapshot. El login es un evento de autenticación, no un cambio
     // de negocio: NO debe agregarse al activityLog compartido ni ejecutar saveData(), porque eso
     // invalida settings/1 para todas las demás sesiones apenas alguien entra.
@@ -3361,7 +3361,7 @@ async function bootstrapCloudflareAuth(){
     document.getElementById('topbar-user-label').textContent=currentUser.email;
     document.getElementById('btn-settings').style.display=currentUser.role==='Administrador'?'':'none';
     document.getElementById('sb-btn-settings').style.display=currentUser.role==='Administrador'?'':'none';
-    document.getElementById('sb-btn-pagos').style.display=currentUser.role==='Administrador'?'':'none';
+    document.getElementById('sb-btn-pagos').style.display='';   // visible para cualquier rol
     // Igual que login(): autenticarse no debe mutar settings/1 ni generar conflictos artificiales.
     const _apiOk=await loadDataFromAPI();
     if(!_apiOk) loadData();
@@ -7723,12 +7723,16 @@ function ocPagoExtOk(fileName){
   const ext=String(fileName||'').split('.').pop().toLowerCase();
   return ocPagoFormatos().includes(ext);
 }
-// I4 — decisión del dueño: solo el rol Administrador registra pagos. Ocultar el botón de la
-// barra lateral no es control de acceso; ambas puertas (la ventana y el modal) se gatean acá.
+// Ola de cierre — el dueño revirtió I4: registrar un pago vuelve a estar abierto a cualquier
+// usuario autenticado (ya no pasa por acá). Editar y anular un pago YA HECHO siguen siendo solo
+// del Administrador — corregir un registro financiero existente es distinto de crearlo — así que
+// esta función (pese al nombre, heredado de cuando también gateaba el registro) y el gate que la
+// usa quedan vivos solo para esas dos acciones: ocEditarPago() y ocAnularPago(), y para decidir si
+// la franja de pago ofrece esos dos botones.
 function ocPagoPuedeRegistrar(){ return !!(currentUser&&currentUser.role==='Administrador'); }
 function ocPagoGateRol(){
   if(ocPagoPuedeRegistrar()) return true;
-  alert('Solo el Administrador puede registrar, editar o anular pagos de órdenes de compra.');
+  alert('Solo el Administrador puede editar o anular pagos de órdenes de compra.');
   return false;
 }
 
@@ -7746,7 +7750,11 @@ function _ocPagoResolve(){
   return {proj,oc};
 }
 function ocOpenPagoModal(projId,ocId,modoEdicion){
-  if(!ocPagoGateRol()) return;
+  // Ola de cierre — registrar ya no está gateado por rol (I4 revertida): cualquier usuario
+  // autenticado llega hasta acá para registrar. El modo edición SIGUE siendo solo del
+  // Administrador, pero ese gate ya lo aplicó el único llamador que abre este modal en modo
+  // edición (ocEditarPago(), con contraseña) ANTES de invocar esta función — no hace falta
+  // repetirlo acá.
   const proj=projects.find(p=>String(p.id)===String(projId));
   const oc=proj&&(proj.ocs||[]).find(o=>String(o.id)===String(ocId));
   if(!proj||!oc){ alert('No se encontró la orden de compra.'); return; }
@@ -7839,7 +7847,8 @@ function ocPagoFilePicked(input){
 }
 async function ocConfirmPago(){
   if(!_ocPagoCtx)return;
-  if(!ocPagoGateRol())return;
+  // Ola de cierre — registrar ya no está gateado por rol (I4 revertida). El caso de edición llega
+  // acá solo si ya pasó por ocEditarPago() (contraseña de administrador) para abrir el modal.
   // I3 — re-resolver por id: el polling pudo haber reemplazado `projects` mientras el modal
   // estaba abierto. Si la OC ya no existe, no se escribe NADA.
   const ctx=_ocPagoResolve();
@@ -9293,6 +9302,13 @@ function ocListMenuToggle(ocId, e){
 function ocListMenuClose(){ document.querySelectorAll('[id^="oc-dd-"]').forEach(el=>el.style.display='none'); }
 function deleteOC(ocId){
   const oc=curProj.ocs.find(x=>x.id===ocId); if(!oc)return;
+  // Ola de cierre — el pago es el registro financiero de la OC y su comprobante es la evidencia:
+  // borrar la OC sin anular el pago primero dejaría ambos huérfanos (el pago y el comprobante en
+  // R2/Documentos). Sin excepción de rol: ni el Administrador puede saltarse esto.
+  if(oc.pago){
+    alert(`No se puede eliminar la OC ${oc.num}.\n\nTiene un pago registrado el ${fmtDate(oc.pago.fecha)} por ${fmt(oc.pago.montoUSD||0)}.\n\nPrimero anulá el pago desde la franja de pago del formulario de la OC ("Anular pago"); recién entonces se puede eliminar la orden.`);
+    return;
+  }
   // Verificar si existe factura de proveedor pagada vinculada a esta OC
   const linkedPaidBill=(curProj.billVendor||[]).find(b=>b.linkedOcId===ocId&&(b.status==='Pagada'||b.status==='Pagada parcial'));
   if(linkedPaidBill){
@@ -15990,10 +16006,8 @@ function assignUnclassified(i){
 // Vista global: SOLO OCs completas y sin pago registrado. Una OC incompleta no aparece —
 // ese es el candado: lo que no está acá, no se paga.
 function openPagosWin(){
-  // I4 — ocultar el botón de la barra lateral no es control de acceso: esta función es
-  // alcanzable por otros caminos (consola, hash de navegación, un botón que se quedara visible
-  // por un render viejo). El gate real vive acá, y el otro en ocOpenPagoModal().
-  if(!ocPagoGateRol()) return;
+  // Ola de cierre — el dueño revirtió I4: "Listo para pagar" y registrar un pago vuelven a estar
+  // abiertos a cualquier usuario autenticado, sin gate de rol acá.
   if(fwinExists('pagos')){ fwinRestore('pagos'); return; }
   fwinOpen('pagos',{title:'Listo para pagar',width:940,height:600,dirtyFn:()=>false,
     bodyHTML:'<div id="pagos-body" style="padding:12px 16px"></div>',
@@ -17367,7 +17381,7 @@ function clearErrors(){['lerr','serr','ferr','ierr'].forEach(id=>{document.getEl
 function validateEmail(email){return/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);}
 function validatePassword(password){return password.length>=8&&/[A-Z]/.test(password)&&/\d/.test(password);}
 async function forgotPassword(){const email=document.getElementById('fe').value.trim();if(!validateEmail(email)){showError('ferr','Email inválido');return;}try{const resp=await fetch(BACKEND_URL+'/api/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});if(!resp.ok){showError('ferr',await authErrMsg(resp));return;}showToast('✓ Instrucciones enviadas al email');showLogin();}catch(e){showError('ferr','Error: '+e.message);}}
-async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}authLoading(true,'accept-btn','Creando cuenta…');try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){authLoading(false,'accept-btn');showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();if(data.needsManualLogin||!data.access_token){authLoading(false,'accept-btn');try{showLogin();}catch(e){}const lu=document.getElementById('lu');if(lu)lu.value=email;alert(data.message||'Tu cuenta fue creada. Inicia sesión con tu email y contraseña.');return;}currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);startTokenRefresh();authLoading(false,'accept-btn');document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';document.getElementById('sb-btn-settings').style.display=data.user.role==='Administrador'?'':'none';document.getElementById('sb-btn-pagos').style.display=data.user.role==='Administrador'?'':'none';const _apiOk2=await loadDataFromAPI();logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});if(!_apiOk2)loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){authLoading(false,'accept-btn');showError('ierr','Error: '+e.message);}}
+async function acceptInvitation(){const email=window._inviteEmail;const code=window._inviteCode;const name=document.getElementById('in').value.trim();const password=document.getElementById('ip').value;const confirmPassword=document.getElementById('ipc').value;if(!name){showError('ierr','Nombre requerido');return;}if(!validatePassword(password)){showError('ierr','Contraseña: mín 8 chars, mayúscula, número');return;}if(password!==confirmPassword){showError('ierr','Las contraseñas no coinciden');return;}authLoading(true,'accept-btn','Creando cuenta…');try{const resp=await fetch(BACKEND_URL+'/api/auth/accept-invitation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,code,password,name,confirmPassword})});if(!resp.ok){authLoading(false,'accept-btn');showError('ierr',await authErrMsg(resp));return;}const data=await resp.json();if(data.needsManualLogin||!data.access_token){authLoading(false,'accept-btn');try{showLogin();}catch(e){}const lu=document.getElementById('lu');if(lu)lu.value=email;alert(data.message||'Tu cuenta fue creada. Inicia sesión con tu email y contraseña.');return;}currentUser=data.user;_sbToken=data.access_token;localStorage.setItem('sb_token',data.access_token);localStorage.setItem('sb_refresh_token',data.refresh_token);startTokenRefresh();authLoading(false,'accept-btn');document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('topbar-user-label').textContent=data.user.name;document.getElementById('btn-settings').style.display=data.user.role==='Administrador'?'':'none';document.getElementById('sb-btn-settings').style.display=data.user.role==='Administrador'?'':'none';document.getElementById('sb-btn-pagos').style.display='';const _apiOk2=await loadDataFromAPI();logAction('Invitación aceptada','log-create','Sistema',null,{user:data.user.name});if(!_apiOk2)loadData();renderDash();handleOpenHash();msAutoSync();setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);setTimeout(()=>checkPendingAuthOnLogin(), 1200);if(qboConfigured()) setTimeout(()=>qboFullSync(null), 3000);}catch(e){authLoading(false,'accept-btn');showError('ierr','Error: '+e.message);}}
 function checkInvitationCode(){const params=new URLSearchParams(window.location.search);const code=params.get('invite');const email=params.get('email');if(code&&email){document.getElementById('login-form').classList.add('hidden');document.getElementById('invite-form').classList.remove('hidden');document.getElementById('invite-email-display').textContent='Email: '+email;window._inviteCode=code;window._inviteEmail=email;}}
 // FASE 2: Bootstrap desde Cloudflare Access al cargar
 if(document.readyState==='loading'){

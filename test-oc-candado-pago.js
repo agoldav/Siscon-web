@@ -493,13 +493,18 @@ ok('I3 — si la OC ya no existe al re-resolver, avisa con alert()',
 ok('I3 — si la OC ya no existe NO se escribe nada',
   !desaparecida.ocVivo.pago && desaparecida.logs.length === 0 && desaparecida.toasts.length === 0);
 
-const noAdmin = await runConfirm({ role: 'Supervisor' });
-ok('I4 — un Supervisor no puede registrar el pago ni aunque llegue a ocConfirmPago',
-  noAdmin.alerts.length === 1 && /Administrador/.test(noAdmin.alerts[0])
-  && !noAdmin.ocVivo.pago && noAdmin.toasts.length === 0,
-  JSON.stringify(noAdmin.alerts));
-const noAdmin2 = await runConfirm({ role: 'Regular' });
-ok('I4 — un Regular tampoco', !noAdmin2.ocVivo.pago && noAdmin2.toasts.length === 0);
+// Ola de cierre — el dueño revirtió I4: registrar un pago vuelve a estar abierto a cualquier
+// usuario autenticado. Estas dos aserciones afirmaban lo contrario (Supervisor/Regular
+// bloqueados); ahora verifican que SÍ pueden registrar, igual que un Administrador.
+const supervisorSiPuede = await runConfirm({ role: 'Supervisor' });
+ok('Ola de cierre (I4 revertida) — un Supervisor SÍ puede registrar el pago',
+  supervisorSiPuede.toasts.some(t => t.includes('Pago registrado')) && supervisorSiPuede.alerts.length === 0
+  && !!(supervisorSiPuede.ocVivo && supervisorSiPuede.ocVivo.pago),
+  JSON.stringify({ toasts: supervisorSiPuede.toasts, alerts: supervisorSiPuede.alerts }));
+const regularSiPuede = await runConfirm({ role: 'Regular' });
+ok('Ola de cierre (I4 revertida) — un Regular también puede registrar el pago',
+  regularSiPuede.toasts.some(t => t.includes('Pago registrado'))
+  && !!(regularSiPuede.ocVivo && regularSiPuede.ocVivo.pago));
 
 ok('I1 — el toast está DESPUÉS del await del guardado, no antes',
   /await saveData\(\)[\s\S]{0,900}showToast\(/.test(extractAsyncFunction('ocConfirmPago'))
@@ -510,19 +515,28 @@ ok('I3 — _ocPagoCtx guarda ids, no los objetos proj/oc',
 ok('I3 — la re-resolución sigue el patrón de assignUnclassified (find por id sobre projects)',
   /function _ocPagoResolve[\s\S]{0,400}projects\.find\(p=>String\(p\.id\)===String\(_ocPagoCtx\.projId\)\)/.test(html));
 
-// ---------- I4 — control de rol también en la puerta de la ventana ----------
-console.log('\nI4 — gate de rol Administrador:');
-ok('I4 — el botón de la barra lateral tiene id y nace oculto, igual que sb-btn-settings',
+// ---------- Ola de cierre — I4 revertida: registrar abierto a todos; editar/anular siguen Admin ----------
+console.log('\nOla de cierre — I4 revertida (botón visible siempre; gate solo en editar/anular):');
+ok('el botón de la barra lateral tiene id y nace oculto en el HTML (recién visible tras login), igual que sb-btn-settings',
   /id="sb-btn-pagos"[^>]*style="display:none"/.test(html));
-ok('I4 — la visibilidad se fija en los mismos 4 lugares que sb-btn-settings',
+ok('la visibilidad se fija en los mismos 4 lugares que sb-btn-settings',
   (html.match(/sb-btn-pagos'\)\.style\.display/g) || []).length
     === (html.match(/sb-btn-settings'\)\.style\.display/g) || []).length,
   `pagos=${(html.match(/sb-btn-pagos'\)\.style\.display/g) || []).length} settings=${(html.match(/sb-btn-settings'\)\.style\.display/g) || []).length}`);
-ok('I4 — openPagosWin() gatea por rol antes de abrir la ventana',
-  /function openPagosWin\(\)\{[\s\S]{0,600}ocPagoGateRol\(\)[\s\S]{0,200}fwinExists\('pagos'\)/.test(html));
-ok('I4 — ocOpenPagoModal() gatea por rol en su primera línea',
-  /function ocOpenPagoModal\([^)]*\)\{\s*(?:\/\/[^\n]*\n\s*)*if\(!ocPagoGateRol\(\)\)\s*return;/.test(html));
-ok('I4 — el gate reconoce exactamente el rol Administrador',
+ok('ninguno de los 4 lugares condiciona la visibilidad del botón por rol (a diferencia de sb-btn-settings)',
+  !/sb-btn-pagos'\)\.style\.display=[^;]*role/.test(html));
+ok('openPagosWin() YA NO gatea por rol antes de abrir la ventana',
+  !/ocPagoGateRol/.test(extractFunction('openPagosWin')));
+ok('ocOpenPagoModal() YA NO gatea por rol al abrir en modo registro',
+  !/ocPagoGateRol/.test(extractFunction('ocOpenPagoModal')));
+ok('ocConfirmPago() YA NO gatea por rol',
+  !/ocPagoGateRol/.test(extractAsyncFunction('ocConfirmPago')));
+ok('ocPagoGateRol() sigue vivo, pero solo en ocEditarPago() y ocAnularPago() (editar/anular siguen solo Admin)',
+  (html.match(/ocPagoGateRol\(\)/g) || []).length === 3   // la definición + las 2 llamadas
+  && extractFunction('ocEditarPago').includes('if(!ocPagoGateRol()) return;')
+  && extractAsyncFunction('ocAnularPago').includes('if(!ocPagoGateRol()) return;'),
+  `usos totales=${(html.match(/ocPagoGateRol\(\)/g) || []).length}`);
+ok('el gate de editar/anular reconoce exactamente el rol Administrador',
   /function ocPagoPuedeRegistrar\(\)\{[^}]*currentUser\.role==='Administrador'/.test(html));
 
 // ---------- I6 — el pago se ve en la lista y en el formulario ----------
@@ -643,6 +657,83 @@ ok('D3 — la edición no reescribe quién registró el pago original; deja rast
   /oc\.pago\.editadoPor=/.test(html) && /registradoPor:\(editando&&pagoPrevio&&pagoPrevio\.registradoPor\)/.test(html));
 ok('D3 — anular también espera el guardado antes de cantar victoria',
   /function ocAnularPago[\s\S]{0,1800}await saveData\(\)[\s\S]{0,700}NO QUED[ÓO] GUARDADA/.test(html));
+
+// ---------- Ola de cierre (punto 1) — no se puede eliminar una OC con pago registrado ----------
+// Prueba de comportamiento real: se extrae deleteOC() de index.html y se ejecuta en un sandbox
+// aislado, verificando que la guarda de `oc.pago` corta ANTES de llegar a confirm() — nunca se
+// pregunta, nunca se borra, nunca se guarda — y que no hay excepción de rol (a diferencia de la
+// guarda de factura pagada, que sí permite al Administrador seguir adelante).
+console.log('\nOla de cierre (1) — deleteOC() bloquea el borrado si hay pago registrado:');
+const deleteSandbox = { console, JSON, Date, Math, Number, String, Array, Object };
+deleteSandbox.window = deleteSandbox;
+vm.createContext(deleteSandbox);
+vm.runInContext([
+  extractFunction('fmtDate'),
+  // `const fmt=...` en vm.runInContext no queda como propiedad del contexto (solo `function`/`var`
+  // lo hacen) — se usa function declaration, mismo patrón que el stub de fmt() en la sección I6.
+  "function fmt(n){ return '$' + (Number(n)||0).toFixed(2); }",
+  extractFunction('deleteOC'),
+].join('\n'), deleteSandbox);
+
+function runDeleteOC({ pago = null, linkedPaidBill = null, role = 'Administrador', confirmReturns = true } = {}) {
+  const oc = { id: 'oc-9', num: 'OC-2026-009', pago };
+  deleteSandbox.curProj = { ocs: [oc], billVendor: linkedPaidBill ? [linkedPaidBill] : [] };
+  deleteSandbox.currentUser = { name: 'Abraham', role };
+  const alerts = [];
+  let confirmCalled = false;
+  deleteSandbox.alert = m => alerts.push(String(m));
+  deleteSandbox.confirm = () => { confirmCalled = true; return confirmReturns; };
+  const logs = [];
+  deleteSandbox.logAction = (...a) => logs.push(a);
+  let saved = false;
+  deleteSandbox.saveData = () => { saved = true; };
+  deleteSandbox.curOCId = 'oc-9';
+  let rendered = false;
+  deleteSandbox.renderOCList = () => { rendered = true; };
+  deleteSandbox.deleteOC('oc-9');
+  return { alerts, confirmCalled, saved, rendered, logs, ocsRestantes: deleteSandbox.curProj.ocs };
+}
+
+const pagoExistente = { montoUSD: 883.11, fecha: '2026-09-01', metodo: 'Transferencia', registradoPor: 'Abraham' };
+
+const conPagoAdmin = runDeleteOC({ pago: pagoExistente, role: 'Administrador' });
+ok('con pago registrado, deleteOC() corta ANTES de llamar confirm() — ni siquiera pregunta',
+  !conPagoAdmin.confirmCalled && conPagoAdmin.ocsRestantes.length === 1
+  && !conPagoAdmin.saved && conPagoAdmin.logs.length === 0 && !conPagoAdmin.rendered,
+  JSON.stringify(conPagoAdmin));
+ok('sin excepción de rol: ni el Administrador puede saltarse la guarda del pago',
+  conPagoAdmin.alerts.length === 1);
+ok('el alert explica qué pasó (fecha y monto del pago) y qué hacer (anular primero)',
+  /2026/.test(conPagoAdmin.alerts[0])
+  && conPagoAdmin.alerts[0].includes(deleteSandbox.fmtDate(pagoExistente.fecha))
+  && conPagoAdmin.alerts[0].includes(deleteSandbox.fmt(pagoExistente.montoUSD))
+  && /anular/i.test(conPagoAdmin.alerts[0]),
+  JSON.stringify(conPagoAdmin.alerts));
+
+const conPagoSupervisor = runDeleteOC({ pago: pagoExistente, role: 'Supervisor' });
+ok('un rol no-Administrador tampoco llega a confirm() (mismo bloqueo, sin distinción de rol)',
+  !conPagoSupervisor.confirmCalled && conPagoSupervisor.ocsRestantes.length === 1);
+
+const sinPago = runDeleteOC({ pago: null, confirmReturns: true });
+ok('sin pago, el camino normal sigue intacto: pide confirm() y borra al confirmar',
+  sinPago.confirmCalled && sinPago.ocsRestantes.length === 0 && sinPago.saved);
+
+const sinPagoNoConfirma = runDeleteOC({ pago: null, confirmReturns: false });
+ok('sin pago, si el usuario cancela el confirm() no se borra nada (comportamiento previo intacto)',
+  sinPagoNoConfirma.confirmCalled && sinPagoNoConfirma.ocsRestantes.length === 1 && !sinPagoNoConfirma.saved);
+
+const facturaPagadaNoAdmin = runDeleteOC({
+  pago: null, role: 'Supervisor',
+  linkedPaidBill: { linkedOcId: 'oc-9', status: 'Pagada', num: 'FP-1' },
+});
+ok('la guarda existente de factura pagada sigue intacta: sin pago en la OC pero con factura pagada, un no-Admin sigue bloqueado',
+  !facturaPagadaNoAdmin.confirmCalled && facturaPagadaNoAdmin.ocsRestantes.length === 1
+  && facturaPagadaNoAdmin.alerts.some(a => /Administrador/.test(a)));
+
+ok('la guarda de pago es la PRIMERA verificación del cuerpo (corre antes que la de factura pagada)',
+  /function deleteOC\(ocId\)\{\s*const oc=curProj\.ocs\.find[^;]+;\s*if\(!oc\)return;\s*(?:\/\/[^\n]*\n\s*)*if\(oc\.pago\)\{/.test(html));
+ok('el mensaje formatea el monto con fmt() y la fecha con fmtDate(), como pide el brief',
+  /if\(oc\.pago\)\{[\s\S]{0,80}alert\(`[\s\S]{0,250}fmtDate\(oc\.pago\.fecha\)[\s\S]{0,120}fmt\(oc\.pago\.montoUSD/.test(html));
 
 })().then(() => {
   console.log(`\n${pass} pruebas OK, ${fail} fallas`);

@@ -2197,6 +2197,15 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
 - [x] Alerta 🔔 al login y sección nueva en el digest diario para OCs pagadas sin factura del
   proveedor, con umbral configurable en `SYS.alertas.diasSinFactura` (default 10).
 - [x] Pruebas: `siscon-web/test-oc-candado-pago.js` y `siscon-backend/test-paid-ocs-digest.js`.
+- [x] **Ola de cierre (2026-09-10):** `deleteOC()` ahora corta con `alert()` (fecha + monto del
+  pago, y qué hacer) si la OC tiene `oc.pago`, ANTES de cualquier otra verificación y sin
+  excepción de rol — evita huérfanos del pago y su comprobante en R2/Documentos. "Cancelar" una OC
+  no existe en la app (el estado `Cancelada` nunca lo asigna ninguna pantalla); el agujero real
+  era eliminar una OC ya pagada. Además, el dueño revirtió el gate de rol de I4: **registrar** un
+  pago vuelve a estar abierto a cualquier usuario autenticado (`openPagosWin()`,
+  `ocOpenPagoModal()` y `ocConfirmPago()` ya no llaman `ocPagoGateRol()`); **editar y anular** un
+  pago ya registrado siguen siendo solo del Administrador, con contraseña (Decisión 3, sin
+  cambios).
 
 ## 10. ⏳ Pendiente
 
@@ -2259,12 +2268,6 @@ y ninguna se arregló acá porque está fuera de alcance. Quedan pendientes de r
   no lo estaban. La de XSS conviene mirarla primero.
 - **Backend** (`siscon-backend/`): `test-projects-houses.js` falla en la aserción
   "DELETE project usa RPC transaccional" (43/44).
-
-### Inconsistencia conocida entre la alerta in-app y el correo
-`ocDiasSinFactura()` (frontend) excluye solo las OC con estatus `Facturada`, mientras que
-`buildPaidOcsDigestRows()` (backend) excluye `Facturada` **y** `Cancelada`. Una OC que se pagó y
-después se canceló sin que llegara la factura aparece en la alerta 🔔 de la app pero no en el
-correo diario. Decidir cuál de los dos criterios es el correcto y unificar.
 
 ---
 
