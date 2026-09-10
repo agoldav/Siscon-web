@@ -74,16 +74,40 @@ ok('null / undefined no revientan',
   sandbox.ocIsComplete(null) === false && sandbox.ocIsComplete(undefined) === false);
 
 console.log('\nparseComprobanteName:');
-const p1 = sandbox.parseComprobanteName('Polycenter-883.11-OC-2026-014-PRO 5567-116 Este.pdf');
+// Arreglo de moneda (2026-09-10) — el nombre real trae el símbolo pegado al monto ($ o ₡).
+// La función ya NO devuelve `montoUSD` (asumía dólares siempre); devuelve `monto` (el número tal
+// como aparece) y `moneda` ('USD'|'CRC'|null si no hay símbolo — no se adivina).
+// p1 es el ejemplo real de dólares del brief.
+const p1 = sandbox.parseComprobanteName('Polycenter-$883.11-OC-2026-014-PRO 5567-116 Este.pdf');
 ok('proveedor', p1 && p1.proveedor === 'Polycenter', p1 && p1.proveedor);
-ok('monto', p1 && p1.montoUSD === 883.11, p1 && p1.montoUSD);
+ok('monto', p1 && p1.monto === 883.11, p1 && p1.monto);
+ok('símbolo $ detectado como moneda USD', p1 && p1.moneda === 'USD', p1 && p1.moneda);
 ok('número de OC reconstruido', p1 && p1.ocNum === 'OC-2026-014', p1 && p1.ocNum);
 ok('proforma', p1 && p1.proforma === 'PRO 5567', p1 && p1.proforma);
 ok('proyecto', p1 && p1.proyecto === '116 Este', p1 && p1.proyecto);
 
-const p2 = sandbox.parseComprobanteName('Extralum-1,250.00-OC-2026-7-4821-Dor.jpg');
-ok('monto con separador de miles', p2 && p2.montoUSD === 1250, p2 && p2.montoUSD);
-ok('consecutivo de OC de un dígito se rellena a 3', p2 && p2.ocNum === 'OC-2026-007', p2 && p2.ocNum);
+// p2 es el ejemplo real de colones del brief.
+const p2 = sandbox.parseComprobanteName('Extralum-₡450000-OC-2026-007-4821-Dor.pdf');
+ok('símbolo ₡ detectado como moneda CRC', p2 && p2.moneda === 'CRC', p2 && p2.moneda);
+ok('monto en colones (sin separador de miles)', p2 && p2.monto === 450000, p2 && p2.monto);
+
+// p3: sin símbolo — no se adivina la moneda. Sigue cubriendo lo que cubría antes: separador de
+// miles y el padding del consecutivo de OC de un dígito.
+const p3 = sandbox.parseComprobanteName('Extralum-1,250.00-OC-2026-7-4821-Dor.jpg');
+ok('sin símbolo, moneda queda en null (no se adivina)', p3 && p3.moneda === null, p3 && p3.moneda);
+ok('monto con separador de miles, sin símbolo', p3 && p3.monto === 1250, p3 && p3.monto);
+ok('consecutivo de OC de un dígito se rellena a 3', p3 && p3.ocNum === 'OC-2026-007', p3 && p3.ocNum);
+
+// p4: separador de miles CON símbolo — la limpieza del número tiene que tolerar los dos a la vez.
+const p4 = sandbox.parseComprobanteName('Polycenter-$1,250.00-OC-2026-014-4821-Dor.pdf');
+ok('separador de miles con símbolo: la moneda se detecta igual', p4 && p4.moneda === 'USD', p4 && p4.moneda);
+ok('separador de miles con símbolo: el monto se limpia igual', p4 && p4.monto === 1250, p4 && p4.monto);
+
+// El brief también pide reconocer el texto USD/CRC pegado al monto, no solo el símbolo.
+ok('texto "USD" pegado al monto también se detecta',
+  sandbox.parseComprobanteName('Prov-USD500-OC-2026-001-x-Proy.pdf').moneda === 'USD');
+ok('texto "CRC" pegado al monto también se detecta',
+  sandbox.parseComprobanteName('Prov-CRC500-OC-2026-001-x-Proy.pdf').moneda === 'CRC');
 
 ok('nombre sin suficientes partes devuelve null',
   sandbox.parseComprobanteName('comprobante.pdf') === null);
@@ -92,9 +116,9 @@ ok('null no revienta', sandbox.parseComprobanteName(null) === null);
 ok('sin OC en el nombre igual devuelve el resto',
   (() => { const r = sandbox.parseComprobanteName('Ferretería X-45.00-sin ref-Proyecto Z.pdf');
            return r && r.ocNum === '' && r.proveedor === 'Ferretería X' && r.proyecto === 'Proyecto Z'; })());
-ok('monto no numérico queda en null',
+ok('monto no numérico queda en null (y tampoco hay símbolo que detectar)',
   (() => { const r = sandbox.parseComprobanteName('Prov-abc-OC-2026-001-x-Proy.pdf');
-           return r && r.montoUSD === null; })());
+           return r && r.monto === null && r.moneda === null; })());
 
 console.log('\nSelectores:');
 // C1(b) — desde esta ola de arreglos, `ocsListasParaPagar()` exige el sello `createdAtISO`, que
@@ -150,8 +174,12 @@ ok('el pago queda registrado con autor y fecha',
 // ============================================================
 
 console.log('\nlogAction — atribuye al proyecto dueño de la OC, no a curProj (fix):');
+// Rangos ampliados tras el arreglo de moneda: el bloque de comentario nuevo antes de armar
+// oc.pago empuja la llamada a logAction() más lejos del inicio de la función (3000→3400), y el
+// objeto que se le pasa ahora también lleva `moneda` y `montoUSD` (antes/después), así que la
+// llamada en sí es más larga (400→700).
 ok('ocConfirmPago le pasa el proyecto dueño (proj) a logAction, no depende de curProj implícito',
-  /function ocConfirmPago[\s\S]{0,3000}logAction\([\s\S]{0,400},\s*proj\)\s*;/.test(html));
+  /function ocConfirmPago[\s\S]{0,3400}logAction\([\s\S]{0,700},\s*proj\)\s*;/.test(html));
 
 // Prueba de comportamiento real: se extrae logAction del archivo y se ejecuta en un sandbox
 // aislado con curProj apuntando a un proyecto DISTINTO del dueño de la OC — reproduce
@@ -382,6 +410,20 @@ ok('M5 — el archivo se acepta ANTES de evaluar el número (el aviso nunca lo d
 ok('M5 — el modal tiene su propio contenedor de advertencia, sin pisar el hint de transferencia',
   /id="oc-pago-warn"/.test(html) && /id="oc-pago-hint"/.test(html));
 
+// ---------- Arreglo de moneda — ocPagoFilePicked preselecciona la moneda detectada ----------
+ok('moneda — el prellenado de monto usa parsed.monto (ya no parsed.montoUSD, que ya no existe)',
+  /parsed&&parsed\.monto!=null/.test(pickedSrc) && !/parsed\.montoUSD/.test(pickedSrc));
+ok('moneda — si el nombre trae símbolo, se preselecciona esa moneda en el selector',
+  /if\(parsed&&parsed\.moneda\)\{[\s\S]{0,200}oc-pago-moneda/.test(pickedSrc));
+ok('moneda — la preselección corre ANTES del bloque de advertencia del número de OC',
+  pickedSrc.indexOf('if(parsed&&parsed.moneda)') >= 0
+  && pickedSrc.indexOf('if(parsed&&parsed.moneda)') < pickedSrc.indexOf('if(warnEl){'));
+// Si el nombre no trae símbolo (moneda: null), el guard `if(parsed&&parsed.moneda)` de la
+// aserción anterior es justamente lo que evita tocar el selector: no hay una rama `else` que
+// fuerce una moneda — se deja como estaba para que el usuario la confirme, sin adivinar.
+ok('moneda — el bloque de preselección está guardado por parsed.moneda, sin rama "else" que fuerce una moneda',
+  !/if\(parsed&&parsed\.moneda\)[\s\S]{0,250}\}\s*else/.test(pickedSrc));
+
 // ---------- I1 — el toast de éxito no puede salir antes del guardado ----------
 console.log('\nI1 — accept acotado a la allowlist real del backend:');
 // La allowlist real vive en siscon-backend/r2-storage.js (DOCUMENT_MIME_ALLOWLIST):
@@ -408,11 +450,15 @@ ok('I1 — ocPagoFilePicked avisa al elegir en vez de dejar que falle al guardar
 console.log('\nI1 + I3 + I4 — ocConfirmPago ejecutado de verdad:');
 const pagoSandbox = { console, JSON, Date, Math, Number, parseFloat, String, Array, Object };
 pagoSandbox.window = pagoSandbox;
+// Arreglo de moneda — ocConfirmPago ahora llama a tcGet(), que lee SYS.exchangeRate. Tasa fija
+// para que las pruebas de conversión CRC→USD sean deterministas (450000 ÷ 500 = 900 exacto).
+pagoSandbox.SYS = { exchangeRate: 500 };
 vm.createContext(pagoSandbox);
 vm.runInContext([
   extractFunction('ocPagoPuedeRegistrar'),
   extractFunction('ocPagoGateRol'),
   extractFunction('_ocPagoResolve'),
+  extractFunction('tcGet'),
   extractAsyncFunction('ocConfirmPago'),
 ].join('\n'), pagoSandbox);
 
@@ -424,8 +470,11 @@ function mkPagoProjects() {
   }];
 }
 // Devuelve {alerts, toasts, projects, oc} tras ejecutar ocConfirmPago con el escenario pedido.
+// `monto`/`moneda` alimentan los campos del modal (oc-pago-monto / oc-pago-moneda); por defecto
+// reproducen el caso de siempre: 883.11 dólares (el total de la OC de la fixture).
 async function runConfirm({ saveResult = true, saveThrows = false, role = 'Administrador',
-                            ocId = 'oc-14', metodo = 'Tarjeta', file = null, repollear = false } = {}) {
+                            ocId = 'oc-14', metodo = 'Tarjeta', file = null, repollear = false,
+                            monto = '883.11', moneda = 'USD' } = {}) {
   const alerts = [], toasts = [], logs = [];
   pagoSandbox.projects = mkPagoProjects();
   const ocOriginal = pagoSandbox.projects[0].ocs[0];
@@ -439,8 +488,8 @@ async function runConfirm({ saveResult = true, saveThrows = false, role = 'Admin
   pagoSandbox.logAction = (...a) => logs.push(a);
   pagoSandbox.closeModal = () => {};
   pagoSandbox.curTab = 'info'; pagoSandbox.curTxnTab = 'oc'; pagoSandbox.curOCId = null;
-  const campos = { 'oc-pago-monto': { value: '883.11' }, 'oc-pago-fecha': { value: '2026-09-10' },
-                   'oc-pago-metodo': { value: metodo } };
+  const campos = { 'oc-pago-monto': { value: monto }, 'oc-pago-fecha': { value: '2026-09-10' },
+                   'oc-pago-metodo': { value: metodo }, 'oc-pago-moneda': { value: moneda } };
   pagoSandbox.document = { getElementById: id => campos[id] || null };
   pagoSandbox.saveData = () => {
     if (saveThrows) return Promise.reject(new Error('R2 caído'));
@@ -460,6 +509,33 @@ ok('I1 — con guardado exitoso sí sale el toast de éxito',
   okExito.toasts.some(t => t.includes('Pago registrado')) && okExito.alerts.length === 0,
   JSON.stringify({ toasts: okExito.toasts, alerts: okExito.alerts }));
 ok('I1 — el pago queda escrito en la OC', !!(okExito.ocVivo && okExito.ocVivo.pago));
+
+// ---------- Arreglo de moneda — ocConfirmPago ejecutado de verdad, las dos monedas ----------
+// runConfirm() por defecto no toca el selector de moneda (queda en 'USD', el valor con el que
+// abre el modal siempre) y paga el total de la OC de la fixture (883.11). Con SYS.exchangeRate
+// fijo en 500 (arriba), un pago en colones de ₡450.000 tiene que dar exactamente $900 de
+// equivalente — sin redondeos raros porque los números se eligieron para que la división sea exacta.
+ok('moneda — un pago sin tocar el selector queda en USD, con monto===montoUSD (compatibilidad con OC en dólares)',
+  okExito.ocVivo.pago.moneda === 'USD'
+  && okExito.ocVivo.pago.monto === 883.11
+  && okExito.ocVivo.pago.montoUSD === 883.11,
+  JSON.stringify(okExito.ocVivo.pago));
+ok('moneda — igual se guarda el exchangeRate del momento (tcGet()), aunque sea USD',
+  okExito.ocVivo.pago.exchangeRate === 500);
+
+const pagoCRC = await runConfirm({ monto: '450000', moneda: 'CRC' });
+ok('moneda — un pago en colones guarda monto, moneda y el tipo de cambio usado',
+  pagoCRC.ocVivo.pago.moneda === 'CRC'
+  && pagoCRC.ocVivo.pago.monto === 450000
+  && pagoCRC.ocVivo.pago.exchangeRate === 500,
+  JSON.stringify(pagoCRC.ocVivo.pago));
+ok('moneda — el equivalente en dólares se calcula como monto/exchangeRate (450000/500=900)',
+  pagoCRC.ocVivo.pago.montoUSD === 900, pagoCRC.ocVivo.pago.montoUSD);
+ok('moneda — un pago en colones también sale exitoso (toast, sin alertas)',
+  pagoCRC.toasts.some(t => t.includes('Pago registrado')) && pagoCRC.alerts.length === 0,
+  JSON.stringify({ toasts: pagoCRC.toasts, alerts: pagoCRC.alerts }));
+ok('moneda — la validación de monto mayor a 0 usa el monto nativo, no el equivalente en dólares',
+  (await runConfirm({ monto: '0', moneda: 'CRC' })).alerts.some(a => /monto mayor a 0/i.test(a)));
 
 const falla = await runConfirm({ saveResult: false });
 ok('I1 — si saveData() resuelve false NO sale el toast de éxito',
@@ -551,8 +627,10 @@ ok('I6 — el formulario de OC reserva el contenedor de la franja de pago',
   /id="oc-pago-strip">\$\{ocPagoStripHTML\(\)\}/.test(html));
 const stripSrc = html.slice(html.indexOf('function ocPagoStripHTML'),
   html.indexOf('function ocPagoRefreshStrip'));
+// Arreglo de moneda — el monto ya no se interpola directo como `pg.montoUSD`: pasa por
+// ocPagoMontoTexto(pg), que elige fmt()/fmtCRC() según la moneda real del pago.
 ok('I6 — la franja muestra monto, fecha, método y quién lo registró',
-  /pg\.montoUSD/.test(stripSrc) && /fmtDate\(pg\.fecha\)/.test(stripSrc)
+  /ocPagoMontoTexto\(pg\)/.test(stripSrc) && /fmtDate\(pg\.fecha\)/.test(stripSrc)
   && /pg\.metodo/.test(stripSrc) && /pg\.registradoPor/.test(stripSrc));
 ok('I6 — el comprobante se abre por el mismo camino que Documentos (openPdfNewTab por blobId)',
   /openPdfNewTab\('\$\{esc\(String\(pg\.blobId\)\)\}'\)/.test(stripSrc));
@@ -571,9 +649,14 @@ vm.createContext(stripSandbox);
 // toma la línea real del archivo — sigue siendo el esc() de producción, no una copia.
 const escSrc = html.split('\n').find(l => l.trim().startsWith('function esc(s)'));
 if (!escSrc) throw new Error('No se encontró la definición de esc()');
+// Arreglo de moneda — ocPagoStripHTML/ocPagoBadgeHTML ahora llaman a ocPagoMontoTexto(pg), que a
+// su vez llama a fmt()/fmtCRC(). Se extrae ocPagoMontoTexto real de index.html (es una función
+// simple, sin template literals anidados) y se agregan los mismos stubs de fmt/fmtCRC que usa
+// el resto de la app (fmt real: '$'+toLocaleString con 2 decimales; fmtCRC real: '₡'+Math.round).
 vm.runInContext([stripSrc, escSrc, extractFunction('fmtDate'),
-  extractFunction('ocPagoPuedeRegistrar'),
-  "function fmt(v){return '$'+(Number(v)||0).toFixed(2);}"].join('\n'), stripSandbox);
+  extractFunction('ocPagoPuedeRegistrar'), extractFunction('ocPagoMontoTexto'),
+  "function fmt(v){return '$'+(Number(v)||0).toFixed(2);}",
+  "function fmtCRC(v){return '₡'+Math.round(v).toLocaleString('es-CR');}"].join('\n'), stripSandbox);
 function renderStrip({ pago, role = 'Administrador', ocId = 'oc-14' } = {}) {
   stripSandbox.currentUser = { name: 'Abraham', role };
   stripSandbox.curProj = { id: 7, name: 'Dor', ocs: [{ id: 'oc-14', num: 'OC-2026-014', pago }] };
@@ -609,6 +692,29 @@ ok('I6 (render real) — un nombre de comprobante con payload XSS no sobrevive c
            return !s.includes('<img src=x onerror=alert(1)>') && !s.includes('<script>alert(2)</script>')
              && s.includes('&lt;img src=x onerror=alert(1)&gt;'); })());
 
+// ---------- Arreglo de moneda — la franja respeta la moneda real del pago ----------
+// pagoDemo (arriba) solo tiene `montoUSD`, sin `moneda` ni `monto` propios: es exactamente la
+// forma de un pago registrado ANTES de este cambio. Que "I6 (render real) — la franja muestra
+// el monto" siga viendo "$883.11" con esa fixture YA prueba la compatibilidad hacia atrás; acá
+// se deja explícito y se cubre el caso nuevo (CRC).
+ok('moneda — compatibilidad hacia atrás: un pago viejo sin `moneda` se lee como dólares',
+  renderStrip({ pago: { montoUSD: 883.11, fecha: '2026-09-09', metodo: 'Transferencia',
+    registradoPor: 'Abraham' } }).includes('$883.11'));
+const pagoCRCDemo = { monto: 450000, moneda: 'CRC', exchangeRate: 500, montoUSD: 900,
+  fecha: '2026-09-09', metodo: 'Transferencia', blobId: 'blob_crc',
+  comprobanteName: 'Extralum-₡450000-OC-2026-014.pdf', registradoPor: 'Abraham' };
+const stripCRC = renderStrip({ pago: pagoCRCDemo });
+// El separador de miles de toLocaleString('es-CR') depende de los datos ICU del runtime (puede
+// ser '.', ',' o un espacio no separable) — se compara contra el fmtCRC() real en vez de
+// adivinar el carácter exacto.
+ok('moneda — un pago en colones se muestra con fmtCRC(), no con el símbolo $',
+  stripCRC.includes(stripSandbox.fmtCRC(450000)) && !/\$450[.,]?000/.test(stripCRC), stripCRC.slice(0, 250));
+ok('moneda — un pago en colones también muestra el equivalente en dólares entre paréntesis',
+  stripCRC.includes(stripSandbox.fmt(900)) && new RegExp('\\(.*' + stripSandbox.fmt(900).replace('$', '\\$') + '.*\\)').test(stripCRC),
+  stripCRC.slice(0, 250));
+ok('moneda — un pago en dólares NO muestra equivalente entre paréntesis (no hace falta)',
+  !strip.includes('≈'));
+
 // Render real del distintivo de la lista.
 vm.runInContext([extractFunction('ocPagoBadgeHTML')].join('\n'), stripSandbox);
 ok('I6 (render real) — el distintivo de la lista dice "Pagada" con la fecha en dd/mm/aaaa',
@@ -618,6 +724,13 @@ ok('I6 (render real) — el distintivo de la lista dice "Pagada" con la fecha en
   stripSandbox.ocPagoBadgeHTML({ pago: pagoDemo }));
 ok('I6 (render real) — sin pago el distintivo es vacío',
   stripSandbox.ocPagoBadgeHTML({ num: 'OC-1' }) === '' && stripSandbox.ocPagoBadgeHTML(null) === '');
+// Arreglo de moneda — el distintivo de la lista también muestra el monto con su símbolo.
+ok('moneda — el distintivo muestra el monto en dólares con $',
+  stripSandbox.ocPagoBadgeHTML({ pago: pagoDemo }).includes('$883.11'));
+ok('moneda — el distintivo de un pago en colones muestra fmtCRC() y el equivalente en dólares',
+  (() => { const b = stripSandbox.ocPagoBadgeHTML({ pago: pagoCRCDemo });
+           return b.includes(stripSandbox.fmtCRC(450000)) && b.includes(stripSandbox.fmt(900)); })(),
+  stripSandbox.ocPagoBadgeHTML({ pago: pagoCRCDemo }));
 
 // ---------- Decisión 3 — editar y anular un pago con contraseña de administrador ----------
 console.log('\nDecisión 3 — editar y anular pago:');
@@ -636,9 +749,12 @@ ok('D3 — cancelar el prompt no hace nada (pwd===null)',
   && (extractAsyncFunction('ocAnularPago').match(/if\(pwd===null\) return;/g) || []).length === 1);
 ok('D3 — editar reabre el modal en modo edición sobre la MISMA OC',
   /function ocEditarPago[\s\S]{0,900}ocOpenPagoModal\(proj\.id,oc\.id,true\)/.test(html));
+// montoInicial se actualizó con el arreglo de moneda: lee `previo.monto` (nativo, en su propia
+// moneda) y cae a `previo.montoUSD` solo para pagos viejos que no tienen `monto` propio.
 ok('D3 — el modal en modo edición prellena monto, fecha, método y el nombre del comprobante actual',
   /const previo=editando\?oc\.pago:null/.test(html)
-  && /const montoInicial=previo\?Number\(previo\.montoUSD\|\|0\)/.test(html)
+  && /const monedaActual=previo\?\(previo\.moneda\|\|'USD'\):'USD'/.test(html)
+  && /const montoInicial=previo\?Number\(previo\.monto!=null\?previo\.monto:\(previo\.montoUSD\|\|0\)\):Number\(oc\.totalUSD\|\|0\)/.test(html)
   && /const fechaInicial=previo&&previo\.fecha/.test(html)
   && /const metodoActual=previo&&previo\.metodo/.test(html)
   && /const nombreArchivo=previo&&previo\.comprobanteName/.test(html));

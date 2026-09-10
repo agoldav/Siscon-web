@@ -7618,20 +7618,30 @@ function ocIsComplete(oc){
 
 // Fase 0 — lee la convención de nombre que el usuario ya usa para los comprobantes:
 //   PROVEEDOR-MONTO-#OC-#PROFORMA-NOMBRE DEL PROYECTO
-// Conveniencia para prellenar el modal de pago. Nunca lanza; si no calza, devuelve null.
+// El MONTO lleva su símbolo pegado ($ o ₡; también se reconoce USD/CRC en texto). Conveniencia
+// para prellenar el modal de pago. Nunca lanza; si no calza, devuelve null.
+// Arreglo de moneda (2026-09-10) — antes devolvía `montoUSD` asumiendo que todo pago es en
+// dólares: un comprobante de ₡450.000 prellenaba el modal con 450000 DÓLARES. Ahora devuelve el
+// monto tal como aparece (`monto`) más la moneda detectada (`moneda`), sin adivinar cuando el
+// nombre no trae símbolo — ese caso lo resuelve el modal (moneda: null).
 function parseComprobanteName(fileName){
   const base=String(fileName==null?'':fileName).replace(/\.[A-Za-z0-9]{1,5}$/,'').trim();
   if(!base) return null;
   const parts=base.split('-').map(s=>s.trim()).filter(s=>s!=='');
   if(parts.length<3) return null;
-  const monto=parseFloat(String(parts[1]).replace(/,/g,'').replace(/[^\d.]/g,''));
+  const montoRaw=String(parts[1]);
+  let moneda=null;
+  if(/\$|USD/i.test(montoRaw)) moneda='USD';
+  else if(/₡|CRC/i.test(montoRaw)) moneda='CRC';
+  const monto=parseFloat(montoRaw.replace(/,/g,'').replace(/[^\d.]/g,''));
   const medio=parts.slice(2,-1).join('-');
   const ocM=medio.match(/OC-?(\d{4})-?(\d{1,4})/i);
   const ocNum=ocM?('OC-'+ocM[1]+'-'+String(ocM[2]).padStart(3,'0')):'';
   const proforma=medio.replace(/OC-?\d{4}-?\d{1,4}/i,'').replace(/^[-\s]+|[-\s]+$/g,'').trim();
   return {
     proveedor: parts[0],
-    montoUSD: Number.isFinite(monto)?monto:null,
+    monto: Number.isFinite(monto)?monto:null,
+    moneda,
     ocNum,
     proforma,
     proyecto: parts[parts.length-1],
@@ -7767,7 +7777,11 @@ function ocOpenPagoModal(projId,ocId,modoEdicion){
   const hoy=new Date().toISOString().slice(0,10);
   const metodos=['Transferencia','Tarjeta','Caja Chica','Reembolso'];
   const metodoActual=previo&&previo.metodo?String(previo.metodo):'Transferencia';
-  const montoInicial=previo?Number(previo.montoUSD||0):Number(oc.totalUSD||0);
+  // Arreglo de moneda — un pago viejo (previo a este cambio) solo tiene `montoUSD`, sin `monto`
+  // propio ni `moneda`: se lee como dólares, sin migración de datos. Por defecto al registrar
+  // un pago nuevo la moneda es USD, que es la base en la que la app guarda oc.totalUSD.
+  const monedaActual=previo?(previo.moneda||'USD'):'USD';
+  const montoInicial=previo?Number(previo.monto!=null?previo.monto:(previo.montoUSD||0)):Number(oc.totalUSD||0);
   const fechaInicial=previo&&previo.fecha?String(previo.fecha):hoy;
   const nombreArchivo=previo&&previo.comprobanteName?String(previo.comprobanteName):'';
   document.getElementById('modal-inner').innerHTML=`
@@ -7778,15 +7792,23 @@ function ocOpenPagoModal(projId,ocId,modoEdicion){
       ${esc(oc.vendorName||'—')} · ${esc(proj.name)} · ${fmt(oc.totalUSD||0)}
     </div>
     <div class="ff-row">
-      <div class="ff"><label>Monto pagado (USD)</label>
+      <div class="ff"><label>Moneda</label>
+        <span class="ivasel" style="display:block"><select id="oc-pago-moneda" onchange="ocPagoRenderMontoLabel()">
+          <option value="USD"${monedaActual==='USD'?' selected':''}>Dólares ($)</option>
+          <option value="CRC"${monedaActual==='CRC'?' selected':''}>Colones (₡)</option>
+        </select></span>
+      </div>
+      <div class="ff"><label id="oc-pago-monto-label">Monto pagado (${monedaActual==='CRC'?'₡':'$'})</label>
         <input id="oc-pago-monto" type="number" step="0.01" min="0" value="${montoInicial.toFixed(2)}"/></div>
+    </div>
+    <div class="ff-row">
       <div class="ff"><label>Fecha de pago</label>
         <input id="oc-pago-fecha" type="date" value="${esc(fechaInicial)}"/></div>
-    </div>
-    <div class="ff"><label>Método de pago</label>
-      <span class="ivasel" style="display:block"><select id="oc-pago-metodo" onchange="ocPagoRenderHint()">
-        ${metodos.map(m=>`<option${m===metodoActual?' selected':''}>${esc(m)}</option>`).join('')}
-      </select></span>
+      <div class="ff"><label>Método de pago</label>
+        <span class="ivasel" style="display:block"><select id="oc-pago-metodo" onchange="ocPagoRenderHint()">
+          ${metodos.map(m=>`<option${m===metodoActual?' selected':''}>${esc(m)}</option>`).join('')}
+        </select></span>
+      </div>
     </div>
     <div class="ff"><label>Comprobante</label>
       <button class="btn-sm" onclick="document.getElementById('oc-pago-file').click()">📎 ${editando&&nombreArchivo?'Reemplazar archivo':'Elegir archivo'}</button>
@@ -7806,6 +7828,13 @@ function ocPagoRenderHint(){
   const el=document.getElementById('oc-pago-hint'); if(!el)return;
   const metodo=(document.getElementById('oc-pago-metodo')||{}).value||'';
   el.textContent=metodo==='Transferencia'?'El comprobante es obligatorio para transferencias.':'';
+}
+// Arreglo de moneda — el rótulo del campo de monto refleja la moneda elegida, mismo patrón que
+// vbOpenPaymentModal() con su símbolo ($/₡) para la factura de proveedor.
+function ocPagoRenderMontoLabel(){
+  const sel=document.getElementById('oc-pago-moneda'); const lbl=document.getElementById('oc-pago-monto-label');
+  if(!sel||!lbl) return;
+  lbl.textContent='Monto pagado ('+(sel.value==='CRC'?'₡':'$')+')';
 }
 // M5 — la convención de nombre ya trae el número de OC; compararlo es gratis y es exactamente
 // el punto de la cadena de custodia. Advertencia, NO bloqueo: el nombre es una conveniencia y el
@@ -7832,9 +7861,16 @@ function ocPagoFilePicked(input){
   _ocPagoCtx.file=f;
   const el=document.getElementById('oc-pago-fname'); if(el)el.textContent=f.name;
   const parsed=parseComprobanteName(f.name);
-  if(parsed&&parsed.montoUSD!=null){
+  if(parsed&&parsed.monto!=null){
     const inp=document.getElementById('oc-pago-monto');
-    if(inp)inp.value=parsed.montoUSD.toFixed(2);
+    if(inp)inp.value=parsed.monto.toFixed(2);
+  }
+  // Arreglo de moneda — si el nombre trae símbolo ($/₡) se preselecciona esa moneda. Si no
+  // (parsed.moneda === null), el selector queda como estaba para que el usuario la confirme:
+  // no se adivina.
+  if(parsed&&parsed.moneda){
+    const selMoneda=document.getElementById('oc-pago-moneda');
+    if(selMoneda){ selMoneda.value=parsed.moneda; ocPagoRenderMontoLabel(); }
   }
   if(warnEl){
     const ctx=_ocPagoResolve();
@@ -7858,10 +7894,11 @@ async function ocConfirmPago(){
   }
   const {proj,oc}=ctx;
   const {file,editando,pagoPrevio}=_ocPagoCtx;
-  const montoUSD=parseFloat((document.getElementById('oc-pago-monto')||{}).value)||0;
+  const monto=parseFloat((document.getElementById('oc-pago-monto')||{}).value)||0;
+  const moneda=(document.getElementById('oc-pago-moneda')||{}).value==='CRC'?'CRC':'USD';
   const fecha=(document.getElementById('oc-pago-fecha')||{}).value||new Date().toISOString().slice(0,10);
   const metodo=(document.getElementById('oc-pago-metodo')||{}).value||'Transferencia';
-  if(!(montoUSD>0)){ alert('Ingresa un monto mayor a 0.'); return; }
+  if(!(monto>0)){ alert('Ingresa un monto mayor a 0.'); return; }
   const comprobantePrevioId=editando&&pagoPrevio?String(pagoPrevio.blobId||''):'';
   if(metodo==='Transferencia'&&!file&&!comprobantePrevioId){ alert('Adjunta el comprobante de la transferencia.'); return; }
   let blobId=comprobantePrevioId;
@@ -7880,7 +7917,14 @@ async function ocConfirmPago(){
     });
     _pendingDocFiles.set(blobId,file);
   }
-  oc.pago={ montoUSD, fecha, metodo, blobId, comprobanteName,
+  // Arreglo de moneda — se guarda el monto tal como se pagó (monto/moneda). `montoUSD` es el
+  // equivalente en dólares para que cualquier suma futura tenga una base común, igual que la
+  // tabla `transactions` guarda total_usd junto a total_crc; `exchangeRate` es el tcGet() de este
+  // momento y solo es relevante cuando moneda==='CRC'. Un pago registrado ANTES de este cambio
+  // solo tiene montoUSD — se lee como dólares al editarlo (montoInicial más arriba).
+  const exchangeRate=tcGet();
+  const montoUSD=moneda==='CRC'?(monto/exchangeRate):monto;
+  oc.pago={ monto, moneda, exchangeRate, montoUSD, fecha, metodo, blobId, comprobanteName,
     registradoPor:(editando&&pagoPrevio&&pagoPrevio.registradoPor)?pagoPrevio.registradoPor:(currentUser?currentUser.name:'Sistema'),
     registradoAt:(editando&&pagoPrevio&&pagoPrevio.registradoAt)?pagoPrevio.registradoAt:new Date().toISOString() };
   if(editando){
@@ -7890,8 +7934,8 @@ async function ocConfirmPago(){
   proj.lastActivity=Date.now();
   logAction(editando?`Pago editado en "${oc.num||'OC'}" (${metodo})`:`Pago registrado para "${oc.num||'OC'}" (${metodo})`,
     editando?'log-edit':'log-create','OC',
-    editando&&pagoPrevio?{monto:pagoPrevio.montoUSD,fecha:pagoPrevio.fecha,metodo:pagoPrevio.metodo,comprobante:pagoPrevio.comprobanteName||''}:null,
-    {num:oc.num,monto:montoUSD,fecha,metodo,comprobante:comprobanteName,proyecto:proj.name},proj);
+    editando&&pagoPrevio?{monto:(pagoPrevio.monto!=null?pagoPrevio.monto:pagoPrevio.montoUSD),moneda:pagoPrevio.moneda||'USD',fecha:pagoPrevio.fecha,metodo:pagoPrevio.metodo,comprobante:pagoPrevio.comprobanteName||''}:null,
+    {num:oc.num,monto,moneda,montoUSD,fecha,metodo,comprobante:comprobanteName,proyecto:proj.name},proj);
   _ocPagoCtx=null;
   closeModal();
   // I1 — el toast de éxito SOLO después de que el guardado terminó bien. La cadena sube los
@@ -7956,6 +8000,22 @@ async function ocAnularPago(projId,ocId){
   if(curTab==='txn'&&curTxnTab==='oc'&&curOCId&&String(curOCId)===String(oc.id)&&typeof ocPagoRefreshStrip==='function')ocPagoRefreshStrip();
 }
 
+// Arreglo de moneda — arma el texto del monto de un pago respetando su moneda real: fmt() si es
+// USD, fmtCRC() con el equivalente en dólares entre paréntesis si es CRC (para comparar contra
+// el total de la OC, que siempre está en dólares, sin hacer la cuenta mentalmente).
+// Compatibilidad hacia atrás: un pago sin `moneda` (registrado antes de este cambio) se lee como
+// dólares, usando `montoUSD` si tampoco tiene `monto` propio. Sin migración de datos.
+function ocPagoMontoTexto(pg){
+  if(!pg) return fmt(0);
+  const moneda=pg.moneda||'USD';
+  if(moneda==='CRC'){
+    const monto=pg.monto!=null?pg.monto:0;
+    const usd=pg.montoUSD!=null?pg.montoUSD:0;
+    return `${fmtCRC(monto)} (≈ ${fmt(usd)})`;
+  }
+  return fmt(pg.monto!=null?pg.monto:(pg.montoUSD||0));
+}
+
 // ---- I6 — el pago tiene que verse ----
 // Franja del formulario de OC: monto, fecha, método, quién lo registró y el enlace al
 // comprobante. El comprobante se abre por el mismo camino que usa Documentos para los adjuntos
@@ -7971,7 +8031,7 @@ function ocPagoStripHTML(){
     : `<span style="color:var(--t3)">Sin comprobante adjunto</span>`;
   return `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:rgba(29,184,122,.08);border:1px solid rgba(29,184,122,.28);border-radius:var(--r);padding:9px 14px;margin-bottom:10px">
     <span style="font-size:12px;font-weight:700;color:var(--grn)">💰 Pagada</span>
-    <span style="font-size:12px;color:var(--t1);font-weight:600">${fmt(pg.montoUSD||0)}</span>
+    <span style="font-size:12px;color:var(--t1);font-weight:600">${ocPagoMontoTexto(pg)}</span>
     <span style="font-size:11px;color:var(--t2)">${esc(fmtDate(pg.fecha))}</span>
     <span style="font-size:11px;color:var(--t2)">${esc(pg.metodo||'—')}</span>
     <span style="font-size:11px;color:var(--t3)">Registrado por ${esc(pg.registradoPor||'—')}${pg.editadoPor?' · editado por '+esc(pg.editadoPor):''}</span>
@@ -7987,9 +8047,10 @@ function ocPagoRefreshStrip(){
   if(el) el.innerHTML=ocPagoStripHTML();
 }
 // Distintivo para la lista de OCs (renderOCList): mismo estilo que los badges que ya viven ahí.
+// Arreglo de moneda — también muestra el monto con el símbolo que corresponde (ocPagoMontoTexto).
 function ocPagoBadgeHTML(oc){
   if(!oc||!oc.pago) return '';
-  return `<span class="qbo-badge" style="background:rgba(29,184,122,.12);color:var(--grn);border-color:rgba(29,184,122,.3)">💰 Pagada ${esc(fmtDate(oc.pago.fecha))}</span>`;
+  return `<span class="qbo-badge" style="background:rgba(29,184,122,.12);color:var(--grn);border-color:rgba(29,184,122,.3)">💰 Pagada ${esc(fmtDate(oc.pago.fecha))} · ${ocPagoMontoTexto(oc.pago)}</span>`;
 }
 
 // Cantidad ya solicitada de un material (lineId del tipo) para una casa, sumando todas las OCs excepto la actual
