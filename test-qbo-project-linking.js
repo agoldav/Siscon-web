@@ -93,8 +93,6 @@ ok('Bills multiproyecto se dividen por línea conservando una copia completa por
 ok('facturas a clientes usan referencias estables QBO y no aproximan por nombre de cliente',
   /const projectResolution=qboResolveProject\(qi,qboProjects\)/.test(html) &&
   !/const cln=clientName\.toLowerCase\(\)\.trim\(\)/.test(html));
-ok('Outlook usa el proyecto resuelto desde QBO como destino preferente',
-  /const destinationProject=qboProjectResolution&&qboProjectResolution\.status==='matched'\?qboProjectResolution\.project:proj/.test(html));
 ok('la importación comparativa conserva el vínculo del proyecto',
   /if\(d\.projectResolution\)qboApplyProjectLink\(rec,d\.projectResolution\)/.test(html));
 ok('la UI usa el catálogo gratuito Customer/Job y no recomienda permisos premium',

@@ -261,10 +261,6 @@ button{cursor:pointer;font-family:var(--font);transition:all .15s;}
 .log-meta{font-size:10px;color:var(--t3);margin-top:3px;display:flex;gap:10px;}
 .btn-history{background:transparent;border:1px solid var(--border2);border-radius:7px;padding:7px 12px;font-size:12px;color:var(--t2);font-weight:500;}
 .btn-history:hover{color:var(--t1);border-color:var(--acc);}
-.btn-refresh-mail{background:var(--grn);color:#fff;border:none;border-radius:7px;padding:7px 12px;font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:5px;}
-.btn-refresh-mail:hover{filter:brightness(.9);}
-.btn-refresh-mail.error{background:var(--red);}
-.btn-refresh-mail.loading{opacity:.7;pointer-events:none;}
 
 /* PROJECT LOCK */
 .lock-btn{background:transparent;border:none;font-size:16px;color:var(--t3);padding:3px;cursor:pointer;}
@@ -1507,86 +1503,6 @@ function _documentIdForUpload(upload,project){
   }
   return null;
 }
-async function _linkPendingBillFiles(){
-  for(const project of projects){
-    for(const upload of (project.uploads||[])){
-      if(!upload.pendingBillId||upload.storageKey)continue;
-      const documentId=_documentIdForUpload(upload,project);
-      if(!documentId||!_documentSnapshots.has(String(documentId)))continue;
-      try{
-        const resp=await fetch(
-          `${BACKEND_URL}/api/files/documents/${encodeURIComponent(documentId)}/from-pending`,
-          {
-            method:'POST',
-            headers:{
-              'Authorization':`Bearer ${_sbToken}`,
-              'Content-Type':'application/json',
-            },
-            credentials:'include',
-            body:JSON.stringify({pendingBillId:upload.pendingBillId}),
-          }
-        );
-        const data=await resp.json().catch(()=>({}));
-        if(!resp.ok)throw new Error(data.error||data.message||`Error ${resp.status} al enlazar el documento`);
-        const storageKey=data.storageKey??data.document?.storage_key??data.document?.storageKey;
-        if(!storageKey)throw new Error('El servidor no devolvió la ubicación del documento');
-        upload.storageKey=storageKey;
-        delete upload.pendingBillId;
-        delete upload.pendingStorageKey;
-        delete upload.pdfBase64;
-        const group=_documentGroups(project).find(item=>String(item.id)===String(documentId));
-        if(group?.docSortOrder!==null&&project.docs?.[group.docSortOrder]){
-          const doc=project.docs[group.docSortOrder];
-          doc.storageKey=storageKey;
-          delete doc.pendingBillId;
-          delete doc.pendingStorageKey;
-          delete doc.pdfBase64;
-        }
-        const refreshed=_documentGroups(project).find(item=>String(item.id)===String(documentId));
-        if(refreshed){
-          _documentSnapshots.set(String(documentId),_snapshot(_documentCloudPayload(refreshed)));
-          _documentProjectIds.set(String(documentId),String(project.id));
-        }
-        if(data.document?.updated_at)_documentVersions.set(String(documentId),data.document.updated_at);
-        // Las copias lógicas multiproyecto apuntan al mismo PDF. Solo la copia preferida consume
-        // from-pending; las hermanas comparten su key y conservan su snapshot anterior para que el
-        // próximo sync persista el storageKey en cada fila de documents.
-        if(String(upload.blobId||'').startsWith('outlook-')){
-          for(const siblingProject of projects){
-            for(const sibling of (siblingProject.uploads||[])){
-              if(
-                sibling===upload||sibling.storageKey||
-                sibling.name!==upload.name||sibling.blobId!==upload.blobId
-              )continue;
-              sibling.storageKey=storageKey;
-              delete sibling.pendingBillId;
-              delete sibling.pendingStorageKey;
-              delete sibling.pdfBase64;
-              // Igual que arriba: `_documentGroups` clona, así que hay que resolver por id
-              // (acotado a siblingProject) en vez de comparar la referencia de `sibling`.
-              const siblingDocId=_documentIdForUpload(sibling,siblingProject);
-              const siblingGroup=siblingDocId
-                ?_documentGroups(siblingProject).find(item=>String(item.id)===String(siblingDocId))
-                :null;
-              if(siblingGroup?.docSortOrder!==null&&siblingProject.docs?.[siblingGroup.docSortOrder]){
-                const siblingDoc=siblingProject.docs[siblingGroup.docSortOrder];
-                siblingDoc.storageKey=storageKey;
-                delete siblingDoc.pendingBillId;
-                delete siblingDoc.pendingStorageKey;
-                delete siblingDoc.pdfBase64;
-              }
-            }
-          }
-        }
-      }catch(error){
-        console.error('No se pudo enlazar el PDF pendiente de Outlook:',error);
-        alert(`No se pudo guardar "${upload.name}" en Documentos. ${error.message||''}`.trim());
-        return false;
-      }
-    }
-  }
-  return true;
-}
 async function _flushPendingDocumentUploads(){
   for(const [blobId,file] of [..._pendingDocFiles.entries()]){
     const found=_findUploadByBlobId(blobId);
@@ -1628,7 +1544,7 @@ async function _flushPendingDocumentUploads(){
       return false;
     }
   }
-  return _linkPendingBillFiles();
+  return true;
 }
 // Una aprobación propia puede chocar con la versión que el administrador acaba de guardar. Ese caso
 // no requiere decidir entre recargar/sobrescribir: se informa con un solo OK y se toma la versión
@@ -2840,7 +2756,7 @@ async function resetData(){
     if(!resp.ok)throw new Error(result.detail||result.message||result.error||`HTTP ${resp.status}`);
     localStorage.removeItem(LS_KEY);
     localStorage.removeItem('migrated_to_supabase');
-    alert('La aplicación quedó limpia. QuickBooks y Outlook fueron desconectados.');
+    alert('La aplicación quedó limpia. QuickBooks fue desconectado.');
     location.reload();
   }catch(e){
     alert('No se completó el borrado: '+e.message);
@@ -3244,7 +3160,6 @@ async function login(){
     renderDash();
     handleOpenHash();
     checkNewWinOverride();
-    msAutoSync();
     msgAutoSync();
     setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);
     setTimeout(()=>checkPendingAuthOnLogin(), 1200);
@@ -3342,7 +3257,6 @@ async function bootstrapCloudflareAuth(){
     renderDash();
     handleOpenHash();
     checkNewWinOverride();
-    msAutoSync();
     msgAutoSync();
     setTimeout(()=>{ updateBadges(); updateNotifBadge(); }, 500);
     setTimeout(()=>checkPendingAuthOnLogin(), 1200);
@@ -3453,26 +3367,6 @@ async function openSettings(){
       <div style="font-size:10px;color:var(--t3);margin-top:8px">Los registros antiguos de SYS.users se conservan como compatibilidad de datos, pero no se usan para seleccionar usuarios nuevos.</div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Correo de Facturas (Outlook / Microsoft)</div>
-      <div style="font-size:11px;color:var(--t3);margin-bottom:8px">El sistema lee los adjuntos PDF de facturas del buzón indicado. La conexión se hace vía OAuth en el backend (MS_CLIENT_ID requerido en el servidor).</div>
-      <div class="ff"><label>Buzón a leer</label><input id="s-mail-user" value="${(SYS.mailbox&&SYS.mailbox.user)||'facturas@sisconcr.com'}" style="width:260px"/></div>
-      <div class="qbo-settings" style="margin-top:8px">
-        <div class="qbo-status-row" id="s-ms-status">
-          <div class="qbo-dot${SYS.mailbox&&SYS.mailbox.msConnected?' connected':''}"></div>
-          <span style="font-size:12px;color:var(--t1);font-weight:500">${SYS.mailbox&&SYS.mailbox.msConnected?'Conectado a Outlook':'Sin conectar'}</span>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-          <button onclick="msConnect()" style="background:var(--acc);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:11px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M9 15 15 9"/><path d="M11 6l1-1a4 4 0 0 1 6 6l-1 1"/><path d="M13 18l-1 1a4 4 0 0 1-6-6l1-1"/></svg> Conectar Outlook</button>
-          <button onclick="msCheckStatus()" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">↻ Probar conexión</button>
-          <button onclick="msForceScan()" style="background:var(--grn);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:11px;cursor:pointer" title="Escanea el buzón ahora y trae facturas pendientes"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg> Escanear ahora</button>
-          <button onclick="msResubscribeNow()" style="background:transparent;border:1px solid var(--grn);color:var(--grn);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer" title="Re-suscribe carpetas y escanea"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/></svg> Re-suscribir carpetas</button>
-          <button onclick="msCopyRefreshToken()" style="background:transparent;border:1px solid var(--t3);color:var(--t3);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer" title="Copia el Refresh Token para fijarlo en Render y que nunca se desconecte"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><circle cx="8" cy="15" r="4"/><path d="M11 12 20 3"/><path d="M16 7l3 3"/><path d="M13.5 9.5l2.5 2.5"/></svg> Guardar token</button>
-        </div>
-        <div id="ms-token-hint" style="display:none;font-size:10px;color:var(--amb);background:rgba(212,148,26,.1);border-radius:6px;padding:8px 10px;margin-top:6px;line-height:1.5"></div>
-        <div id="ms-scan-result" style="font-size:11px;color:var(--t3);margin-top:6px"></div>
-      </div>
-    </div>
-    <div class="settings-section">
       <div class="settings-section-title">Correos (Automatizaciones)</div>
       <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Correos automáticos que envía el sistema. Cada automatización tiene su propia lista de destinatarios — agregá o quitá correos según haga falta, sin afectar a las demás.</div>
       ${renderEmailAutomationsSettings()}
@@ -3531,8 +3425,6 @@ function saveSettings(){
   const gm=document.getElementById('s-gmaps'); if(gm)SYS.googleMapsKey=gm.value.trim();
   const bu=document.getElementById('s-backend'); if(bu)SYS.backendUrl=bu.value.trim().replace(/\/$/,'');
   const bt=document.getElementById('s-backend-token'); if(bt)SYS.backendToken=bt.value.trim();
-  const mu=document.getElementById('s-mail-user');
-  if(mu){ if(!SYS.mailbox)SYS.mailbox={}; SYS.mailbox.user=mu.value.trim(); }
   // VUL-034: campo vacío = conservar la actual (no se puede rellenar con el hash).
   const _spwd=document.getElementById('s-spwd')?.value||'';
   if(_spwd) SYS.supervisorPasswordHash=hashPwd(_spwd);
@@ -4139,7 +4031,6 @@ function openProj(id){
   lb.innerHTML=curProj.locked?LOCK_ICON_CLOSED:LOCK_ICON_OPEN;
   lb.className=curProj.locked?'locked':'unlocked';
   renderBreadcrumb(); renderMetric(); setTab('info');
-  if(typeof msPollPending==='function') msPollPending();
   setTimeout(()=>updateBadges(),100);
 }
 
@@ -10534,8 +10425,7 @@ function setTxnTab(k){
 }
 function renderTxnSub(){ if(curTxnTab==='oc') renderOCList(); else renderGenericList(curTxnTab); updateBadges(); }
 // true si hay una OC u otra transacción individual abierta para editar dentro de la pestaña
-// Transacciones. Los pollers en segundo plano (qboFullSync cada 5 min, msPollPending cada 2 min
-// tras un scan de Outlook) antes volvían a pintar la lista sin fijarse en esto — si llegaba data
+// Transacciones. Los pollers en segundo plano (qboFullSync cada 5 min) antes volvían a pintar la lista sin fijarse en esto — si llegaba data
 // nueva mientras el usuario editaba una OC/Factura/Pago, la pantalla saltaba a la lista sin avisar
 // y se perdía lo que llevaba escrito sin guardar.
 function txnEditOpen(){ return curTab==='txn'&&!!(curOCId||curTxnId); }
@@ -10616,7 +10506,6 @@ function renderGenericList(type){
       <div class="th-title">${TXN_TABS.find(t=>t[0]===type)[1]} (${arr.length})</div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn-add" onclick="newGenericTxn('${type}')">+ Nuevo</button>
-        ${type==='proveedor'?`<button id="btn-refresh-mail" class="btn-refresh-mail" onclick="msForceScanQuiet()" title="Escanear buzón de facturas">${MAIL_ICON} Refrescar</button>`:''}
         <button class="btn-history" onclick="showLogModal('${def.label}',curProj.id)">Log</button>
         ${txnSortSelect(`renderGenericList('${type}')`)}
       </div>
@@ -14472,481 +14361,8 @@ function deleteVendorBill(id){
   saveData(); renderMetric(); curTxnId=null; renderTxnSub();
 }
 
-// ════════════════════════════════════════════════════════════
-//  MICROSOFT GRAPH / OUTLOOK
-// ════════════════════════════════════════════════════════════
-function msConnect(){
-  const be=backendUrl();
-  if(!backendConfigured()){alert('Configura primero la URL del Backend en Ajustes.');return;}
-  if(!SYS.backendToken){
-    alert('Falta el Token del Backend.\n\nVe a Ajustes → Backend → "Token compartido" y escribe:\nsiscon-2026-pmapp\n\nLuego presiona "Probar backend" antes de conectar Outlook.');return;
-  }
-  window.open(be+'/api/ms/connect','_blank');
-  showToast('Autoriza Outlook en la pestaña nueva, luego presiona "Probar conexión".');
-}
-async function msCheckStatus(){
-  const be=backendUrl();
-  if(!backendConfigured()){alert('Configura primero la URL del Backend en Ajustes.');return;}
-  if(!SYS.backendToken){alert('Falta el Token del Backend en Ajustes → Backend → "Token compartido".\n\nValor: siscon-2026-pmapp');return;}
-  try{
-    const r=await fetch(be+'/api/ms/status',{headers:{'x-siscon-token':SYS.backendToken||''}});
-    if(r.status===401||r.status===403){
-      alert('Token del Backend incorrecto.\n\nRevisa Ajustes → Backend → "Token compartido".\nValor correcto: siscon-2026-pmapp');return;
-    }
-    const d=await r.json();
-    if(!SYS.mailbox)SYS.mailbox={};
-    SYS.mailbox.msConnected=!!d.connected; saveData();
-    const dot=document.querySelector('#s-ms-status .qbo-dot');
-    const txt=document.querySelector('#s-ms-status span');
-    if(dot) dot.className='qbo-dot'+(d.connected?' connected':'');
-    if(txt) txt.textContent=d.connected?'Conectado a Outlook':'Sin conectar';
-    if(d.connected){
-      alert('✓ Outlook conectado correctamente');
-    } else if(!d.configured){
-      alert('El servidor no tiene configuradas las credenciales de Microsoft Azure (MS_CLIENT_ID).\n\nContacta al administrador del servidor.');
-    } else {
-      alert('Outlook no conectado. Los tokens expiraron.\n\nHaz click en "<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M9 15 15 9"/><path d="M11 6l1-1a4 4 0 0 1 6 6l-1 1"/><path d="M13 18l-1 1a4 4 0 0 1-6-6l1-1"/></svg> Conectar Outlook" para re-autorizar.');
-    }
-  }catch(e){alert('Error de red: '+e.message);}
-}
-
-// Recopila todos los archivos PDF y números de factura ya cargados en la app
-// para que el backend pueda evitar duplicados sin depender de estado interno
-function msGetExistingBillData(){
-  const files=[], invoiceNums=[];
-  for(const p of projects){
-    for(const b of (p.billVendor||[])){
-      if(b.pdfName) files.push(b.pdfName);
-      if(b.invoiceNumber) invoiceNums.push(b.invoiceNumber);
-    }
-  }
-  return {files:[...new Set(files)], invoiceNums:[...new Set(invoiceNums)]};
-}
-
-// Construye URL de scan con parámetros de dedup y proyectos
-function msBuildScanUrl(be){
-  const projList=projects.map(p=>({ref:p.num||String(p.id),name:p.name}));
-  const {files,invoiceNums}=msGetExistingBillData();
-  return be+'/api/ms/scan?projects='+encodeURIComponent(JSON.stringify(projList))
-    +'&existingFiles='+encodeURIComponent(JSON.stringify(files))
-    +'&existingInvoiceNums='+encodeURIComponent(JSON.stringify(invoiceNums));
-}
-
-// Scan completo: escanea Outlook → agrega pendingBills → procesa pendingBills → guarda en app
-async function msScanAndProcess(){
-  const be=backendUrl(); if(!backendConfigured()||!(SYS.mailbox&&SYS.mailbox.msConnected))return;
-  try{
-    const r=await fetch(msBuildScanUrl(be),{headers:{'x-siscon-token':SYS.backendToken||''}});
-    if(!r.ok){ console.warn('msScanAndProcess scan failed',r.status); return; }
-    const d=await r.json();
-    console.log('[msScanAndProcess]',d.scanned,'carpeta(s)',d.new,'nuevo(s)',d.diag);
-    await msPollPending();
-  }catch(e){ console.warn('msScanAndProcess error',e); }
-}
-
-// Auto-sync al iniciar sesión: suscribe carpetas y procesa pendientes
-async function msForceScanQuiet(){
-  const btn=document.getElementById('btn-refresh-mail');
-  const be=backendUrl();
-  if(btn) btn.classList.add('loading');
-  try{
-    if(!backendConfigured()) throw new Error('Backend no configurado');
-    const sr=await fetch(be+'/api/ms/status',{headers:{'x-siscon-token':SYS.backendToken||''}});
-    const sd=await sr.json();
-    if(!SYS.mailbox)SYS.mailbox={};
-    SYS.mailbox.msConnected=!!sd.connected; saveData();
-    if(!sd.connected) throw new Error('Sin conexión con correo de facturas');
-    const r=await fetch(msBuildScanUrl(be),{headers:{'x-siscon-token':SYS.backendToken||''}});
-    if(!r.ok) throw new Error('Error del servidor: '+r.status);
-    const d=await r.json();
-    console.log('[msForceScanQuiet] scan result:',JSON.stringify(d));
-    const newCount=d.new||0;
-    const diag=(d.diag||[]);
-    const diagMsg=diag.map(f=>`"${f.projectRef}": ${f.emails} correos, ${f.alreadyInApp||0} ya en app, ${f.noPdf} sin PDF, ${f.processed} nuevos${f.errors&&f.errors.length?' ⚠'+f.errors[0]:''}`).join(' | ');
-    console.log('[msForceScanQuiet]',diagMsg);
-    if(d.scanned===0){
-      showToast('⚠ 0 carpetas encontradas — verifica que los proyectos tengan carpetas en Outlook con el mismo nombre/número');
-    } else if(newCount===0){
-      addNotif(`Scan: ${d.scanned} carpeta(s) — sin facturas nuevas · ${diagMsg}`);
-    }
-    // Procesar facturas pendientes (las que el scan acaba de agregar)
-    await msPollPending();
-    if(btn){ btn.classList.remove('loading','error'); btn.title=''; }
-    if(!window._msPollInterval) window._msPollInterval=setInterval(msScanAndProcess,2*60*1000);
-  }catch(e){
-    if(btn){ btn.classList.remove('loading'); btn.classList.add('error'); btn.title='Error de comunicación con correo de facturas: '+e.message; }
-    console.warn('msForceScanQuiet error',e);
-  }
-}
-// Envelope SVG icon (minimal white)
-const MAIL_ICON=`<svg width="14" height="11" viewBox="0 0 14 11" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0.5" y="0.5" width="13" height="10" rx="1.5" stroke="white" stroke-width="1"/><path d="M1 1.5L7 6.5L13 1.5" stroke="white" stroke-width="1" stroke-linecap="round"/></svg>`;
-// Candado abierto/cerrado (reemplazan los emojis 🔒/🔓 del botón de bloqueo de proyecto)
 const LOCK_ICON_CLOSED=`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>`;
 const LOCK_ICON_OPEN=`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2.1"/></svg>`;
-async function msForceScan(){
-  const be=backendUrl();
-  if(!backendConfigured()){ showToast('Configura el Backend en Ajustes primero'); return; }
-  const res=document.getElementById('ms-scan-result');
-  if(res) res.textContent='Verificando conexión...';
-  try{
-    // Verify/fix connection state
-    const sr=await fetch(be+'/api/ms/status',{headers:{'x-siscon-token':SYS.backendToken||''}});
-    const sd=await sr.json();
-    if(!SYS.mailbox)SYS.mailbox={};
-    SYS.mailbox.msConnected=!!sd.connected; saveData();
-    if(!sd.connected){ if(res)res.textContent='❌ Outlook no conectado en el backend — usa "Conectar Outlook"'; return; }
-    if(res) res.textContent='Escaneando buzón...';
-    if(res) res.textContent='Escaneando...';
-    const r=await fetch(msBuildScanUrl(be),{headers:{'x-siscon-token':SYS.backendToken||''}});
-    if(!r.ok){ if(res)res.textContent='❌ Error del servidor: '+r.status; return; }
-    const d=await r.json();
-    const bills=d.bills||[];
-    if(res) res.textContent=`✓ Escaneado: ${d.scanned} carpeta(s) · ${bills.length} factura(s) pendiente(s)`;
-    await msPollPending();
-    // Start polling if not already running
-    if(!window._msPollInterval) window._msPollInterval=setInterval(msScanAndProcess,2*60*1000);
-    showToast(`Escaneo completado · ${d.scanned} carpeta(s) revisada(s)`);
-  }catch(e){
-    if(res) res.textContent='❌ Error: '+e.message;
-    console.warn('msForceScan error',e);
-  }
-}
-async function msAutoSync(){
-  const be=backendUrl(); if(!backendConfigured()||!(SYS.mailbox&&SYS.mailbox.msConnected))return;
-  // Verificar que el backend tiene tokens. Si no, intentar silenciosamente (bootstrap puede recuperarlos)
-  try{
-    const sr=await fetch(be+'/api/ms/status',{headers:{'x-siscon-token':SYS.backendToken||''}});
-    const sd=await sr.json();
-    if(!sd.connected){
-      // Esperar 3 s para que el bootstrap del servidor pueda correr, luego verificar de nuevo
-      await new Promise(r=>setTimeout(r,3000));
-      const sr2=await fetch(be+'/api/ms/status',{headers:{'x-siscon-token':SYS.backendToken||''}});
-      const sd2=await sr2.json();
-      if(!sd2.connected){
-        if(!SYS.mailbox)SYS.mailbox={};
-        SYS.mailbox.msConnected=false; saveData();
-        showToast('⚠ Outlook desconectado — reconecta desde Ajustes (o configura MS_REFRESH_TOKEN en Render)'); return;
-      }
-    }
-  }catch(e){ console.warn('msAutoSync status check failed',e); }
-  // 1) Enviar lista de proyectos al backend para scan de fondo (persiste aunque la app esté cerrada)
-  try{
-    const projList=projects.map(p=>({ref:p.num||String(p.id),name:p.name}));
-    const {files:efFiles,invoiceNums:efNums}=msGetExistingBillData();
-    await fetch(be+'/api/ms/set-projects',{method:'POST',headers:{'Content-Type':'application/json','x-siscon-token':SYS.backendToken||''},body:JSON.stringify({projects:projList,existingFiles:efFiles,existingInvoiceNums:efNums})});
-  }catch(e){ console.warn('msAutoSync set-projects error',e); }
-  // 2) Suscribir carpetas que coinciden con proyectos activos
-  try{
-    const projList=projects.map(p=>({ref:p.num||String(p.id),name:p.name}));
-    const r=await fetch(be+'/api/ms/subscribe',{method:'POST',headers:{'Content-Type':'application/json','x-siscon-token':SYS.backendToken||''},body:JSON.stringify({projects:projList})});
-    const d=await r.json();
-    if(d.error) console.warn('msAutoSync subscribe error:',d.error);
-    else{
-      const ok=(d.results||[]).filter(x=>x.status==='subscribed'||x.status==='already subscribed').length;
-      const notFound=(d.results||[]).filter(x=>x.status==='no folder found');
-      if(notFound.length) console.warn('Outlook: carpetas no encontradas para proyectos:',notFound.map(x=>x.project).join(', '));
-      if(ok>0) console.log(`Outlook: ${ok} carpeta(s) suscritas`);
-    }
-  }catch(e){console.warn('msAutoSync subscribe error',e);}
-  // 3) Scan inicial + procesar pendientes
-  await msScanAndProcess();
-  // Repetir cada 2 minutos mientras la app está abierta (mantiene Render despierto)
-  if(!window._msPollInterval) window._msPollInterval=setInterval(msScanAndProcess,2*60*1000);
-  // QB full sync cada 5 minutos
-  if(!window._qboSyncInterval&&qboConfigured()) window._qboSyncInterval=setInterval(()=>qboFullSync(null),5*60*1000);
-}
-
-async function msResubscribeNow(){
-  const be=backendUrl(); if(!backendConfigured()){showToast('Backend no configurado');return;}
-  showToast('Suscribiendo carpetas de Outlook…');
-  try{
-    const projList=projects.map(p=>({ref:p.num||String(p.id),name:p.name}));
-    const r=await fetch(be+'/api/ms/subscribe',{method:'POST',headers:{'Content-Type':'application/json','x-siscon-token':SYS.backendToken||''},body:JSON.stringify({projects:projList})});
-    const d=await r.json();
-    if(d.error){alert('Error: '+d.error);return;}
-    const results=d.results||[];
-    const ok=results.filter(x=>x.status==='subscribed');
-    const already=results.filter(x=>x.status==='already subscribed');
-    const notFound=results.filter(x=>x.status==='no folder found');
-    const errors=results.filter(x=>x.status==='error');
-    let msg='Resultado:\n';
-    if(ok.length) msg+=`✓ Suscritas (${ok.length}): `+ok.map(x=>x.folder||x.project).join(', ')+'\n';
-    if(already.length) msg+=`↩ Ya suscritas (${already.length}): `+already.map(x=>x.folder||x.project).join(', ')+'\n';
-    if(notFound.length) msg+=`⚠ Carpeta no encontrada para: `+notFound.map(x=>x.project+' (buscado: "'+x.searched+'")'  ).join(', ')+'\n';
-    if(errors.length) msg+=`✗ Errores: `+errors.map(x=>x.project+': '+x.detail).join(', ')+'\n';
-    alert(msg);
-    await msPollPending();
-  }catch(e){alert('Error: '+e);}
-}
-
-function msPendingBillProbe(data){
-  const currency=String(data&&data.currency||'CRC').toUpperCase();
-  const total=Number(data&&data.total)||0;
-  return {
-    party:data&&data.vendor||'',invoiceNumber:data&&data.invoiceNumber||'',date:data&&data.date||'',
-    currencyBill:currency,qboDocumentTotal:total,
-    totalCRC:currency==='CRC'?total:0,totalUSD:currency==='USD'?total:0,
-  };
-}
-function msAttachPendingPdf(proj,target,bill,consumePending=true){
-  if(!bill.storageKey&&!bill.pdfBase64)return false;
-  try{
-    const stable=String(bill.id||bill.fileName||Date.now()).replace(/[^a-zA-Z0-9_-]/g,'');
-    const blobId='outlook-'+stable;
-    let blob=null,url=null;
-    if(!bill.storageKey){
-      const byteArr=Uint8Array.from(atob(bill.pdfBase64),c=>c.charCodeAt(0));
-      blob=new Blob([byteArr],{type:'application/pdf'});
-      url=URL.createObjectURL(blob);
-    }
-    if(!proj.uploads)proj.uploads=[];
-    let upload=proj.uploads.find(u=>u.name===bill.fileName||u.blobId===blobId);
-    if(!upload){upload={blobId,name:bill.fileName,type:'PDF'};proj.uploads.push(upload);}
-    if(bill.storageKey&&!upload.storageKey&&consumePending){
-      upload.pendingBillId=bill.id;
-      upload.pendingStorageKey=bill.storageKey;
-      delete upload.pdfBase64;
-      delete upload.url;
-    }else if(!bill.storageKey&&!upload.storageKey){
-      upload.pdfBase64=bill.pdfBase64;
-      upload.url=url;
-    }
-    if(!proj.docs)proj.docs=[];
-    let doc=proj.docs.find(d=>d.name===bill.fileName||d.blobId===blobId);
-    if(!doc){doc={id:'doc-'+Date.now(),name:bill.fileName,category:'Factura de Gastos',docType:'Factura de Gastos',date:new Date().toISOString().slice(0,10),size:blob?.size??bill.sizeBytes??bill.size??'—',blobId};proj.docs.push(doc);}
-    target.pdfBlobId=upload.blobId;
-    target.pdfName=bill.fileName;
-    return true;
-  }catch(e){console.warn('PDF blob error',e);return false;}
-}
-
-async function msPollPending(){
-  const be=backendUrl(); if(!backendConfigured()||!(SYS.mailbox&&SYS.mailbox.msConnected))return;
-  try{
-    // Solo lee las facturas pendientes del servidor (sin hacer scan — el scan se hace por separado)
-    const r=await fetch(be+'/api/ms/pending',{headers:{'x-siscon-token':SYS.backendToken||''}});
-    if(!r.ok){ console.warn('msPollPending failed',r.status); return; }
-    const d=await r.json();
-    const bills=d.bills||[];
-    if(!bills.length)return;
-    let imported=0, merged=0;
-    const pendingAckIds=[]; // candidatos; no se confirman hasta completar el guardado de este import
-    for(const bill of bills){
-      // Encontrar el proyecto por ref (num o id)
-      const proj=projects.find(p=>p.num===bill.projectRef||String(p.id)===bill.projectRef||p.name===bill.projectRef);
-      if(!proj){
-        // Mover a Sin Clasificar y ackear — así no reaparece en cada reinicio
-        console.warn(`[msPollPending] Factura sin proyecto: ref="${bill.projectRef}", archivo="${bill.fileName}". Proyectos disponibles: ${projects.map(p=>p.num||p.id).join(', ')}`);
-        if(!SYS.unclassified)SYS.unclassified=[];
-        const alreadyUnclass=SYS.unclassified.some(u=>u.fileName===bill.fileName||(bill.data&&bill.data.invoiceNumber&&u.invoiceNumber===bill.data.invoiceNumber));
-        if(!alreadyUnclass){
-          SYS.unclassified.push({
-            id:'uc-'+Date.now()+Math.random(), type:'PendingBill',
-            fileName:bill.fileName, projectRef:bill.projectRef,
-            invoiceNumber:bill.data&&bill.data.invoiceNumber||'',
-            vendor:bill.data&&bill.data.vendor||'', date:bill.data&&bill.data.date||'',
-            total:bill.data&&bill.data.total||0, currency:bill.data&&bill.data.currency||'CRC',
-            storageKey:bill.storageKey||null,
-            pdfBase64:bill.storageKey?null:(bill.pdfBase64||null), ocrData:bill.data||null,
-            _pending:true
-          });
-          addNotif(`⚠ Factura "${bill.fileName}" sin proyecto (ref: "${bill.projectRef}") — agregada a Sin Clasificar`, 'unclassified');
-          imported++;
-        }
-        pendingAckIds.push(bill.id);
-        continue;
-      }
-      // Si OCR falló, usar objeto vacío para importar como borrador (usuario completa manualmente)
-      const data=bill.data || {vendor:'',date:new Date().toISOString().slice(0,10),invoiceNumber:'',currency:'CRC',total:0,lines:[]};
-      // Deduplicación fuerte: número normalizado + proveedor/monto/fecha. El número solo no basta,
-      // porque dos proveedores distintos pueden usar la misma numeración.
-      const outlookProbe=msPendingBillProbe(data);
-      const cachedBills=_qboTransactionsCache&&_qboTransactionsCache.bills||[];
-      const cachedProjects=_qboCatalogsCache&&_qboCatalogsCache.projects||[];
-      const cachedQboMatch=qboFindBestBillMatch(outlookProbe,cachedBills.map(qb=>({qb,bill:qboBillAsRecord(qb)})));
-      const cachedQboBill=cachedQboMatch.status==='matched'?cachedQboMatch.match.qb:null;
-      const qboProjectResolution=cachedQboBill?qboResolveProject(cachedQboBill,cachedProjects):null;
-      const allLocalBills=[];
-      projects.forEach(candidateProject=>(candidateProject.billVendor||[]).forEach(existing=>allLocalBills.push({project:candidateProject,bill:existing})));
-      const localMatch=qboFindBestBillMatch(outlookProbe,allLocalBills);
-      if(localMatch.status==='matched'){
-        const existing=localMatch.match.bill;
-        const logicalCopies=existing.qboMultiProject
-          ?allLocalBills.filter(row=>String(row.bill.qboId||'')===String(existing.qboId||''))
-          :[localMatch.match];
-        const preferredCopy=logicalCopies.find(row=>String(row.project&&row.project.id)===String(proj.id))||logicalCopies[0];
-        let existingProject=preferredCopy.project||proj;
-        if(!existing.party)existing.party=data.vendor||'';
-        if(!existing.invoiceNumber)existing.invoiceNumber=data.invoiceNumber||'';
-        if(!existing.date)existing.date=data.date||'';
-        if(cachedQboBill&&!existing.qboMultiProject){
-          qboApplyBillMatch(existing,cachedQboBill,cachedQboMatch.reasons);
-          qboApplyProjectLink(existing,qboProjectResolution);
-          if(qboProjectResolution.status==='matched'){
-            qboMoveRecord(existing,localMatch.match.project,qboProjectResolution.project,'billVendor');
-            existingProject=qboProjectResolution.project;
-          }
-        }
-        msAttachPendingPdf(preferredCopy.project||existingProject,preferredCopy.bill,bill);
-        logicalCopies
-          .filter(row=>row!==preferredCopy)
-          .forEach(row=>msAttachPendingPdf(row.project||existingProject,row.bill,bill,!bill.storageKey));
-        if(String(existingProject.id)!==String(proj.id))addNotif(`Factura ${data.invoiceNumber||bill.fileName} ya existía en ${existingProject.name}; se adjuntó el PDF sin duplicarla.`);
-        pendingAckIds.push(bill.id);merged++;continue;
-      }
-      // Crear borrador de factura de proveedor en ese proyecto
-      const destinationProject=qboProjectResolution&&qboProjectResolution.status==='matched'?qboProjectResolution.project:proj;
-      if(!destinationProject.billVendor)destinationProject.billVendor=[];
-      const num='FP-'+new Date().getFullYear()+'-'+String(destinationProject.billVendor.length+1).padStart(3,'0');
-      const isCRCBill = (data.currency||'').toUpperCase()==='CRC';
-      // Para facturas CRC: siempre usar tipo de cambio oficial de Hacienda para la fecha de la factura.
-      // Ignoramos el valor del OCR (puede devolver 1 o valores incorrectos).
-      let xr = isCRCBill ? tcGet() : 1;
-      if(isCRCBill){
-        try{
-          xr = await new Promise(resolve=>tcFetchForDate(data.date||new Date().toISOString().slice(0,10), resolve));
-          if(!xr||xr<100) xr=tcGet(); // sanidad: TC de CRC nunca es < 100
-        }catch(e){ xr=tcGet(); }
-      }
-      const newBill={
-        id:Date.now()+Math.random(),num,
-        party:data.vendor||'',invoiceNumber:data.invoiceNumber||'',
-        date:data.date||new Date().toISOString().slice(0,10),
-        status:'Borrador',
-        currencyBill: isCRCBill ? 'CRC' : 'USD',
-        exchangeRate: xr,
-        discountOn:false,
-        lines:(data.lines||[]).map(l=>({productId:'',desc:l.desc||'',qty:parseFloat(l.qty)||0,price:parseFloat(l.price)||0,discPct:parseFloat(l.discPct)||0,assign:[]})),
-        notes:'Importado automáticamente desde Outlook ('+bill.fileName+')',
-        subtotalUSD:0,totalUSD:0,qboId:null,_pending:true
-      };
-      // Calcular totales: si viene en CRC, convertir a USD para gastos internos
-      const rawTotal = data.total ? parseFloat(data.total) : newBill.lines.reduce((s,l)=>s+(l.qty*l.price*(1-(l.discPct||0)/100)),0);
-      if(isCRCBill){
-        newBill.totalCRC = rawTotal;
-        newBill.subtotalCRC = rawTotal / 1.13;
-        newBill.subtotalUSD = newBill.subtotalCRC / xr;
-        newBill.totalUSD = rawTotal / xr;
-        newBill.lines.forEach(l=>{ l.priceCRC=l.price; l.price=l.price/xr; });
-      } else {
-        newBill.subtotalUSD = rawTotal / 1.13;
-        newBill.totalUSD = rawTotal;
-      }
-      newBill.discountOn=newBill.lines.some(l=>l.discPct>0);
-      // Si QBO ya contiene la factura, enlazar sus metadatos sobre ESTE registro de Outlook.
-      // Nunca se crea una segunda factura por el resultado de QuickBooks.
-      if(cachedQboBill){
-        qboApplyBillMatch(newBill,cachedQboBill,cachedQboMatch.reasons);
-        qboApplyProjectLink(newBill,qboProjectResolution);
-      }else if(cachedQboMatch.status==='ambiguous')newBill.qboMatchStatus='ambiguous';
-      msAttachPendingPdf(destinationProject,newBill,bill);
-      destinationProject.billVendor.push(newBill);
-      destinationProject.lastActivity=Date.now();
-      logAction(`Factura "${newBill.num}" importada desde Outlook (${bill.fileName})`,'log-create','Transacciones',null,{party:newBill.party,total:newBill.totalUSD});
-      pendingAckIds.push(bill.id);
-      imported++;
-    }
-    if(imported>0||merged>0){
-      if(!(await saveDataForCurrentChanges()))return; // guardar y enlazar el PDF primero
-      // Ackear en servidor SOLO después de que saveData haya persistido los datos
-      for(const id of pendingAckIds) await msAck(id,be);
-      if(imported)addNotif(`✓ ${imported} factura(s) importada(s) desde Outlook`);
-      if(merged)addNotif(`✓ ${merged} factura(s) de Outlook unificada(s) sin duplicar`);
-      updateBadges();
-      // Igual que en qboFullSync: no pisar una OC/transacción abierta editándose. Este poll corre
-      // automático cada 2 min tras un scan de Outlook.
-      if(!curProj){ renderDash(); }
-      else if(curTab==='txn'){ if(!txnEditOpen()) renderTxnSub(); }
-      else if(curTab==='docs'){ renderDocs(); }
-    }
-  }catch(e){console.warn('msPollPending error',e);}
-}
-
-async function msCopyRefreshToken(){
-  const be=backendUrl(); if(!backendConfigured()){alert('Configura primero la URL del Backend en Ajustes.');return;}
-  try{
-    const r=await fetch(be+'/api/ms/refresh-token',{headers:{'x-siscon-token':SYS.backendToken||''}});
-    if(!r.ok){alert('No hay token disponible. Conecta Outlook primero.');return;}
-    const d=await r.json();
-    const token=d.refresh_token||'';
-    if(!token){alert('No hay token disponible.');return;}
-    try{ await navigator.clipboard.writeText(token); }catch(e){}
-    const hint=document.getElementById('ms-token-hint');
-    if(hint){
-      hint.style.display='block';
-      hint.innerHTML=`<b>Token copiado al portapapeles.</b><br>Para que Outlook nunca se desconecte después de reinicios de Render:<br>
-1. Ve a <b>render.com</b> → tu servicio <b>siscon-backend</b> → <b>Environment</b><br>
-2. Agrega o actualiza la variable: <code>MS_REFRESH_TOKEN</code><br>
-3. Pega el token que acabas de copiar → <b>Save Changes</b><br>
-4. Render redespliega automáticamente.<br><br>
-<span style="color:var(--t3)">Solo necesitas hacer esto una vez. Repite si algún día Outlook vuelve a desconectarse.</span>`;
-    }
-  }catch(e){alert('Error: '+e);}
-}
-
-async function msAck(id,be){
-  try{ await fetch(be+'/api/ms/pending/ack',{method:'POST',headers:{'Content-Type':'application/json','x-siscon-token':SYS.backendToken||''},body:JSON.stringify({id})}); }catch{}
-}
-
-// Abre ventana flotante de importación desde Outlook
-async function msImportOpen(){
-  if(!backendConfigured()){alert('Configura primero la URL del Backend en Ajustes.');return;}
-  if(fwinExists('ms-import')){fwinRestore('ms-import');return;}
-  fwinOpen('ms-import',{title:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg> Importar facturas desde Outlook',width:720,height:520,dirtyFn:()=>false,
-    bodyHTML:'<div id="ms-import-body"><div style="color:var(--t3);text-align:center;padding:30px">Cargando correos…</div></div>',
-    footerHTML:`<span style="font-size:11px;color:var(--t3)" id="ms-import-hint">Selecciona un PDF para importarlo como factura de proveedor.</span>
-      <button class="btn-cancel" onclick="fwinClose('ms-import',true)">Cerrar</button>`});
-  await msLoadEmails();
-}
-
-async function msLoadEmails(){
-  const el=document.getElementById('ms-import-body'); if(!el)return;
-  el.innerHTML='<div style="color:var(--t3);text-align:center;padding:30px">Consultando buzón…</div>';
-  const be=backendUrl();
-  const mailbox=encodeURIComponent((SYS.mailbox&&SYS.mailbox.user)||'');
-  const projName=curProj?encodeURIComponent(curProj.name):'';
-  try{
-    const r=await fetch(`${be}/api/ms/emails?mailbox=${mailbox}&search=${projName}&top=30`,{headers:{'x-siscon-token':SYS.backendToken||''}});
-    const d=await r.json();
-    if(d.error){el.innerHTML=`<div style="color:var(--red);padding:20px">${d.error}</div>`;return;}
-    const emails=d.emails||[];
-    if(!emails.length){el.innerHTML='<div style="color:var(--t3);text-align:center;padding:30px">No se encontraron correos con adjuntos PDF.</div>';return;}
-    el.innerHTML=emails.map((m,mi)=>`
-      <div style="border-bottom:1px solid var(--border);padding:10px 14px">
-        <div style="font-size:12px;font-weight:600;color:var(--t1);margin-bottom:2px">${m.subject||'(sin asunto)'}</div>
-        <div style="font-size:10px;color:var(--t3);margin-bottom:6px">${m.from} · ${m.receivedAt?new Date(m.receivedAt).toLocaleDateString('es-CR'):'—'}</div>
-        ${m.attachments.map(a=>`
-          <div style="display:flex;align-items:center;gap:10px;background:var(--bg3);border-radius:6px;padding:6px 10px;margin-bottom:4px">
-            <span style="font-size:11px;color:var(--acc);flex:1"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/></svg> ${a.name} <span style="color:var(--t3)">(${(a.size/1024).toFixed(0)} KB)</span></span>
-            <button onclick="msImportAttachment('${m.id}','${a.id}','${(a.name||'').replace(/'/g,'')}')" style="background:var(--grn);color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer">Importar</button>
-          </div>`).join('')}
-      </div>`).join('');
-  }catch(e){el.innerHTML=`<div style="color:var(--red);padding:20px">Error: ${e}</div>`;}
-}
-
-async function msImportAttachment(msgId,attachId,fileName){
-  const be=backendUrl();
-  const mailbox=encodeURIComponent((SYS.mailbox&&SYS.mailbox.user)||'');
-  const hint=document.getElementById('ms-import-hint');
-  if(hint)hint.textContent='Descargando '+fileName+'…';
-  try{
-    const r=await fetch(`${be}/api/ms/attachment?msgId=${msgId}&attachId=${attachId}&mailbox=${mailbox}`,{headers:{'x-siscon-token':SYS.backendToken||''}});
-    const d=await r.json();
-    if(d.error){alert('Error: '+d.error);if(hint)hint.textContent='Error descargando el adjunto.';return;}
-    if(hint)hint.textContent='Leyendo factura con Claude…';
-    // Registrar en documentos del proyecto
-    if(curProj) registerDoc(d.name,'Factura de Gastos','application/pdf');
-    // Correr OCR igual que si se hubiera subido manualmente
-    // Aseguramos que el vbState apunte a proveedor
-    const prevTab=curTxnTab;
-    if(curTxnType!=='proveedor'){ curTxnType='proveedor'; if(!vbState.id)vbOpen(); }
-    await ocrInvoice(d.base64,'application/pdf');
-    if(hint)hint.textContent='✓ Factura importada. Revisa y ajusta los datos antes de guardar.';
-    fwinClose('ms-import',true);
-    // Abrir la factura de proveedor si no está visible
-    if(curTab!=='transacciones') setTab('transacciones');
-  }catch(e){alert('Error importando: '+e);if(hint)hint.textContent='Error.';}
-}
 
 // ════════════════════════════════════════════════════════════
 //  OCR DE FACTURAS DE PROVEEDOR (Claude visión / PDF)
@@ -14967,7 +14383,6 @@ function txnOcrZoneHtml(){
     <input id="txn-file" type="file" accept="application/pdf,image/*" style="display:none" onchange="if(this.files[0])txnFile(this.files[0])"/>
     <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
       <div id="txn-ocr-status" style="font-size:11px;color:var(--t2);flex:1"></div>
-      <button onclick="msImportOpen()" style="background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg> Importar desde Outlook</button>
     </div>
   </div>`;
 }

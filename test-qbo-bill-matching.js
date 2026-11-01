@@ -60,14 +60,7 @@ ok('copias multiproyecto del mismo qboId se tratan como una sola factura lógica
 ok('un candidato fuerte único se enlaza',
   sandbox.qboFindBestBillMatch(outlook, [{ id: 1, bill: qbo }]).status === 'matched');
 
-console.log('\nCableado sin duplicidad:');
-ok('Outlook usa el matcher fuerte antes de crear la factura',
-  /const localMatch=qboFindBestBillMatch\(outlookProbe/.test(html));
-ok('Outlook adjunta el PDF al registro existente',
-  /if\(localMatch\.status==='matched'\)[\s\S]{0,1800}msAttachPendingPdf\(preferredCopy/.test(html) &&
-  /logicalCopies[\s\S]{0,180}\.forEach\(row=>msAttachPendingPdf/.test(html));
-ok('Outlook busca duplicados en todos los proyectos, no solo en la carpeta destino',
-  /projects\.forEach\(candidateProject=>\(candidateProject\.billVendor\|\|\[\]\)/.test(html));
+console.log('\nCableado QBO:');
 ok('QBO enlaza sobre billVendor existente',
   /function qboSyncVendorBills[\s\S]{0,5200}qboFindBestBillMatch\(qboBillAsRecord\(qb\),candidates\)[\s\S]{0,900}qboApplyBillSlice\(row\.bill/.test(html));
 ok('la sincronización importa Bills nuevos solo después de descartar coincidencias',
