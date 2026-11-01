@@ -2185,6 +2185,28 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   Mergeado directo a `main` (sin PR) el 2026-08-14 junto con el trabajo de OC/QuickBooks de esa
   misma sesión → desplegado a producción vía auto-deploy de Vercel.
 
+### Sesión 2026-09-08 (Fase 0 — candado del pago)
+> Primera fase del diseño `docs/superpowers/specs/2026-09-08-cadena-custodia-compra-design.md`.
+- [x] `ocIsComplete()`: la completitud de una OC se **deriva**, no se guarda — no colisiona con
+  el `status` existente, que sigue reflejando el ciclo de QuickBooks.
+- [x] Pantalla global **Listo para pagar**: solo aparecen OCs completas y sin pago. Lo que no
+  está ahí, no se paga. El estado vacío explica el candado en vez de decir "sin datos".
+- [x] Registro del pago con comprobante a R2, prellenado desde la convención de nombre
+  `PROVEEDOR-MONTO-#OC-#PROFORMA-PROYECTO`. El comprobante se adjunta al proyecto **dueño de la
+  OC**, no a `curProj` (trampa multiproyecto ya vista en la sesión 2026-08-07).
+- [x] Alerta 🔔 al login y sección nueva en el digest diario para OCs pagadas sin factura del
+  proveedor, con umbral configurable en `SYS.alertas.diasSinFactura` (default 10).
+- [x] Pruebas: `siscon-web/test-oc-candado-pago.js` y `siscon-backend/test-paid-ocs-digest.js`.
+- [x] **Ola de cierre (2026-09-10):** `deleteOC()` ahora corta con `alert()` (fecha + monto del
+  pago, y qué hacer) si la OC tiene `oc.pago`, ANTES de cualquier otra verificación y sin
+  excepción de rol — evita huérfanos del pago y su comprobante en R2/Documentos. "Cancelar" una OC
+  no existe en la app (el estado `Cancelada` nunca lo asigna ninguna pantalla); el agujero real
+  era eliminar una OC ya pagada. Además, el dueño revirtió el gate de rol de I4: **registrar** un
+  pago vuelve a estar abierto a cualquier usuario autenticado (`openPagosWin()`,
+  `ocOpenPagoModal()` y `ocConfirmPago()` ya no llaman `ocPagoGateRol()`); **editar y anular** un
+  pago ya registrado siguen siendo solo del Administrador, con contraseña (Decisión 3, sin
+  cambios).
+
 ## 10. ⏳ Pendiente
 
 > Nota: la **Pestaña Tareas** ya está implementada (existe `renderTareas`, `SYS`/`curProj.tasks`, tablero y badge). Queda en el histórico como completada aunque no tiene sesión fechada asociada.
@@ -2225,6 +2247,27 @@ Fallback listo por si el flujo cross-subdominio fallara, **sin activar**:
   para tipos antiguos donde sí se marcó IVA al crearlos. Si hace falta certeza, agregar un
   campo `ivaOn` al modelo de `type`. **NO construir hasta que el usuario lo pida.**
 - [ ] **Aprobaciones por WhatsApp** — que las solicitudes de aprobación lleguen a WhatsApp y el admin apruebe/rechace desde ahí. Arquitectura: frontend crea el request → backend envía WhatsApp → webhook recibe la respuesta → backend cambia `req.status` en Supabase → el polling actual aplica el material. Requiere: WhatsApp Business API (Twilio para prototipo / Meta Cloud API para producción), número dedicado, plantillas pre-aprobadas por Meta, lista blanca de números de admin. Decisiones pendientes: proveedor y mecanismo (botones vs texto+código). **NO construir hasta que el usuario lo pida.**
+
+### Activación del correo diario (pasos manuales — solo el usuario puede hacerlos)
+El digest está escrito y desplegado desde 2026-08-12, y la Fase 0 le agregó la sección de OCs
+pagadas sin factura. **No envía nada hasta completar estos 5 pasos:**
+1. Reconectar Outlook desde Ajustes (el `refresh_token` actual no tiene el scope `Mail.Send`).
+2. Generar el secreto: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+3. Cargarlo como `INTERNAL_CRON_SECRET` en Render, servicio web `siscon-backend`.
+4. Crear un Render Cron Job (~$1/mes), schedule `0 4 * * *` (UTC = 10pm CR, sin DST):
+   `curl -X POST -H "x-internal-secret: $INTERNAL_CRON_SECRET" https://<backend>/internal/cron/pending-bills-digest`
+5. En Ajustes → Correos, agregar destinatarios a **ambas** automatizaciones.
+
+### Suites de prueba que ya fallaban antes de la Fase 0 (no causadas por este trabajo)
+Verificado con `git stash` y con comparación byte a byte del archivo entre commits: estas suites
+ya fallaban antes de empezar la Fase 0 y siguen fallando. **Ninguna fue causada por este trabajo**,
+y ninguna se arregló acá porque está fuera de alcance. Quedan pendientes de revisión aparte:
+- **Frontend** (`siscon-web/`): `test-concurrency.js`, `test-login-concurrency.js`,
+  `test-normalized-persistence.js`, `test-qbo-transaction-sync.js` y **`test-xss.js`**.
+  Solo `test-login-concurrency.js` estaba documentada como fallo conocido; las otras cuatro
+  no lo estaban. La de XSS conviene mirarla primero.
+- **Backend** (`siscon-backend/`): `test-projects-houses.js` falla en la aserción
+  "DELETE project usa RPC transaccional" (43/44).
 
 ---
 
