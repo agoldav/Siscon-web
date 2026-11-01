@@ -14477,7 +14477,7 @@ function deleteVendorBill(id){
 // ════════════════════════════════════════════════════════════
 function msConnect(){
   const be=backendUrl();
-  if(!be){alert('Configura primero la URL del Backend en Ajustes.');return;}
+  if(!backendConfigured()){alert('Configura primero la URL del Backend en Ajustes.');return;}
   if(!SYS.backendToken){
     alert('Falta el Token del Backend.\n\nVe a Ajustes → Backend → "Token compartido" y escribe:\nsiscon-2026-pmapp\n\nLuego presiona "Probar backend" antes de conectar Outlook.');return;
   }
@@ -14486,7 +14486,7 @@ function msConnect(){
 }
 async function msCheckStatus(){
   const be=backendUrl();
-  if(!be){alert('Configura primero la URL del Backend en Ajustes.');return;}
+  if(!backendConfigured()){alert('Configura primero la URL del Backend en Ajustes.');return;}
   if(!SYS.backendToken){alert('Falta el Token del Backend en Ajustes → Backend → "Token compartido".\n\nValor: siscon-2026-pmapp');return;}
   try{
     const r=await fetch(be+'/api/ms/status',{headers:{'x-siscon-token':SYS.backendToken||''}});
@@ -14534,7 +14534,7 @@ function msBuildScanUrl(be){
 
 // Scan completo: escanea Outlook → agrega pendingBills → procesa pendingBills → guarda en app
 async function msScanAndProcess(){
-  const be=backendUrl(); if(!be||!(SYS.mailbox&&SYS.mailbox.msConnected))return;
+  const be=backendUrl(); if(!backendConfigured()||!(SYS.mailbox&&SYS.mailbox.msConnected))return;
   try{
     const r=await fetch(msBuildScanUrl(be),{headers:{'x-siscon-token':SYS.backendToken||''}});
     if(!r.ok){ console.warn('msScanAndProcess scan failed',r.status); return; }
@@ -14550,7 +14550,7 @@ async function msForceScanQuiet(){
   const be=backendUrl();
   if(btn) btn.classList.add('loading');
   try{
-    if(!be) throw new Error('Backend no configurado');
+    if(!backendConfigured()) throw new Error('Backend no configurado');
     const sr=await fetch(be+'/api/ms/status',{headers:{'x-siscon-token':SYS.backendToken||''}});
     const sd=await sr.json();
     if(!SYS.mailbox)SYS.mailbox={};
@@ -14585,7 +14585,7 @@ const LOCK_ICON_CLOSED=`<svg width="17" height="17" viewBox="0 0 24 24" fill="no
 const LOCK_ICON_OPEN=`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2.1"/></svg>`;
 async function msForceScan(){
   const be=backendUrl();
-  if(!be){ showToast('Configura el Backend en Ajustes primero'); return; }
+  if(!backendConfigured()){ showToast('Configura el Backend en Ajustes primero'); return; }
   const res=document.getElementById('ms-scan-result');
   if(res) res.textContent='Verificando conexión...';
   try{
@@ -14612,7 +14612,7 @@ async function msForceScan(){
   }
 }
 async function msAutoSync(){
-  const be=backendUrl(); if(!be||!(SYS.mailbox&&SYS.mailbox.msConnected))return;
+  const be=backendUrl(); if(!backendConfigured()||!(SYS.mailbox&&SYS.mailbox.msConnected))return;
   // Verificar que el backend tiene tokens. Si no, intentar silenciosamente (bootstrap puede recuperarlos)
   try{
     const sr=await fetch(be+'/api/ms/status',{headers:{'x-siscon-token':SYS.backendToken||''}});
@@ -14657,7 +14657,7 @@ async function msAutoSync(){
 }
 
 async function msResubscribeNow(){
-  const be=backendUrl(); if(!be){showToast('Backend no configurado');return;}
+  const be=backendUrl(); if(!backendConfigured()){showToast('Backend no configurado');return;}
   showToast('Suscribiendo carpetas de Outlook…');
   try{
     const projList=projects.map(p=>({ref:p.num||String(p.id),name:p.name}));
@@ -14721,7 +14721,7 @@ function msAttachPendingPdf(proj,target,bill,consumePending=true){
 }
 
 async function msPollPending(){
-  const be=backendUrl(); if(!be||!(SYS.mailbox&&SYS.mailbox.msConnected))return;
+  const be=backendUrl(); if(!backendConfigured()||!(SYS.mailbox&&SYS.mailbox.msConnected))return;
   try{
     // Solo lee las facturas pendientes del servidor (sin hacer scan — el scan se hace por separado)
     const r=await fetch(be+'/api/ms/pending',{headers:{'x-siscon-token':SYS.backendToken||''}});
@@ -14863,7 +14863,7 @@ async function msPollPending(){
 }
 
 async function msCopyRefreshToken(){
-  const be=backendUrl(); if(!be){alert('Configura primero la URL del Backend en Ajustes.');return;}
+  const be=backendUrl(); if(!backendConfigured()){alert('Configura primero la URL del Backend en Ajustes.');return;}
   try{
     const r=await fetch(be+'/api/ms/refresh-token',{headers:{'x-siscon-token':SYS.backendToken||''}});
     if(!r.ok){alert('No hay token disponible. Conecta Outlook primero.');return;}
@@ -14890,7 +14890,7 @@ async function msAck(id,be){
 
 // Abre ventana flotante de importación desde Outlook
 async function msImportOpen(){
-  if(!backendUrl()){alert('Configura primero la URL del Backend en Ajustes.');return;}
+  if(!backendConfigured()){alert('Configura primero la URL del Backend en Ajustes.');return;}
   if(fwinExists('ms-import')){fwinRestore('ms-import');return;}
   fwinOpen('ms-import',{title:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg> Importar facturas desde Outlook',width:720,height:520,dirtyFn:()=>false,
     bodyHTML:'<div id="ms-import-body"><div style="color:var(--t3);text-align:center;padding:30px">Cargando correos…</div></div>',
@@ -16706,6 +16706,9 @@ function backendUrl(){
   const v=(SYS.backendUrl||'').trim().replace(/\/$/,'');
   return (v && /localhost|127\.0\.0\.1/.test(v)) ? v : BACKEND_URL;
 }
+// Con Plan B (USE_SAME_ORIGIN_API) backendUrl() es '' a propósito: significa rutas /api/* relativas.
+// Por eso el chequeo de "backend configurado" no puede ser `if(!be)`: '' es falsy y bloqueaba Outlook.
+function backendConfigured(){ return USE_SAME_ORIGIN_API || !!backendUrl(); }
 async function claudeCall(body){
   const be=backendUrl();
   const headers={'Content-Type':'application/json'};
