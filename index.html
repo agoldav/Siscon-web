@@ -1624,8 +1624,17 @@ async function _syncNormalizedTransactions(){
     const snap=_snapshot(payload);
     if(!_transactionSnapshots.has(id)){
       const {resp,data}=await _dbRowRequest('POST','/api/db/transactions',payload);
-      if(!resp.ok){console.error('No se pudo crear transacción',id,data);return false;}
-      _rememberTransactionRow(data,transaction,projectId,kind);
+      if(resp.status===409){
+        // Ya existe en el servidor (p. ej. la creó la sincronización de QuickBooks y esta sesión no la
+        // tenía registrada). Antes esto detenía todo el guardado, incluidos los Ajustes. Ahora se toma la
+        // versión del servidor como base, sin sobrescribirla con el dato local.
+        const existing=await _dbRowRequest('GET',`/api/db/transactions/${encodeURIComponent(id)}`);
+        if(!existing.resp.ok){console.error('No se pudo leer transacción existente',id,existing.data);return false;}
+        _rememberTransactionRow(existing.data,transaction,projectId,kind);
+      }else{
+        if(!resp.ok){console.error('No se pudo crear transacción',id,data);return false;}
+        _rememberTransactionRow(data,transaction,projectId,kind);
+      }
     }else if(_transactionSnapshots.get(id)!==snap){
       if(_transactionKinds.get(id)!==kind){
         console.error('No se puede cambiar el tipo de una transacción existente:',id);
