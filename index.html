@@ -992,6 +992,12 @@ let SYS = {
       enabled: true,
       recipients: [],
     },
+    weeklyProjectReport: {
+      label: 'Informe semanal por proyecto',
+      description: 'Informe de gastos, facturación y pendientes por proyecto. Se envía cada viernes a las 6:00pm (hora de Costa Rica).',
+      enabled: true,
+      recipients: [],
+    },
   },
   googleMapsKey: 'AIzaSyCFKPbq02rnkIAe3cnzSeS7ztSoVP8TuTA',
   backendUrl: '',   // URL del backend (proxy) p.ej. https://siscon-backend.onrender.com
@@ -2706,6 +2712,12 @@ function applyDefaults(sys){
     enabled:true, recipients:[],
   };
   if(!Array.isArray(SYS.emailAutomations.pendingBillsDigest.recipients))SYS.emailAutomations.pendingBillsDigest.recipients=[];
+  if(!SYS.emailAutomations.weeklyProjectReport)SYS.emailAutomations.weeklyProjectReport={
+    label:'Informe semanal por proyecto',
+    description:'Informe de gastos, facturación y pendientes por proyecto. Se envía cada viernes a las 6:00pm (hora de Costa Rica).',
+    enabled:true, recipients:[],
+  };
+  if(!Array.isArray(SYS.emailAutomations.weeklyProjectReport.recipients))SYS.emailAutomations.weeklyProjectReport.recipients=[];
   // notifications/pendingAuthRequests (VUL-044 parte 1.5): ya no viven en SYS, ver notifCache/pendingAuthCache.
 }
 
